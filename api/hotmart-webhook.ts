@@ -19,7 +19,7 @@ function hashName(name: string): { fn?: string; ln?: string } {
   const parts = name.trim().split(/\s+/)
   return {
     fn: sha256(parts[0] ?? ''),
-    ln: sha256(parts.slice(1).join(' ') || parts[0] ?? ''),
+    ln: sha256((parts.slice(1).join(' ') || parts[0]) ?? ''),
   }
 }
 

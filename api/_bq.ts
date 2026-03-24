@@ -226,13 +226,13 @@ export async function bqQuery(
 export function tableLeads(): string {
   const { project_id } = getCredentials()
   const dataset = process.env.BQ_DATASET ?? ''
-  const table = process.env.BQ_TABLE_LEADS ?? 'TAGS-E-UTMS'
+  const table = process.env.BQ_TABLE_LEADS ?? 'Green_Gold'
   return `\`${project_id}.${dataset}.${table}\``
 }
 
 export function tableVendas(): string {
   const { project_id } = getCredentials()
   const dataset = process.env.BQ_DATASET ?? ''
-  const table = process.env.BQ_TABLE_VENDAS ?? 'VENDAS-BA'
+  const table = process.env.BQ_TABLE_VENDAS ?? 'Hotmart_Greenn_Unificada'
   return `\`${project_id}.${dataset}.${table}\``
 }

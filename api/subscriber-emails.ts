@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
-import { bqQuery, tableLeads } from './_bq'
+import { bqQuery, tableLeads } from './_bq.js'
 
 function auth(req: VercelRequest, res: VercelResponse): boolean {
   const token = process.env.DASHBOARD_TOKEN
