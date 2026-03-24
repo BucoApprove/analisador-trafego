@@ -77,7 +77,7 @@ async function getAccessToken(): Promise<string> {
   const claimset = Buffer.from(
     JSON.stringify({
       iss: creds.client_email,
-      scope: 'https://www.googleapis.com/auth/bigquery.readonly',
+      scope: 'https://www.googleapis.com/auth/bigquery.readonly https://www.googleapis.com/auth/drive.readonly',
       aud: 'https://oauth2.googleapis.com/token',
       exp: now + 3600,
       iat: now,
