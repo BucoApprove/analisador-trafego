@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
 import { LogOut, BarChart2 } from 'lucide-react'
 import TabVisaoGeral from './TabVisaoGeral'
+import TabLancamento from './TabLancamento'
 import TabLeads from './TabLeads'
 import TabInscritos from './TabInscritos'
 import TabInstagram from './TabInstagram'
@@ -19,6 +20,7 @@ interface DashboardLayoutProps {
 const TABS = [
   { id: 'visao-geral', label: 'Visão Geral' },
   { id: 'campanhas', label: 'Campanhas' },
+  { id: 'lancamento', label: 'Lançamento' },
   { id: 'leads', label: 'Leads' },
   { id: 'inscritos', label: 'Inscritos' },
   { id: 'instagram', label: 'Instagram' },
@@ -62,6 +64,9 @@ export default function DashboardLayout({ token, onLogout }: DashboardLayoutProp
           </TabsContent>
           <TabsContent value="campanhas">
             <TabPaidTraffic token={token} enabled={activeTab === 'campanhas'} />
+          </TabsContent>
+          <TabsContent value="lancamento">
+            <TabLancamento token={token} enabled={activeTab === 'lancamento'} />
           </TabsContent>
           <TabsContent value="leads">
             <TabLeads token={token} enabled={activeTab === 'leads'} />

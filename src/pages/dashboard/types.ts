@@ -10,6 +10,29 @@ export interface DashboardData {
   inscritosPorCampanha: { name: string; value: number }[]
 }
 
+// ─── Análise de Lançamento ───────────────────────────────────────────────────
+
+export interface LaunchTagCount {
+  tag: string
+  count: number
+}
+
+export interface LaunchData {
+  prefix: string
+  byTag: LaunchTagCount[]
+  totalUnique: number
+  sumByTag: number
+  overlap: number
+  leadsByDay: { date: string; count: number }[]
+  bySource: { name: string; value: number }[]
+  byCampaign: { name: string; value: number }[]
+  dateRange: { since: string; until: string }
+}
+
+export interface TagsListData {
+  tags: string[]
+}
+
 export interface MetaGroup {
   spend: number
   leads: number
