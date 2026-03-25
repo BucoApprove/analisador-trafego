@@ -14,7 +14,8 @@ export interface DashboardData {
 
 export interface LaunchTagCount {
   tag: string
-  count: number
+  countAll: number    // total histórico (sem filtro de data)
+  countPeriod: number // total no período selecionado
 }
 
 export interface LaunchData {

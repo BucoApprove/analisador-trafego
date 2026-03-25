@@ -46,88 +46,104 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const since = typeof req.query.since === 'string' ? req.query.since : firstOfMonthStr()
   const until = typeof req.query.until === 'string' ? req.query.until : todayStr()
-  const prefixPattern = `${prefix}%`
+  const containsPattern = `%${prefix}%`
 
   res.setHeader('Cache-Control', 's-maxage=120, stale-while-revalidate=60')
 
-  const params = [
-    { name: 'prefix', value: prefixPattern },
+  const paramsDate = [
+    { name: 'pattern', value: containsPattern },
     { name: 'since', value: since },
     { name: 'until', value: until },
   ]
+  const paramsAll = [{ name: 'pattern', value: containsPattern }]
 
   try {
-    const [rTotal, rByTag, rByDay, rBySource, rByCampaign] = await Promise.all([
-      // Total de leads ÚNICOS com qualquer tag que comece com o prefix
+    const [rAllTags, rTotal, rByTagDate, rByDay, rBySource, rByCampaign] = await Promise.all([
+      // TODOS os tags que contêm o termo — SEM filtro de data (para não perder tags antigas)
+      bqQuery(
+        `SELECT tag_name, COUNT(DISTINCT lead_id) AS cnt_all
+         FROM ${tLeads}
+         WHERE tag_name LIKE @pattern
+         GROUP BY tag_name
+         ORDER BY cnt_all DESC`,
+        paramsAll,
+      ),
+
+      // Total de leads ÚNICOS no período selecionado
       bqQuery(
         `SELECT COUNT(DISTINCT lead_id) AS cnt
          FROM ${tLeads}
-         WHERE tag_name LIKE @prefix
+         WHERE tag_name LIKE @pattern
            AND DATE(lead_register) BETWEEN DATE(@since) AND DATE(@until)`,
-        params,
+        paramsDate,
       ),
 
-      // Contagem por tag (leads únicos dentro de cada tag)
+      // Contagem por tag no período (pode ser 0 para algumas tags)
       bqQuery(
         `SELECT tag_name, COUNT(DISTINCT lead_id) AS cnt
          FROM ${tLeads}
-         WHERE tag_name LIKE @prefix
+         WHERE tag_name LIKE @pattern
            AND DATE(lead_register) BETWEEN DATE(@since) AND DATE(@until)
-         GROUP BY tag_name
-         ORDER BY cnt DESC`,
-        params,
+         GROUP BY tag_name`,
+        paramsDate,
       ),
 
-      // Leads únicos por dia (primeiro contato do lead com qualquer tag do lançamento)
+      // Leads únicos por dia no período (primeiro contato do lead)
       bqQuery(
         `SELECT FORMAT_DATE('%Y-%m-%d', first_date) AS date, COUNT(*) AS count
          FROM (
            SELECT lead_id, MIN(DATE(lead_register)) AS first_date
            FROM ${tLeads}
-           WHERE tag_name LIKE @prefix
+           WHERE tag_name LIKE @pattern
              AND DATE(lead_register) BETWEEN DATE(@since) AND DATE(@until)
            GROUP BY lead_id
          )
          GROUP BY date
          ORDER BY date`,
-        params,
+        paramsDate,
       ),
 
-      // Por utm_source
+      // Por utm_source no período
       bqQuery(
         `SELECT COALESCE(utm_source, '(direto)') AS name,
                 COUNT(DISTINCT lead_id) AS value
          FROM ${tLeads}
-         WHERE tag_name LIKE @prefix
+         WHERE tag_name LIKE @pattern
            AND DATE(lead_register) BETWEEN DATE(@since) AND DATE(@until)
          GROUP BY name
          ORDER BY value DESC
          LIMIT 15`,
-        params,
+        paramsDate,
       ),
 
-      // Por utm_campaign
+      // Por utm_campaign no período
       bqQuery(
         `SELECT COALESCE(utm_campaign, '(sem campanha)') AS name,
                 COUNT(DISTINCT lead_id) AS value
          FROM ${tLeads}
-         WHERE tag_name LIKE @prefix
+         WHERE tag_name LIKE @pattern
            AND DATE(lead_register) BETWEEN DATE(@since) AND DATE(@until)
          GROUP BY name
          ORDER BY value DESC
          LIMIT 15`,
-        params,
+        paramsDate,
       ),
     ])
 
-    const totalUnique = parseInt(rTotal.rows[0]?.cnt ?? '0')
+    // Mapa de contagem no período por tag
+    const countInPeriod = new Map<string, number>(
+      rByTagDate.rows.map((r) => [r.tag_name as string, parseInt(r.cnt ?? '0')])
+    )
 
-    const byTag = rByTag.rows.map((r) => ({
+    // Combina: todas as tags (histórico), sobrepõe contagem do período
+    const byTag = rAllTags.rows.map((r) => ({
       tag: r.tag_name as string,
-      count: parseInt(r.cnt ?? '0'),
+      countAll: parseInt(r.cnt_all ?? '0'),
+      countPeriod: countInPeriod.get(r.tag_name as string) ?? 0,
     }))
 
-    const sumByTag = byTag.reduce((acc, t) => acc + t.count, 0)
+    const totalUnique = parseInt(rTotal.rows[0]?.cnt ?? '0')
+    const sumByTag = byTag.reduce((acc, t) => acc + t.countPeriod, 0)
     const overlap = sumByTag - totalUnique
 
     res.json({

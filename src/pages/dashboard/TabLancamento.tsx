@@ -70,7 +70,7 @@ export default function TabLancamento({ token, enabled }: Props) {
       .filter(Boolean)
   )].slice(0, 12)
 
-  const maxTagCount = data ? Math.max(...data.byTag.map(t => t.count), 1) : 1
+  const maxTagCount = data ? Math.max(...data.byTag.map(t => t.countAll), 1) : 1
 
   return (
     <div className="space-y-6">
@@ -95,7 +95,7 @@ export default function TabLancamento({ token, enabled }: Props) {
                 value={prefix}
                 onChange={e => setPrefix(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder="ex: BA25"
+                placeholder="ex: BA25 (busca por similaridade)"
                 className="w-full rounded-md border bg-background pl-8 pr-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
               />
             </div>
@@ -205,9 +205,10 @@ export default function TabLancamento({ token, enabled }: Props) {
                 <thead className="bg-muted">
                   <tr>
                     <th className="px-4 py-2 text-left font-medium">Tag</th>
-                    <th className="px-4 py-2 text-right font-medium w-28">Leads únicos</th>
-                    <th className="px-4 py-2 text-right font-medium w-20">% do total</th>
-                    <th className="px-4 py-2 text-left font-medium">Distribuição</th>
+                    <th className="px-4 py-2 text-right font-medium w-28">No período</th>
+                    <th className="px-4 py-2 text-right font-medium w-24">Histórico</th>
+                    <th className="px-4 py-2 text-right font-medium w-20">% período</th>
+                    <th className="px-4 py-2 text-left font-medium">Distribuição (histórico)</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y">
@@ -215,11 +216,16 @@ export default function TabLancamento({ token, enabled }: Props) {
                     <tr key={t.tag} className="hover:bg-muted/50">
                       <td className="px-4 py-3 font-medium">{t.tag}</td>
                       <td className="px-4 py-3 text-right tabular-nums">
-                        {t.count.toLocaleString('pt-BR')}
+                        {t.countPeriod > 0
+                          ? t.countPeriod.toLocaleString('pt-BR')
+                          : <span className="text-muted-foreground">0</span>}
                       </td>
                       <td className="px-4 py-3 text-right tabular-nums text-muted-foreground">
-                        {data.totalUnique > 0
-                          ? formatPercent((t.count / data.totalUnique) * 100)
+                        {t.countAll.toLocaleString('pt-BR')}
+                      </td>
+                      <td className="px-4 py-3 text-right tabular-nums text-muted-foreground">
+                        {data.totalUnique > 0 && t.countPeriod > 0
+                          ? formatPercent((t.countPeriod / data.totalUnique) * 100)
                           : '—'}
                       </td>
                       <td className="px-4 py-3">
@@ -227,7 +233,7 @@ export default function TabLancamento({ token, enabled }: Props) {
                           <div
                             className="h-full rounded-full"
                             style={{
-                              width: `${(t.count / maxTagCount) * 100}%`,
+                              width: `${(t.countAll / maxTagCount) * 100}%`,
                               backgroundColor: CHART_COLORS[i % CHART_COLORS.length],
                             }}
                           />
@@ -238,11 +244,11 @@ export default function TabLancamento({ token, enabled }: Props) {
 
                   {/* Linha de soma + sobreposição */}
                   <tr className="bg-muted/30 font-medium">
-                    <td className="px-4 py-2 text-muted-foreground">Soma bruta</td>
+                    <td className="px-4 py-2 text-muted-foreground">Soma bruta (período)</td>
                     <td className="px-4 py-2 text-right tabular-nums text-muted-foreground">
                       {data.sumByTag.toLocaleString('pt-BR')}
                     </td>
-                    <td colSpan={2} />
+                    <td colSpan={3} />
                   </tr>
                   {data.overlap > 0 && (
                     <tr className="text-destructive/80">
@@ -253,15 +259,15 @@ export default function TabLancamento({ token, enabled }: Props) {
                       <td className="px-4 py-2 text-right tabular-nums">
                         -{data.overlap.toLocaleString('pt-BR')}
                       </td>
-                      <td colSpan={2} />
+                      <td colSpan={3} />
                     </tr>
                   )}
                   <tr className="border-t-2 font-bold text-base">
-                    <td className="px-4 py-2">Total único</td>
+                    <td className="px-4 py-2">Total único (período)</td>
                     <td className="px-4 py-2 text-right tabular-nums" style={{ color: CHART_COLORS[1] }}>
                       {data.totalUnique.toLocaleString('pt-BR')}
                     </td>
-                    <td colSpan={2} />
+                    <td colSpan={3} />
                   </tr>
                 </tbody>
               </table>
