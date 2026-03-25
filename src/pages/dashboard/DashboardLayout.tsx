@@ -3,6 +3,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
 import { LogOut, BarChart2 } from 'lucide-react'
+import TabVisaoGeral from './TabVisaoGeral'
 import TabLeads from './TabLeads'
 import TabInscritos from './TabInscritos'
 import TabInstagram from './TabInstagram'
@@ -16,16 +17,17 @@ interface DashboardLayoutProps {
 }
 
 const TABS = [
+  { id: 'visao-geral', label: 'Visão Geral' },
+  { id: 'campanhas', label: 'Campanhas' },
   { id: 'leads', label: 'Leads' },
   { id: 'inscritos', label: 'Inscritos' },
   { id: 'instagram', label: 'Instagram' },
   { id: 'email', label: 'Email' },
-  { id: 'trafego', label: 'Tráfego Pago' },
   { id: 'pesquisa', label: 'Pesquisa' },
 ]
 
 export default function DashboardLayout({ token, onLogout }: DashboardLayoutProps) {
-  const [activeTab, setActiveTab] = useState('leads')
+  const [activeTab, setActiveTab] = useState('visao-geral')
 
   return (
     <div className="min-h-screen bg-background">
@@ -55,6 +57,12 @@ export default function DashboardLayout({ token, onLogout }: DashboardLayoutProp
             ))}
           </TabsList>
 
+          <TabsContent value="visao-geral">
+            <TabVisaoGeral token={token} enabled={activeTab === 'visao-geral'} />
+          </TabsContent>
+          <TabsContent value="campanhas">
+            <TabPaidTraffic token={token} enabled={activeTab === 'campanhas'} />
+          </TabsContent>
           <TabsContent value="leads">
             <TabLeads token={token} enabled={activeTab === 'leads'} />
           </TabsContent>
@@ -66,9 +74,6 @@ export default function DashboardLayout({ token, onLogout }: DashboardLayoutProp
           </TabsContent>
           <TabsContent value="email">
             <TabEmailCampaigns token={token} enabled={activeTab === 'email'} />
-          </TabsContent>
-          <TabsContent value="trafego">
-            <TabPaidTraffic token={token} enabled={activeTab === 'trafego'} />
           </TabsContent>
           <TabsContent value="pesquisa">
             <TabPesquisa token={token} enabled={activeTab === 'pesquisa'} />

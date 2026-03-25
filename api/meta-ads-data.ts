@@ -1,8 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 
 const META_BASE = 'https://graph.facebook.com/v19.0'
-const AD_ACCOUNT = 'act_1379639915667456'
-const TICKET_MEDIO = 1197
 
 function auth(req: VercelRequest, res: VercelResponse): boolean {
   const token = process.env.DASHBOARD_TOKEN
@@ -36,6 +34,8 @@ interface MetaInsight {
   impressions: string
   ctr: string
   cpc: string
+  reach?: string
+  frequency?: string
   actions?: { action_type: string; value: string }[]
   video_avg_percent_watched_actions?: { action_type: string; value: string }[]
 }
@@ -71,20 +71,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Cache-Control', 's-maxage=600, stale-while-revalidate=120')
 
   const accessToken = process.env.META_ACCESS_TOKEN ?? ''
+  const adAccount = process.env.META_AD_ACCOUNT_ID ?? ''
+  const ticketMedio = Number(process.env.TICKET_MEDIO ?? '0')
 
-  // Período: últimos 30 dias
-  const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+  if (!accessToken || !adAccount) {
+    res.status(503).json({ error: 'META_ACCESS_TOKEN ou META_AD_ACCOUNT_ID não configurado' })
+    return
+  }
+
+  // Período configurável via ?days= (padrão: 30)
+  const days = Math.min(Math.max(parseInt(typeof req.query.days === 'string' ? req.query.days : '30') || 30, 1), 90)
+  const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
   const until = new Date().toISOString().split('T')[0]
 
   const insightFields = [
     'campaign_id', 'campaign_name', 'spend', 'clicks', 'impressions',
-    'ctr', 'cpc', 'actions', 'video_avg_percent_watched_actions',
+    'ctr', 'cpc', 'reach', 'frequency', 'actions', 'video_avg_percent_watched_actions',
   ].join(',')
 
   const campaignFields = `id,name,status,objective,insights.time_range({"since":"${since}","until":"${until}"}){${insightFields}}`
 
   try {
-    const url = new URL(`${META_BASE}/${AD_ACCOUNT}/campaigns`)
+    const url = new URL(`${META_BASE}/${adAccount}/campaigns`)
     url.searchParams.set('fields', campaignFields)
     url.searchParams.set('access_token', accessToken)
     url.searchParams.set('limit', '100')
@@ -122,15 +130,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const impressions = Number(insight.impressions ?? 0)
       const ctr = Number(insight.ctr ?? 0)
       const cpc = Number(insight.cpc ?? 0)
+      const reach = Number(insight.reach ?? 0)
       const leads = actionValue(insight.actions, 'lead') + actionValue(insight.actions, 'onsite_conversion.lead_grouped')
       const purchases = actionValue(insight.actions, 'purchase') + actionValue(insight.actions, 'offsite_conversion.fb_pixel_purchase')
 
       g.spend += spend
       g.clicks += clicks
       g.impressions += impressions
+      g.reach += reach
       g.leads += leads
       g.purchases += purchases
-      g.revenue += purchases * TICKET_MEDIO
+      g.revenue += purchases * ticketMedio
 
       totalSpend += spend
       totalLeads += leads
@@ -140,7 +150,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         id: campaign.id,
         name: campaign.name,
         status: campaign.status,
-        spend, leads, clicks, impressions, ctr, cpc,
+        spend, leads, purchases, clicks, impressions, ctr, cpc, reach,
       })
     }
 
@@ -151,6 +161,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       g.roas = g.spend > 0 ? g.revenue / g.spend : 0
       g.ctr = g.impressions > 0 ? (g.clicks / g.impressions) * 100 : 0
       g.cpc = g.clicks > 0 ? g.spend / g.clicks : 0
+      g.frequency = g.reach > 0 ? g.impressions / g.reach : 0
     }
 
     res.json({

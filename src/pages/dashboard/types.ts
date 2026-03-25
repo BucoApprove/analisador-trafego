@@ -35,8 +35,10 @@ export interface MetaCampaign {
   status: string
   spend: number
   leads: number
+  purchases: number
   clicks: number
   impressions: number
+  reach: number
   ctr: number
   cpc: number
 }
