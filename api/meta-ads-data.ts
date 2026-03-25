@@ -37,7 +37,6 @@ interface MetaInsight {
   reach?: string
   frequency?: string
   actions?: { action_type: string; value: string }[]
-  video_avg_percent_watched_actions?: { action_type: string; value: string }[]
 }
 
 interface MetaCampaignRaw {
@@ -86,7 +85,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const insightFields = [
     'campaign_id', 'campaign_name', 'spend', 'clicks', 'impressions',
-    'ctr', 'cpc', 'reach', 'frequency', 'actions', 'video_avg_percent_watched_actions',
+    'ctr', 'cpc', 'reach', 'frequency', 'actions',
   ].join(',')
 
   const campaignFields = `id,name,status,objective,insights.time_range({"since":"${since}","until":"${until}"}){${insightFields}}`
