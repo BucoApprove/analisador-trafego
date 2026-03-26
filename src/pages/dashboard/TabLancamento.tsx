@@ -5,12 +5,66 @@ import {
   formatPercent, ChartTooltip, CHART_COLORS,
 } from './components'
 import {
-  LineChart, Line, BarChart, Bar,
+  LineChart, Line,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts'
 import { Search, AlertTriangle, Info } from 'lucide-react'
 
 interface Props { token: string; enabled: boolean }
+
+// ---------- helper local ----------
+function UtmTable({
+  title,
+  rows,
+  total,
+  color,
+  hint,
+}: {
+  title: string
+  rows: { name: string; value: number }[]
+  total: number
+  color: string
+  hint?: string
+}) {
+  const maxVal = Math.max(...rows.map(r => r.value), 1)
+  return (
+    <div>
+      <SectionHeader title={title} description={hint} />
+      <div className="overflow-x-auto rounded-md border">
+        <table className="w-full text-sm">
+          <thead className="bg-muted">
+            <tr>
+              <th className="px-3 py-2 text-left font-medium">Valor</th>
+              <th className="px-3 py-2 text-right font-medium">Leads</th>
+              <th className="px-3 py-2 text-right font-medium">%</th>
+              <th className="px-3 py-2 w-28"></th>
+            </tr>
+          </thead>
+          <tbody className="divide-y">
+            {rows.map(r => (
+              <tr key={r.name} className="hover:bg-muted/50">
+                <td className="px-3 py-2 max-w-[180px] truncate" title={r.name}>{r.name}</td>
+                <td className="px-3 py-2 text-right tabular-nums">{r.value.toLocaleString('pt-BR')}</td>
+                <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">
+                  {total > 0 ? formatPercent((r.value / total) * 100) : '—'}
+                </td>
+                <td className="px-3 py-2">
+                  <div className="h-2 rounded-full bg-muted overflow-hidden">
+                    <div
+                      className="h-full rounded-full"
+                      style={{ width: `${(r.value / maxVal) * 100}%`, backgroundColor: color }}
+                    />
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+// ----------------------------------
 
 function todayStr() {
   return new Date().toISOString().split('T')[0]
@@ -313,63 +367,68 @@ export default function TabLancamento({ token, enabled }: Props) {
           )}
 
           {/* UTM breakdown */}
-          <div className="grid gap-6 lg:grid-cols-2">
+          <div>
+            <SectionHeader
+              title="Análise de UTMs"
+              description="Todos os breakdowns usam leads únicos do período. Útil para identificar quais canais, formatos e criativos geram mais captação."
+            />
 
-            {/* Por fonte */}
-            {data.bySource.length > 0 && (
-              <div>
-                <SectionHeader title="Por fonte (utm_source)" />
-                <div className="overflow-x-auto rounded-md border">
-                  <table className="w-full text-sm">
-                    <thead className="bg-muted">
-                      <tr>
-                        <th className="px-3 py-2 text-left font-medium">Fonte</th>
-                        <th className="px-3 py-2 text-right font-medium">Leads</th>
-                        <th className="px-3 py-2 text-right font-medium">%</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y">
-                      {data.bySource.map(s => (
-                        <tr key={s.name} className="hover:bg-muted/50">
-                          <td className="px-3 py-2">{s.name}</td>
-                          <td className="px-3 py-2 text-right tabular-nums">{s.value.toLocaleString('pt-BR')}</td>
-                          <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">
-                            {data.totalUnique > 0 ? formatPercent((s.value / data.totalUnique) * 100) : '—'}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
+            <div className="grid gap-6 lg:grid-cols-2">
 
-            {/* Por campanha */}
-            {data.byCampaign.length > 0 && (
-              <div>
-                <SectionHeader title="Por campanha (utm_campaign)" />
-                <ResponsiveContainer width="100%" height={Math.min(data.byCampaign.length * 36 + 20, 320)}>
-                  <BarChart
-                    data={data.byCampaign}
-                    layout="vertical"
-                    margin={{ left: 8, right: 24 }}
-                  >
-                    <CartesianGrid strokeDasharray="3 3" className="stroke-border" horizontal={false} />
-                    <XAxis type="number" tick={{ fontSize: 10 }} allowDecimals={false} />
-                    <YAxis
-                      type="category"
-                      dataKey="name"
-                      tick={{ fontSize: 10 }}
-                      width={140}
-                      tickFormatter={v => v.length > 20 ? v.slice(0, 20) + '…' : v}
-                    />
-                    <Tooltip content={<ChartTooltip />} />
-                    <Bar dataKey="value" name="Leads" fill={CHART_COLORS[0]} radius={[0, 4, 4, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            )}
+              {/* utm_source */}
+              {data.bySource.length > 0 && (
+                <UtmTable
+                  title="Fonte (utm_source)"
+                  rows={data.bySource}
+                  total={data.totalUnique}
+                  color={CHART_COLORS[0]}
+                />
+              )}
 
+              {/* utm_medium */}
+              {data.byMedium.length > 0 && (
+                <UtmTable
+                  title="Mídia (utm_medium)"
+                  rows={data.byMedium}
+                  total={data.totalUnique}
+                  color={CHART_COLORS[1]}
+                  hint="Identifica o tipo de canal: cpc, social, email, organic…"
+                />
+              )}
+
+              {/* utm_campaign */}
+              {data.byCampaign.length > 0 && (
+                <UtmTable
+                  title="Campanha (utm_campaign)"
+                  rows={data.byCampaign}
+                  total={data.totalUnique}
+                  color={CHART_COLORS[2]}
+                />
+              )}
+
+              {/* utm_content */}
+              {data.byContent.filter(r => r.name !== '(não informado)').length > 0 && (
+                <UtmTable
+                  title="Conteúdo (utm_content)"
+                  rows={data.byContent}
+                  total={data.totalUnique}
+                  color={CHART_COLORS[3]}
+                  hint="Diferencia criativos ou links dentro da mesma campanha."
+                />
+              )}
+
+              {/* utm_term */}
+              {data.byTerm.filter(r => r.name !== '(não informado)').length > 0 && (
+                <UtmTable
+                  title="Termo (utm_term)"
+                  rows={data.byTerm}
+                  total={data.totalUnique}
+                  color={CHART_COLORS[4]}
+                  hint="Palavras-chave pagas ou termos de pesquisa."
+                />
+              )}
+
+            </div>
           </div>
         </>
       )}

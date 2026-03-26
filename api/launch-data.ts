@@ -58,7 +58,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const paramsAll = [{ name: 'pattern', value: containsPattern }]
 
   try {
-    const [rAllTags, rTotal, rByTagDate, rByDay, rBySource, rByCampaign] = await Promise.all([
+    const [rAllTags, rTotal, rByTagDate, rByDay, rBySource, rByCampaign, rByMedium, rByContent, rByTerm] = await Promise.all([
       // TODOS os tags que contêm o termo — SEM filtro de data (para não perder tags antigas)
       bqQuery(
         `SELECT tag_name, COUNT(DISTINCT lead_id) AS cnt_all
@@ -128,6 +128,45 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
          LIMIT 15`,
         paramsDate,
       ),
+
+      // Por utm_medium
+      bqQuery(
+        `SELECT COALESCE(utm_medium, '(não informado)') AS name,
+                COUNT(DISTINCT lead_id) AS value
+         FROM ${tLeads}
+         WHERE tag_name LIKE @pattern
+           AND DATE(lead_register) BETWEEN DATE(@since) AND DATE(@until)
+         GROUP BY name
+         ORDER BY value DESC
+         LIMIT 15`,
+        paramsDate,
+      ),
+
+      // Por utm_content
+      bqQuery(
+        `SELECT COALESCE(utm_content, '(não informado)') AS name,
+                COUNT(DISTINCT lead_id) AS value
+         FROM ${tLeads}
+         WHERE tag_name LIKE @pattern
+           AND DATE(lead_register) BETWEEN DATE(@since) AND DATE(@until)
+         GROUP BY name
+         ORDER BY value DESC
+         LIMIT 15`,
+        paramsDate,
+      ),
+
+      // Por utm_term
+      bqQuery(
+        `SELECT COALESCE(utm_term, '(não informado)') AS name,
+                COUNT(DISTINCT lead_id) AS value
+         FROM ${tLeads}
+         WHERE tag_name LIKE @pattern
+           AND DATE(lead_register) BETWEEN DATE(@since) AND DATE(@until)
+         GROUP BY name
+         ORDER BY value DESC
+         LIMIT 15`,
+        paramsDate,
+      ),
     ])
 
     // Mapa de contagem no período por tag
@@ -161,6 +200,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         value: parseInt(r.value ?? '0'),
       })),
       byCampaign: rByCampaign.rows.map((r) => ({
+        name: r.name as string,
+        value: parseInt(r.value ?? '0'),
+      })),
+      byMedium: rByMedium.rows.map((r) => ({
+        name: r.name as string,
+        value: parseInt(r.value ?? '0'),
+      })),
+      byContent: rByContent.rows.map((r) => ({
+        name: r.name as string,
+        value: parseInt(r.value ?? '0'),
+      })),
+      byTerm: rByTerm.rows.map((r) => ({
         name: r.name as string,
         value: parseInt(r.value ?? '0'),
       })),

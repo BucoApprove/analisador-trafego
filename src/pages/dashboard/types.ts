@@ -27,6 +27,9 @@ export interface LaunchData {
   leadsByDay: { date: string; count: number }[]
   bySource: { name: string; value: number }[]
   byCampaign: { name: string; value: number }[]
+  byMedium: { name: string; value: number }[]
+  byContent: { name: string; value: number }[]
+  byTerm: { name: string; value: number }[]
   dateRange: { since: string; until: string }
 }
 
