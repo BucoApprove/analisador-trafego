@@ -140,7 +140,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
          ORDER BY value DESC
          LIMIT 15`,
         paramsDate,
-      ),
+      ).catch(() => ({ rows: [] })),
 
       // Por utm_content
       bqQuery(
@@ -153,7 +153,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
          ORDER BY value DESC
          LIMIT 15`,
         paramsDate,
-      ),
+      ).catch(() => ({ rows: [] })),
 
       // Por utm_term
       bqQuery(
@@ -166,7 +166,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
          ORDER BY value DESC
          LIMIT 15`,
         paramsDate,
-      ),
+      ).catch(() => ({ rows: [] })),
     ])
 
     // Mapa de contagem no período por tag
