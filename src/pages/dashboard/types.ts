@@ -21,7 +21,8 @@ export interface LaunchTagCount {
 export interface LaunchData {
   prefix: string
   byTag: LaunchTagCount[]
-  totalUnique: number
+  totalUniqueAll: number    // total histórico deduplicado (sem filtro de data)
+  totalUnique: number       // total deduplicado no período selecionado
   sumByTag: number
   overlap: number
   leadsByDay: { date: string; count: number }[]

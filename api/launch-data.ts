@@ -65,7 +65,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const paramsAll = [{ name: 'pattern', value: containsPattern }]
 
   try {
-    const [rAllTags, rTotal, rByTagDate, rByDay, rBySource, rByCampaign, rByMedium, rByContent, rByTerm] = await Promise.all([
+    const [rAllTags, rTotalAll, rTotal, rByTagDate, rByDay, rBySource, rByCampaign, rByMedium, rByContent, rByTerm] = await Promise.all([
       // TODOS os tags que contêm o termo — SEM filtro de data (para não perder tags antigas)
       bqQuery(
         `SELECT tag_name, COUNT(DISTINCT lead_id) AS cnt_all
@@ -73,6 +73,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
          WHERE tag_name LIKE @pattern
          GROUP BY tag_name
          ORDER BY cnt_all DESC`,
+        paramsAll,
+      ),
+
+      // Total de leads ÚNICOS histórico — SEM filtro de data (número real do lançamento)
+      bqQuery(
+        `SELECT COUNT(DISTINCT lead_id) AS cnt
+         FROM ${tLeads}
+         WHERE tag_name LIKE @pattern`,
         paramsAll,
       ),
 
@@ -188,9 +196,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       countPeriod: countInPeriod.get(r.tag_name as string) ?? 0,
     }))
 
+    const totalUniqueAll = parseInt(rTotalAll.rows[0]?.cnt ?? '0')
     const totalUnique = parseInt(rTotal.rows[0]?.cnt ?? '0')
-    const sumByTag = byTag.reduce((acc, t) => acc + t.countPeriod, 0)
-    const overlap = sumByTag - totalUnique
+    const sumByTag = byTag.reduce((acc, t) => acc + t.countAll, 0)
+    const overlap = sumByTag - totalUniqueAll
 
     // ---------- Meta Ads spend (opcional) ----------
     let metaSpend: number | null = null
@@ -224,7 +233,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               }
             }
             metaSpend = Math.round(totalSpend * 100) / 100
-            cpl = totalUnique > 0 ? Math.round((metaSpend / totalUnique) * 100) / 100 : null
+            cpl = totalUniqueAll > 0 ? Math.round((metaSpend / totalUniqueAll) * 100) / 100 : null
           }
         } catch (err) {
           console.error('launch-data Meta spend error:', err)
@@ -237,6 +246,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     res.json({
       prefix,
       byTag,
+      totalUniqueAll,
       totalUnique,
       sumByTag,
       overlap,

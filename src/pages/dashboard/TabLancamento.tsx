@@ -247,14 +247,15 @@ export default function TabLancamento({ token, enabled }: Props) {
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
               <KpiCard
                 label="Total leads únicos"
-                value={data.totalUnique.toLocaleString('pt-BR')}
+                value={data.totalUniqueAll.toLocaleString('pt-BR')}
                 color={CHART_COLORS[1]}
-                sub="deduplicados entre todas as tags"
+                sub="histórico total — todas as datas"
               />
               <KpiCard
-                label="Tags encontradas"
-                value={data.byTag.length}
+                label="No período"
+                value={data.totalUnique.toLocaleString('pt-BR')}
                 color={CHART_COLORS[0]}
+                sub={`${data.dateRange.since} → ${data.dateRange.until}`}
               />
               <KpiCard
                 label="Soma bruta (c/ duplicatas)"
