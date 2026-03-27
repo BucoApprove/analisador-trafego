@@ -31,6 +31,10 @@ export interface LaunchData {
   byContent: { name: string; value: number }[]
   byTerm: { name: string; value: number }[]
   dateRange: { since: string; until: string }
+  // Meta Ads spend (presente só quando spendFilter for passado)
+  metaSpend?: number
+  cpl?: number | null
+  metaCampaigns?: { name: string; spend: number }[]
 }
 
 export interface TagsListData {

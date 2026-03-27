@@ -78,6 +78,7 @@ export default function TabLancamento({ token, enabled }: Props) {
   const [prefix, setPrefix] = useState('')
   const [since, setSince] = useState(firstOfMonthStr)
   const [until, setUntil] = useState(todayStr)
+  const [spendFilter, setSpendFilter] = useState('')
   const [suggestions, setSuggestions] = useState<string[]>([])
   const [data, setData] = useState<LaunchData | null>(null)
   const [status, setStatus] = useState<'idle' | 'loading' | 'error'>('idle')
@@ -98,7 +99,10 @@ export default function TabLancamento({ token, enabled }: Props) {
     setStatus('loading')
     setErrorMsg(null)
     try {
-      const url = `/api/launch-data?prefix=${encodeURIComponent(trimmed)}&since=${since}&until=${until}`
+      const spendParam = spendFilter.trim()
+        ? `&spendFilter=${encodeURIComponent(spendFilter.trim())}`
+        : ''
+      const url = `/api/launch-data?prefix=${encodeURIComponent(trimmed)}&since=${since}&until=${until}${spendParam}`
       const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } })
       if (!res.ok) {
         const body = await res.json().catch(() => ({}))
@@ -111,7 +115,7 @@ export default function TabLancamento({ token, enabled }: Props) {
       setStatus('error')
       setErrorMsg((e as Error).message)
     }
-  }, [prefix, since, until, token])
+  }, [prefix, since, until, spendFilter, token])
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter') search()
@@ -186,6 +190,26 @@ export default function TabLancamento({ token, enabled }: Props) {
           </button>
         </div>
 
+        {/* Filtro Meta Ads spend (opcional) */}
+        <div className="mt-3 flex flex-wrap items-end gap-3">
+          <div className="flex-1 min-w-[240px]">
+            <label className="mb-1 block text-xs font-medium text-muted-foreground">
+              Filtro campanhas Meta Ads <span className="font-normal opacity-60">(opcional — calcular CPL)</span>
+            </label>
+            <input
+              type="text"
+              value={spendFilter}
+              onChange={e => setSpendFilter(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="ex: BA25, CAPTURA  (palavras separadas por vírgula)"
+              className="w-full rounded-md border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+            />
+          </div>
+          <p className="text-xs text-muted-foreground pb-2">
+            Todas as palavras devem aparecer no nome da campanha (sem distinguir maiúsculas).
+          </p>
+        </div>
+
         {/* Sugestões de prefixos */}
         {prefixSuggestions.length > 0 && (
           <div className="mt-3 flex flex-wrap gap-1.5">
@@ -245,6 +269,61 @@ export default function TabLancamento({ token, enabled }: Props) {
                 sub="leads em mais de uma tag"
               />
             </div>
+
+            {/* CPL row — só aparece quando spendFilter foi usado */}
+            {data.metaSpend !== undefined && (
+              <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                <KpiCard
+                  label="Gasto Meta Ads"
+                  value={`R$ ${data.metaSpend.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                  color={CHART_COLORS[3]}
+                  sub={`${data.metaCampaigns?.length ?? 0} campanha(s) encontrada(s)`}
+                />
+                <KpiCard
+                  label="CPL (custo por lead)"
+                  value={
+                    data.cpl != null
+                      ? `R$ ${data.cpl.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                      : '—'
+                  }
+                  color={CHART_COLORS[4]}
+                  sub="gasto ÷ leads únicos no período"
+                />
+                {data.metaSpend === 0 && (
+                  <div className="flex items-center gap-2 rounded-lg border border-yellow-200 bg-yellow-50 p-3 text-xs text-yellow-800 dark:border-yellow-800 dark:bg-yellow-950 dark:text-yellow-200">
+                    <AlertTriangle className="h-4 w-4 shrink-0" />
+                    Nenhuma campanha encontrada com os termos informados. Verifique o filtro ou o período.
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Lista das campanhas que casaram */}
+            {(data.metaCampaigns?.length ?? 0) > 0 && (
+              <div className="mt-4">
+                <p className="mb-2 text-xs font-medium text-muted-foreground">Campanhas incluídas no cálculo:</p>
+                <div className="overflow-x-auto rounded-md border">
+                  <table className="w-full text-xs">
+                    <thead className="bg-muted">
+                      <tr>
+                        <th className="px-3 py-1.5 text-left font-medium">Campanha</th>
+                        <th className="px-3 py-1.5 text-right font-medium">Gasto</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {data.metaCampaigns!.map(c => (
+                        <tr key={c.name} className="hover:bg-muted/50">
+                          <td className="px-3 py-1.5">{c.name}</td>
+                          <td className="px-3 py-1.5 text-right tabular-nums">
+                            R$ {c.spend.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Detalhamento por tag */}

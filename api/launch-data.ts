@@ -48,6 +48,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const until = typeof req.query.until === 'string' ? req.query.until : todayStr()
   const containsPattern = `%${prefix}%`
 
+  // Palavras-chave para filtrar campanhas do Meta Ads (ex: "BA25,CAPTURA")
+  const spendFilterRaw = typeof req.query.spendFilter === 'string' ? req.query.spendFilter : ''
+  const spendKeywords = spendFilterRaw
+    .split(',')
+    .map((k) => k.trim().toLowerCase())
+    .filter(Boolean)
+
   res.setHeader('Cache-Control', 's-maxage=120, stale-while-revalidate=60')
 
   const paramsDate = [
@@ -185,6 +192,48 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const sumByTag = byTag.reduce((acc, t) => acc + t.countPeriod, 0)
     const overlap = sumByTag - totalUnique
 
+    // ---------- Meta Ads spend (opcional) ----------
+    let metaSpend: number | null = null
+    let cpl: number | null = null
+    let metaCampaigns: { name: string; spend: number }[] = []
+
+    if (spendKeywords.length > 0) {
+      const accessToken = process.env.META_ACCESS_TOKEN ?? ''
+      const adAccount = process.env.META_AD_ACCOUNT_ID ?? ''
+      if (accessToken && adAccount) {
+        try {
+          const insightFields = 'campaign_id,campaign_name,spend'
+          const campaignFields = `id,name,status,insights.time_range({"since":"${since}","until":"${until}"}){${insightFields}}`
+          const mUrl = new URL(`https://graph.facebook.com/v19.0/${adAccount}/campaigns`)
+          mUrl.searchParams.set('fields', campaignFields)
+          mUrl.searchParams.set('access_token', accessToken)
+          mUrl.searchParams.set('limit', '200')
+
+          const mRes = await fetch(mUrl.toString())
+          if (mRes.ok) {
+            const mData = await mRes.json() as {
+              data: Array<{ id: string; name: string; insights?: { data: Array<{ spend: string }> } }>
+            }
+            let totalSpend = 0
+            for (const c of mData.data ?? []) {
+              const nameLower = c.name.toLowerCase()
+              if (spendKeywords.every((k) => nameLower.includes(k))) {
+                const s = Number(c.insights?.data?.[0]?.spend ?? 0)
+                totalSpend += s
+                metaCampaigns.push({ name: c.name, spend: Math.round(s * 100) / 100 })
+              }
+            }
+            metaSpend = Math.round(totalSpend * 100) / 100
+            cpl = totalUnique > 0 ? Math.round((metaSpend / totalUnique) * 100) / 100 : null
+          }
+        } catch (err) {
+          console.error('launch-data Meta spend error:', err)
+          // silencia — spend é opcional
+        }
+      }
+    }
+    // -----------------------------------------------
+
     res.json({
       prefix,
       byTag,
@@ -216,6 +265,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         value: parseInt(r.value ?? '0'),
       })),
       dateRange: { since, until },
+      ...(metaSpend !== null ? { metaSpend, cpl, metaCampaigns } : {}),
     })
   } catch (err) {
     console.error('launch-data error:', err)
