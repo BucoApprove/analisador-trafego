@@ -8,7 +8,7 @@ import {
   LineChart, Line,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts'
-import { Search, AlertTriangle, Info } from 'lucide-react'
+import { Search, AlertTriangle } from 'lucide-react'
 
 interface Props { token: string; enabled: boolean }
 
@@ -240,35 +240,25 @@ export default function TabLancamento({ token, enabled }: Props) {
         <>
           {/* KPI principal */}
           <div>
-            <SectionHeader
-              title={`Lançamento: ${data.prefix}`}
-              description={`${data.dateRange.since} → ${data.dateRange.until}`}
-            />
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-              <KpiCard
-                label="Total leads únicos"
-                value={data.totalUniqueAll.toLocaleString('pt-BR')}
-                color={CHART_COLORS[1]}
-                sub="histórico total — todas as datas"
-              />
-              <KpiCard
-                label="No período"
-                value={data.totalUnique.toLocaleString('pt-BR')}
-                color={CHART_COLORS[0]}
-                sub={`${data.dateRange.since} → ${data.dateRange.until}`}
-              />
-              <KpiCard
-                label="Soma bruta (c/ duplicatas)"
-                value={data.sumByTag.toLocaleString('pt-BR')}
-                color="#888"
-                sub="contando o mesmo lead em cada tag"
-              />
-              <KpiCard
-                label="Sobreposição"
-                value={data.overlap > 0 ? data.overlap.toLocaleString('pt-BR') : '0'}
-                color={data.overlap > 0 ? '#c17c74' : '#7c9885'}
-                sub="leads em mais de uma tag"
-              />
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+              <h2 className="text-base font-semibold">
+                Lançamento: <span style={{ color: CHART_COLORS[1] }}>{data.prefix}</span>
+              </h2>
+              <span className="text-xs text-muted-foreground">{data.dateRange.since} → {data.dateRange.until}</span>
+            </div>
+            <div className="flex flex-wrap gap-px rounded-lg border overflow-hidden">
+              {([
+                { label: 'Total leads', value: data.totalUniqueAll.toLocaleString('pt-BR'), color: CHART_COLORS[1], sub: 'histórico total' },
+                { label: 'No período', value: data.totalUnique.toLocaleString('pt-BR'), color: CHART_COLORS[0], sub: `${data.dateRange.since} → ${data.dateRange.until}` },
+                { label: 'Soma bruta', value: data.sumByTag.toLocaleString('pt-BR'), color: '#888', sub: 'c/ duplicatas' },
+                { label: 'Sobreposição', value: (data.overlap > 0 ? data.overlap.toLocaleString('pt-BR') : '0'), color: data.overlap > 0 ? '#c17c74' : '#7c9885', sub: 'leads em múltiplas tags' },
+              ] as const).map(s => (
+                <div key={s.label} className="flex-1 min-w-[110px] bg-card px-4 py-2.5">
+                  <p className="text-[11px] text-muted-foreground">{s.label}</p>
+                  <p className="text-xl font-bold tabular-nums" style={{ color: s.color }}>{s.value}</p>
+                  <p className="text-[10px] text-muted-foreground truncate">{s.sub}</p>
+                </div>
+              ))}
             </div>
 
             {/* CPL row — só aparece quando spendFilter foi usado */}
@@ -329,41 +319,37 @@ export default function TabLancamento({ token, enabled }: Props) {
 
           {/* Detalhamento por tag */}
           <div>
-            <SectionHeader
-              title="Leads únicos por tag"
-              description="Cada tag conta seus próprios leads únicos, independentemente. A soma pode ser maior que o total único por causa da sobreposição."
-            />
-
+            <p className="mb-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide">Leads por tag</p>
             <div className="overflow-x-auto rounded-md border">
               <table className="w-full text-sm">
                 <thead className="bg-muted">
                   <tr>
-                    <th className="px-4 py-2 text-left font-medium">Tag</th>
-                    <th className="px-4 py-2 text-right font-medium w-28">No período</th>
-                    <th className="px-4 py-2 text-right font-medium w-24">Histórico</th>
-                    <th className="px-4 py-2 text-right font-medium w-20">% período</th>
-                    <th className="px-4 py-2 text-left font-medium">Distribuição (histórico)</th>
+                    <th className="px-3 py-1.5 text-left text-xs font-medium">Tag</th>
+                    <th className="px-3 py-1.5 text-right text-xs font-medium w-24">Período</th>
+                    <th className="px-3 py-1.5 text-right text-xs font-medium w-20">Histórico</th>
+                    <th className="px-3 py-1.5 text-right text-xs font-medium w-16">%</th>
+                    <th className="px-3 py-1.5 text-left text-xs font-medium w-28">Dist.</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y">
                   {data.byTag.map((t, i) => (
                     <tr key={t.tag} className="hover:bg-muted/50">
-                      <td className="px-4 py-3 font-medium">{t.tag}</td>
-                      <td className="px-4 py-3 text-right tabular-nums">
+                      <td className="px-3 py-1.5 font-medium text-xs">{t.tag}</td>
+                      <td className="px-3 py-1.5 text-right tabular-nums text-xs">
                         {t.countPeriod > 0
                           ? t.countPeriod.toLocaleString('pt-BR')
                           : <span className="text-muted-foreground">0</span>}
                       </td>
-                      <td className="px-4 py-3 text-right tabular-nums text-muted-foreground">
+                      <td className="px-3 py-1.5 text-right tabular-nums text-xs text-muted-foreground">
                         {t.countAll.toLocaleString('pt-BR')}
                       </td>
-                      <td className="px-4 py-3 text-right tabular-nums text-muted-foreground">
+                      <td className="px-3 py-1.5 text-right tabular-nums text-xs text-muted-foreground">
                         {data.totalUnique > 0 && t.countPeriod > 0
                           ? formatPercent((t.countPeriod / data.totalUnique) * 100)
                           : '—'}
                       </td>
-                      <td className="px-4 py-3">
-                        <div className="h-2 rounded-full bg-muted overflow-hidden">
+                      <td className="px-3 py-1.5">
+                        <div className="h-1.5 rounded-full bg-muted overflow-hidden">
                           <div
                             className="h-full rounded-full"
                             style={{
@@ -375,54 +361,24 @@ export default function TabLancamento({ token, enabled }: Props) {
                       </td>
                     </tr>
                   ))}
-
-                  {/* Linha de soma + sobreposição */}
-                  <tr className="bg-muted/30 font-medium">
-                    <td className="px-4 py-2 text-muted-foreground">Soma bruta (período)</td>
-                    <td className="px-4 py-2 text-right tabular-nums text-muted-foreground">
-                      {data.sumByTag.toLocaleString('pt-BR')}
-                    </td>
-                    <td colSpan={3} />
-                  </tr>
                   {data.overlap > 0 && (
-                    <tr className="text-destructive/80">
-                      <td className="px-4 py-2 flex items-center gap-1.5">
-                        <AlertTriangle className="h-3.5 w-3.5" />
-                        Sobreposição (leads em múltiplas tags)
-                      </td>
-                      <td className="px-4 py-2 text-right tabular-nums">
-                        -{data.overlap.toLocaleString('pt-BR')}
+                    <tr className="bg-muted/20 text-xs text-muted-foreground">
+                      <td className="px-3 py-1 italic" colSpan={2}>
+                        Sobreposição: -{data.overlap.toLocaleString('pt-BR')} · Total único período: <strong style={{ color: CHART_COLORS[1] }}>{data.totalUnique.toLocaleString('pt-BR')}</strong>
                       </td>
                       <td colSpan={3} />
                     </tr>
                   )}
-                  <tr className="border-t-2 font-bold text-base">
-                    <td className="px-4 py-2">Total único (período)</td>
-                    <td className="px-4 py-2 text-right tabular-nums" style={{ color: CHART_COLORS[1] }}>
-                      {data.totalUnique.toLocaleString('pt-BR')}
-                    </td>
-                    <td colSpan={3} />
-                  </tr>
                 </tbody>
               </table>
             </div>
-
-            {data.overlap > 0 && (
-              <p className="mt-2 flex items-start gap-1.5 text-xs text-muted-foreground">
-                <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                {data.overlap.toLocaleString('pt-BR')} leads aparecem em mais de uma tag. O total único ({data.totalUnique.toLocaleString('pt-BR')}) usa <strong>DISTINCT lead_id</strong> para evitar essa contagem dupla.
-              </p>
-            )}
           </div>
 
           {/* Gráfico de leads por dia */}
           {data.leadsByDay.length > 0 && (
             <div>
-              <SectionHeader
-                title="Captação diária (leads únicos)"
-                description="Data do primeiro registro do lead em qualquer tag deste lançamento."
-              />
-              <ResponsiveContainer width="100%" height={240}>
+              <p className="mb-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide">Captação diária</p>
+              <ResponsiveContainer width="100%" height={160}>
                 <LineChart data={data.leadsByDay}>
                   <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
                   <XAxis
