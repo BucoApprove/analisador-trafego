@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect } from 'react'
 import type { LaunchData, TagsListData } from './types'
 import {
-  KpiCard, SectionHeader, TabLoading, TabError,
+  SectionHeader, TabLoading, TabError,
   formatPercent, ChartTooltip, CHART_COLORS,
 } from './components'
 import {
@@ -238,170 +238,137 @@ export default function TabLancamento({ token, enabled }: Props) {
       {/* Resultados */}
       {status === 'idle' && data && (
         <>
-          {/* KPI principal */}
-          <div>
-            <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
-              <h2 className="text-base font-semibold">
+          {/* Painel resumo — KPIs + tags + gráfico agrupados */}
+          <div className="rounded-lg border bg-card overflow-hidden">
+
+            {/* Cabeçalho + stat strip */}
+            <div className="flex flex-wrap items-center justify-between gap-x-4 px-4 py-2 border-b bg-muted/40">
+              <span className="text-sm font-semibold">
                 Lançamento: <span style={{ color: CHART_COLORS[1] }}>{data.prefix}</span>
-              </h2>
+              </span>
               <span className="text-xs text-muted-foreground">{data.dateRange.since} → {data.dateRange.until}</span>
             </div>
-            <div className="flex flex-wrap gap-px rounded-lg border overflow-hidden">
+            <div className="flex flex-wrap gap-px border-b">
               {([
-                { label: 'Total leads', value: data.totalUniqueAll.toLocaleString('pt-BR'), color: CHART_COLORS[1], sub: 'histórico total' },
-                { label: 'No período', value: data.totalUnique.toLocaleString('pt-BR'), color: CHART_COLORS[0], sub: `${data.dateRange.since} → ${data.dateRange.until}` },
+                { label: 'Total leads', value: data.totalUniqueAll.toLocaleString('pt-BR'), color: CHART_COLORS[1], sub: 'histórico' },
+                { label: 'No período', value: data.totalUnique.toLocaleString('pt-BR'), color: CHART_COLORS[0], sub: data.dateRange.since + ' → ' + data.dateRange.until },
                 { label: 'Soma bruta', value: data.sumByTag.toLocaleString('pt-BR'), color: '#888', sub: 'c/ duplicatas' },
-                { label: 'Sobreposição', value: (data.overlap > 0 ? data.overlap.toLocaleString('pt-BR') : '0'), color: data.overlap > 0 ? '#c17c74' : '#7c9885', sub: 'leads em múltiplas tags' },
+                { label: 'Sobreposição', value: data.overlap > 0 ? data.overlap.toLocaleString('pt-BR') : '0', color: data.overlap > 0 ? '#c17c74' : '#7c9885', sub: 'em múltiplas tags' },
               ] as const).map(s => (
-                <div key={s.label} className="flex-1 min-w-[110px] bg-card px-4 py-2.5">
-                  <p className="text-[11px] text-muted-foreground">{s.label}</p>
-                  <p className="text-xl font-bold tabular-nums" style={{ color: s.color }}>{s.value}</p>
-                  <p className="text-[10px] text-muted-foreground truncate">{s.sub}</p>
+                <div key={s.label} className="flex-1 min-w-[100px] px-4 py-2">
+                  <p className="text-[10px] text-muted-foreground">{s.label}</p>
+                  <p className="text-lg font-bold tabular-nums leading-tight" style={{ color: s.color }}>{s.value}</p>
+                  <p className="text-[9px] text-muted-foreground truncate">{s.sub}</p>
                 </div>
               ))}
             </div>
 
-            {/* CPL row — só aparece quando spendFilter foi usado */}
-            {data.metaSpend !== undefined && (
-              <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                <KpiCard
-                  label="Gasto Meta Ads"
-                  value={`R$ ${data.metaSpend.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
-                  color={CHART_COLORS[3]}
-                  sub={`${data.metaCampaigns?.length ?? 0} campanha(s) encontrada(s)`}
-                />
-                <KpiCard
-                  label="CPL (custo por lead)"
-                  value={
-                    data.cpl != null
-                      ? `R$ ${data.cpl.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                      : '—'
-                  }
-                  color={CHART_COLORS[4]}
-                  sub="gasto ÷ leads únicos no período"
-                />
-                {data.metaSpend === 0 && (
-                  <div className="flex items-center gap-2 rounded-lg border border-yellow-200 bg-yellow-50 p-3 text-xs text-yellow-800 dark:border-yellow-800 dark:bg-yellow-950 dark:text-yellow-200">
-                    <AlertTriangle className="h-4 w-4 shrink-0" />
-                    Nenhuma campanha encontrada com os termos informados. Verifique o filtro ou o período.
-                  </div>
-                )}
-              </div>
-            )}
+            {/* Tags + gráfico lado a lado */}
+            <div className="grid lg:grid-cols-2 divide-y lg:divide-y-0 lg:divide-x">
 
-            {/* Lista das campanhas que casaram */}
-            {(data.metaCampaigns?.length ?? 0) > 0 && (
-              <div className="mt-4">
-                <p className="mb-2 text-xs font-medium text-muted-foreground">Campanhas incluídas no cálculo:</p>
-                <div className="overflow-x-auto rounded-md border">
-                  <table className="w-full text-xs">
-                    <thead className="bg-muted">
-                      <tr>
-                        <th className="px-3 py-1.5 text-left font-medium">Campanha</th>
-                        <th className="px-3 py-1.5 text-right font-medium">Gasto</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y">
-                      {data.metaCampaigns!.map(c => (
-                        <tr key={c.name} className="hover:bg-muted/50">
-                          <td className="px-3 py-1.5">{c.name}</td>
-                          <td className="px-3 py-1.5 text-right tabular-nums">
-                            R$ {c.spend.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Detalhamento por tag */}
-          <div>
-            <p className="mb-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide">Leads por tag</p>
-            <div className="overflow-x-auto rounded-md border">
-              <table className="w-full text-sm">
-                <thead className="bg-muted">
+              {/* Tabela de tags */}
+              <table className="w-full text-xs">
+                <thead className="bg-muted/60">
                   <tr>
-                    <th className="px-3 py-1.5 text-left text-xs font-medium">Tag</th>
-                    <th className="px-3 py-1.5 text-right text-xs font-medium w-24">Período</th>
-                    <th className="px-3 py-1.5 text-right text-xs font-medium w-20">Histórico</th>
-                    <th className="px-3 py-1.5 text-right text-xs font-medium w-16">%</th>
-                    <th className="px-3 py-1.5 text-left text-xs font-medium w-28">Dist.</th>
+                    <th className="px-3 py-1 text-left font-medium">Tag</th>
+                    <th className="px-3 py-1 text-right font-medium">Período</th>
+                    <th className="px-3 py-1 text-right font-medium">Histórico</th>
+                    <th className="px-2 py-1 w-20"></th>
                   </tr>
                 </thead>
                 <tbody className="divide-y">
                   {data.byTag.map((t, i) => (
-                    <tr key={t.tag} className="hover:bg-muted/50">
-                      <td className="px-3 py-1.5 font-medium text-xs">{t.tag}</td>
-                      <td className="px-3 py-1.5 text-right tabular-nums text-xs">
-                        {t.countPeriod > 0
-                          ? t.countPeriod.toLocaleString('pt-BR')
-                          : <span className="text-muted-foreground">0</span>}
+                    <tr key={t.tag} className="hover:bg-muted/40">
+                      <td className="px-3 py-1 font-medium truncate max-w-[160px]" title={t.tag}>{t.tag}</td>
+                      <td className="px-3 py-1 text-right tabular-nums">
+                        {t.countPeriod > 0 ? t.countPeriod.toLocaleString('pt-BR') : <span className="text-muted-foreground">0</span>}
                       </td>
-                      <td className="px-3 py-1.5 text-right tabular-nums text-xs text-muted-foreground">
-                        {t.countAll.toLocaleString('pt-BR')}
-                      </td>
-                      <td className="px-3 py-1.5 text-right tabular-nums text-xs text-muted-foreground">
-                        {data.totalUnique > 0 && t.countPeriod > 0
-                          ? formatPercent((t.countPeriod / data.totalUnique) * 100)
-                          : '—'}
-                      </td>
-                      <td className="px-3 py-1.5">
+                      <td className="px-3 py-1 text-right tabular-nums text-muted-foreground">{t.countAll.toLocaleString('pt-BR')}</td>
+                      <td className="px-2 py-1">
                         <div className="h-1.5 rounded-full bg-muted overflow-hidden">
-                          <div
-                            className="h-full rounded-full"
-                            style={{
-                              width: `${(t.countAll / maxTagCount) * 100}%`,
-                              backgroundColor: CHART_COLORS[i % CHART_COLORS.length],
-                            }}
-                          />
+                          <div className="h-full rounded-full" style={{ width: `${(t.countAll / maxTagCount) * 100}%`, backgroundColor: CHART_COLORS[i % CHART_COLORS.length] }} />
                         </div>
                       </td>
                     </tr>
                   ))}
                   {data.overlap > 0 && (
-                    <tr className="bg-muted/20 text-xs text-muted-foreground">
-                      <td className="px-3 py-1 italic" colSpan={2}>
-                        Sobreposição: -{data.overlap.toLocaleString('pt-BR')} · Total único período: <strong style={{ color: CHART_COLORS[1] }}>{data.totalUnique.toLocaleString('pt-BR')}</strong>
+                    <tr className="bg-muted/20">
+                      <td className="px-3 py-1 text-[10px] text-muted-foreground italic" colSpan={4}>
+                        sobreposição −{data.overlap.toLocaleString('pt-BR')} · único período: <strong style={{ color: CHART_COLORS[1] }}>{data.totalUnique.toLocaleString('pt-BR')}</strong>
                       </td>
-                      <td colSpan={3} />
                     </tr>
                   )}
                 </tbody>
               </table>
+
+              {/* Gráfico captação diária */}
+              {data.leadsByDay.length > 0 ? (
+                <div className="p-3">
+                  <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1">Captação diária</p>
+                  <ResponsiveContainer width="100%" height={120}>
+                    <LineChart data={data.leadsByDay} margin={{ top: 2, right: 8, left: -24, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
+                      <XAxis dataKey="date" tick={{ fontSize: 9 }} tickFormatter={v => v.slice(5)} />
+                      <YAxis tick={{ fontSize: 9 }} allowDecimals={false} />
+                      <Tooltip content={<ChartTooltip />} />
+                      <Line type="monotone" dataKey="count" name="Leads" stroke={CHART_COLORS[1]} strokeWidth={2} dot={false} activeDot={{ r: 3 }} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              ) : (
+                <div className="flex items-center justify-center p-6 text-xs text-muted-foreground">Sem dados de captação no período</div>
+              )}
+
             </div>
           </div>
 
-          {/* Gráfico de leads por dia */}
-          {data.leadsByDay.length > 0 && (
-            <div>
-              <p className="mb-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide">Captação diária</p>
-              <ResponsiveContainer width="100%" height={160}>
-                <LineChart data={data.leadsByDay}>
-                  <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
-                  <XAxis
-                    dataKey="date"
-                    tick={{ fontSize: 10 }}
-                    tickFormatter={v => v.slice(5)}
-                  />
-                  <YAxis tick={{ fontSize: 11 }} allowDecimals={false} />
-                  <Tooltip content={<ChartTooltip />} />
-                  <Line
-                    type="monotone"
-                    dataKey="count"
-                    name="Leads"
-                    stroke={CHART_COLORS[1]}
-                    strokeWidth={2}
-                    dot={false}
-                    activeDot={{ r: 4 }}
-                  />
-                </LineChart>
-              </ResponsiveContainer>
+          {/* CPL row — só aparece quando spendFilter foi usado */}
+          {data.metaSpend !== undefined && (
+            <div className="rounded-lg border bg-card overflow-hidden">
+              <div className="flex flex-wrap gap-px border-b">
+                <div className="flex-1 min-w-[130px] px-4 py-2">
+                  <p className="text-[10px] text-muted-foreground">Gasto Meta Ads</p>
+                  <p className="text-lg font-bold tabular-nums" style={{ color: CHART_COLORS[3] }}>
+                    R$ {data.metaSpend.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </p>
+                  <p className="text-[9px] text-muted-foreground">{data.metaCampaigns?.length ?? 0} campanha(s)</p>
+                </div>
+                <div className="flex-1 min-w-[130px] px-4 py-2">
+                  <p className="text-[10px] text-muted-foreground">CPL</p>
+                  <p className="text-lg font-bold tabular-nums" style={{ color: CHART_COLORS[4] }}>
+                    {data.cpl != null ? `R$ ${data.cpl.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}
+                  </p>
+                  <p className="text-[9px] text-muted-foreground">gasto ÷ leads únicos</p>
+                </div>
+                {data.metaSpend === 0 && (
+                  <div className="flex items-center gap-2 px-4 py-2 text-xs text-yellow-700 dark:text-yellow-300">
+                    <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                    Nenhuma campanha encontrada. Verifique o filtro ou o período.
+                  </div>
+                )}
+              </div>
+              {(data.metaCampaigns?.length ?? 0) > 0 && (
+                <table className="w-full text-xs">
+                  <thead className="bg-muted/60">
+                    <tr>
+                      <th className="px-3 py-1 text-left font-medium">Campanha</th>
+                      <th className="px-3 py-1 text-right font-medium">Gasto</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {data.metaCampaigns!.map(c => (
+                      <tr key={c.name} className="hover:bg-muted/40">
+                        <td className="px-3 py-1">{c.name}</td>
+                        <td className="px-3 py-1 text-right tabular-nums">
+                          R$ {c.spend.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
             </div>
           )}
-
           {/* UTM breakdown */}
           <div>
             <SectionHeader
