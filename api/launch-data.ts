@@ -257,7 +257,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
               // 2) Gasto por anúncio no período
               const aiUrl = new URL(`https://graph.facebook.com/v19.0/${adAccount}/insights`)
-              aiUrl.searchParams.set('fields', 'ad_id,spend')
+              aiUrl.searchParams.set('fields', 'ad_id,ad_name,spend')
               aiUrl.searchParams.set('time_range', timeRange)
               aiUrl.searchParams.set('level', 'ad')
               aiUrl.searchParams.set('filtering', filtering)
@@ -265,9 +265,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               aiUrl.searchParams.set('access_token', accessToken)
 
               // 3) url_tags de cada anúncio (contém os UTM params)
-              // Tenta: url_tags no anúncio > url_tags no criativo > link do criativo (UTMs na URL)
               const adsUrl = new URL(`https://graph.facebook.com/v19.0/${adAccount}/ads`)
-              adsUrl.searchParams.set('fields', 'id,url_tags,creative{url_tags,effective_object_story_spec{link_data{link,url_tags},video_data{call_to_action{value{link}}}}}')
+              adsUrl.searchParams.set('fields', 'id,url_tags,creative{url_tags,object_story_spec{link_data{link,url_tags}}}')
               adsUrl.searchParams.set('filtering', filtering)
               adsUrl.searchParams.set('limit', '500')
               adsUrl.searchParams.set('access_token', accessToken)
@@ -325,16 +324,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               }
               if (aiRes.ok && adsRes.ok) {
                 const aiData = await aiRes.json() as {
-                  data: Array<{ ad_id: string; spend: string }>
+                  data: Array<{ ad_id: string; ad_name?: string; spend: string }>
                 }
                 type MetaAd = {
                   id: string
                   url_tags?: string
                   creative?: {
                     url_tags?: string
-                    effective_object_story_spec?: {
+                    object_story_spec?: {
                       link_data?: { link?: string; url_tags?: string }
-                      video_data?: { call_to_action?: { value?: { link?: string } } }
                     }
                   }
                 }
@@ -351,14 +349,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     }
                   : null
 
-                // Map: ad_id → gasto
+                // Map: ad_id → {spend, ad_name}
                 const adSpend = new Map<string, number>()
+                const adName = new Map<string, string>()
                 for (const row of aiData.data ?? []) {
                   adSpend.set(row.ad_id, (adSpend.get(row.ad_id) ?? 0) + Number(row.spend ?? 0))
+                  if (row.ad_name) adName.set(row.ad_id, row.ad_name)
                 }
 
                 // Extrai UTM params de cada anúncio:
-                // Prioridade: ad.url_tags > creative.url_tags > URL completa do creative (query string)
+                // Prioridade: ad.url_tags > creative.url_tags > creative.object_story_spec URL > ad_name UTMs
                 const adUtms = new Map<string, URLSearchParams>()
                 for (const ad of adsData.data ?? []) {
                   let rawTags: string | undefined
@@ -367,17 +367,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     rawTags = ad.url_tags
                   } else if (ad.creative?.url_tags) {
                     rawTags = ad.creative.url_tags
-                  } else if (ad.creative?.effective_object_story_spec?.link_data?.url_tags) {
-                    rawTags = ad.creative.effective_object_story_spec.link_data.url_tags
+                  } else if (ad.creative?.object_story_spec?.link_data?.url_tags) {
+                    rawTags = ad.creative.object_story_spec.link_data.url_tags
                   } else {
-                    // Tenta extrair UTMs da URL de destino do criativo
-                    const linkUrl =
-                      ad.creative?.effective_object_story_spec?.link_data?.link ??
-                      ad.creative?.effective_object_story_spec?.video_data?.call_to_action?.value?.link
+                    const linkUrl = ad.creative?.object_story_spec?.link_data?.link
                     if (linkUrl) {
                       try {
                         const parsed = new URL(linkUrl)
-                        // Só usa se tiver ao menos um utm_
                         if (parsed.searchParams.has('utm_source') || parsed.searchParams.has('utm_medium')) {
                           adUtms.set(ad.id, parsed.searchParams)
                           continue
@@ -391,16 +387,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                   }
                 }
 
+                // Fallback: para anúncios sem UTMs no api, tenta parsear o ad_name
+                // Nomes como "[BA25][Captura][Teste] 01 [Env7d_Visit180d]" contêm info útil
+                // mas não mapeiam para utm_ fields — deixamos sem CPL nesse caso
+
                 _metaAdDebug.adsWithUtm = adUtms.size
 
                 // Agrega gasto por valor de UTM
+                const dims = ['source', 'medium', 'campaign', 'content', 'term'] as const
                 const utmSpend: Record<string, Record<string, number>> = {
                   source: {}, medium: {}, campaign: {}, content: {}, term: {},
                 }
-                const dims = ['source', 'medium', 'campaign', 'content', 'term'] as const
+                // Para anúncios sem url_tags, usa o ad_name como fallback para utm_content
+                // (seu padrão: utm_content = nome do anúncio, ex: BA25_Ad_Captura_22)
                 for (const [adId, spend] of adSpend) {
                   const utms = adUtms.get(adId)
-                  if (!utms) continue
+                  if (!utms) {
+                    // Fallback: ad_name → utm_content
+                    const name = adName.get(adId)
+                    if (name && spend > 0) {
+                      utmSpend['content'][name] = (utmSpend['content'][name] ?? 0) + spend
+                    }
+                    continue
+                  }
                   for (const dim of dims) {
                     const val = utms.get(`utm_${dim}`)
                     if (val) {
@@ -417,8 +426,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 }
 
               spendByUtm = utmSpend
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                ;(spendByUtm as any)._debug = _metaAdDebug
+                ;(spendByUtm as any)._debug = _metaAdDebug // eslint-disable-line @typescript-eslint/no-explicit-any
               } else {
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 _metaAdDebug.skipped = true
