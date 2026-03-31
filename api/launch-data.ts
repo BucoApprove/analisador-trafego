@@ -206,6 +206,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     let cpl: number | null = null
     let metaCampaigns: { name: string; spend: number }[] = []
     let dailyMeta: { date: string; spend: number; clicks: number; linkClicks: number; pageViews: number }[] = []
+    let spendByUtm: { source: Record<string, number>; medium: Record<string, number>; campaign: Record<string, number>; content: Record<string, number>; term: Record<string, number> } | undefined = undefined
 
     if (spendKeywords.length > 0) {
       const accessToken = process.env.META_ACCESS_TOKEN ?? ''
@@ -238,19 +239,44 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             metaSpend = Math.round(totalSpend * 100) / 100
             cpl = totalUniqueAll > 0 ? Math.round((metaSpend / totalUniqueAll) * 100) / 100 : null
 
-            // Busca breakdown diário para as campanhas encontradas
+            // Busca breakdown diário + gasto por anúncio (para CPL por UTM) em paralelo
             if (matchedIds.length > 0) {
               const filtering = JSON.stringify([{ field: 'campaign.id', operator: 'IN', value: matchedIds }])
+              const timeRange = JSON.stringify({ since, until })
+
+              // 1) Breakdown diário (gráfico/tabela)
               const dUrl = new URL(`https://graph.facebook.com/v19.0/${adAccount}/insights`)
               dUrl.searchParams.set('fields', 'date_start,spend,clicks,actions')
               dUrl.searchParams.set('time_increment', '1')
-              dUrl.searchParams.set('time_range', JSON.stringify({ since, until }))
+              dUrl.searchParams.set('time_range', timeRange)
               dUrl.searchParams.set('level', 'campaign')
               dUrl.searchParams.set('filtering', filtering)
               dUrl.searchParams.set('limit', '1000')
               dUrl.searchParams.set('access_token', accessToken)
 
-              const dRes = await fetch(dUrl.toString())
+              // 2) Gasto por anúncio no período
+              const aiUrl = new URL(`https://graph.facebook.com/v19.0/${adAccount}/insights`)
+              aiUrl.searchParams.set('fields', 'ad_id,spend')
+              aiUrl.searchParams.set('time_range', timeRange)
+              aiUrl.searchParams.set('level', 'ad')
+              aiUrl.searchParams.set('filtering', filtering)
+              aiUrl.searchParams.set('limit', '500')
+              aiUrl.searchParams.set('access_token', accessToken)
+
+              // 3) url_tags de cada anúncio (contém os UTM params)
+              const adsUrl = new URL(`https://graph.facebook.com/v19.0/${adAccount}/ads`)
+              adsUrl.searchParams.set('fields', 'id,url_tags')
+              adsUrl.searchParams.set('filtering', filtering)
+              adsUrl.searchParams.set('limit', '500')
+              adsUrl.searchParams.set('access_token', accessToken)
+
+              const [dRes, aiRes, adsRes] = await Promise.all([
+                fetch(dUrl.toString()),
+                fetch(aiUrl.toString()),
+                fetch(adsUrl.toString()),
+              ])
+
+              // Processa breakdown diário
               if (dRes.ok) {
                 const dData = await dRes.json() as {
                   data: Array<{
@@ -260,7 +286,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     actions?: Array<{ action_type: string; value: string }>
                   }>
                 }
-                // Agrega por data (soma todas as campanhas do dia)
                 const byDate = new Map<string, { spend: number; clicks: number; linkClicks: number; pageViews: number }>()
                 for (const row of dData.data ?? []) {
                   const d = row.date_start
@@ -283,6 +308,55 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     linkClicks: v.linkClicks,
                     pageViews: v.pageViews,
                   }))
+              }
+
+              // Processa gasto por UTM (ad-level)
+              if (aiRes.ok && adsRes.ok) {
+                const aiData = await aiRes.json() as {
+                  data: Array<{ ad_id: string; spend: string }>
+                }
+                const adsData = await adsRes.json() as {
+                  data: Array<{ id: string; url_tags?: string }>
+                }
+
+                // Map: ad_id → gasto
+                const adSpend = new Map<string, number>()
+                for (const row of aiData.data ?? []) {
+                  adSpend.set(row.ad_id, (adSpend.get(row.ad_id) ?? 0) + Number(row.spend ?? 0))
+                }
+
+                // Map: ad_id → UTM params
+                const adUtms = new Map<string, URLSearchParams>()
+                for (const ad of adsData.data ?? []) {
+                  if (ad.url_tags) {
+                    adUtms.set(ad.id, new URLSearchParams(ad.url_tags))
+                  }
+                }
+
+                // Agrega gasto por valor de UTM
+                const utmSpend: Record<string, Record<string, number>> = {
+                  source: {}, medium: {}, campaign: {}, content: {}, term: {},
+                }
+                const dims = ['source', 'medium', 'campaign', 'content', 'term'] as const
+                for (const [adId, spend] of adSpend) {
+                  const utms = adUtms.get(adId)
+                  if (!utms) continue
+                  for (const dim of dims) {
+                    const val = utms.get(`utm_${dim}`)
+                    if (val) {
+                      utmSpend[dim][val] = (utmSpend[dim][val] ?? 0) + spend
+                    }
+                  }
+                }
+
+                // Arredonda
+                for (const dim of dims) {
+                  for (const key of Object.keys(utmSpend[dim])) {
+                    utmSpend[dim][key] = Math.round(utmSpend[dim][key] * 100) / 100
+                  }
+                }
+
+                spendByUtm = utmSpend
               }
             }
           }
@@ -326,7 +400,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         value: parseInt(r.value ?? '0'),
       })),
       dateRange: { since, until },
-      ...(metaSpend !== null ? { metaSpend, cpl, metaCampaigns, dailyMeta } : {}),
+      ...(metaSpend !== null ? { metaSpend, cpl, metaCampaigns, dailyMeta, ...(spendByUtm ? { spendByUtm } : {}) } : {}),
     })
   } catch (err) {
     console.error('launch-data error:', err)

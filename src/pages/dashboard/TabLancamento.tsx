@@ -13,18 +13,31 @@ import { Search, AlertTriangle } from 'lucide-react'
 interface Props { token: string; enabled: boolean }
 
 // ---------- helper local ----------
+function makeGetCpl(map: Record<string, number> | undefined) {
+  if (!map) return undefined
+  return (name: string, leads: number): number | null => {
+    const spend = map[name]
+    if (spend == null || leads === 0) return null
+    return Math.round((spend / leads) * 100) / 100
+  }
+}
+
 function UtmTable({
   title,
   rows,
   total,
   color,
   hint,
+  getCpl,
+  cplNote,
 }: {
   title: string
   rows: { name: string; value: number }[]
   total: number
   color: string
   hint?: string
+  getCpl?: (name: string, leads: number) => number | null
+  cplNote?: string
 }) {
   const maxVal = Math.max(...rows.map(r => r.value), 1)
   return (
@@ -37,30 +50,44 @@ function UtmTable({
               <th className="px-3 py-2 text-left font-medium">Valor</th>
               <th className="px-3 py-2 text-right font-medium">Leads</th>
               <th className="px-3 py-2 text-right font-medium">%</th>
+              {getCpl && <th className="px-3 py-2 text-right font-medium">CPL</th>}
               <th className="px-3 py-2 w-28"></th>
             </tr>
           </thead>
           <tbody className="divide-y">
-            {rows.map(r => (
-              <tr key={r.name} className="hover:bg-muted/50">
-                <td className="px-3 py-2 max-w-[180px] truncate" title={r.name}>{r.name}</td>
-                <td className="px-3 py-2 text-right tabular-nums">{r.value.toLocaleString('pt-BR')}</td>
-                <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">
-                  {total > 0 ? formatPercent((r.value / total) * 100) : '—'}
-                </td>
-                <td className="px-3 py-2">
-                  <div className="h-2 rounded-full bg-muted overflow-hidden">
-                    <div
-                      className="h-full rounded-full"
-                      style={{ width: `${(r.value / maxVal) * 100}%`, backgroundColor: color }}
-                    />
-                  </div>
-                </td>
-              </tr>
-            ))}
+            {rows.map(r => {
+              const cpl = getCpl ? getCpl(r.name, r.value) : null
+              return (
+                <tr key={r.name} className="hover:bg-muted/50">
+                  <td className="px-3 py-2 max-w-[180px] truncate" title={r.name}>{r.name}</td>
+                  <td className="px-3 py-2 text-right tabular-nums">{r.value.toLocaleString('pt-BR')}</td>
+                  <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">
+                    {total > 0 ? formatPercent((r.value / total) * 100) : '—'}
+                  </td>
+                  {getCpl && (
+                    <td className="px-3 py-2 text-right tabular-nums">
+                      {cpl != null
+                        ? `R$ ${cpl.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                        : <span className="text-muted-foreground text-xs">—</span>}
+                    </td>
+                  )}
+                  <td className="px-3 py-2">
+                    <div className="h-2 rounded-full bg-muted overflow-hidden">
+                      <div
+                        className="h-full rounded-full"
+                        style={{ width: `${(r.value / maxVal) * 100}%`, backgroundColor: color }}
+                      />
+                    </div>
+                  </td>
+                </tr>
+              )
+            })}
           </tbody>
         </table>
       </div>
+      {getCpl && cplNote && (
+        <p className="mt-1.5 text-[10px] text-muted-foreground">{cplNote}</p>
+      )}
     </div>
   )
 }
@@ -385,6 +412,8 @@ export default function TabLancamento({ token, enabled }: Props) {
                   rows={data.bySource}
                   total={data.totalUnique}
                   color={CHART_COLORS[0]}
+                  getCpl={makeGetCpl(data.spendByUtm?.source)}
+                  cplNote="CPL calculado a partir do gasto real dos anúncios com esse utm_source no período."
                 />
               )}
 
@@ -396,6 +425,8 @@ export default function TabLancamento({ token, enabled }: Props) {
                   total={data.totalUnique}
                   color={CHART_COLORS[1]}
                   hint="Identifica o tipo de canal: cpc, social, email, organic…"
+                  getCpl={makeGetCpl(data.spendByUtm?.medium)}
+                  cplNote="CPL calculado a partir do gasto real dos anúncios com esse utm_medium no período."
                 />
               )}
 
@@ -406,8 +437,11 @@ export default function TabLancamento({ token, enabled }: Props) {
                   rows={data.byCampaign}
                   total={data.totalUnique}
                   color={CHART_COLORS[2]}
+                  getCpl={makeGetCpl(data.spendByUtm?.campaign)}
+                  cplNote="CPL calculado a partir do gasto real dos anúncios com esse utm_campaign no período."
                 />
               )}
+
 
               {/* utm_content */}
               {data.byContent.filter(r => r.name !== '(não informado)').length > 0 && (
@@ -417,6 +451,8 @@ export default function TabLancamento({ token, enabled }: Props) {
                   total={data.totalUnique}
                   color={CHART_COLORS[3]}
                   hint="Diferencia criativos ou links dentro da mesma campanha."
+                  getCpl={makeGetCpl(data.spendByUtm?.content)}
+                  cplNote="CPL calculado a partir do gasto real dos anúncios com esse utm_content no período."
                 />
               )}
 
@@ -428,6 +464,8 @@ export default function TabLancamento({ token, enabled }: Props) {
                   total={data.totalUnique}
                   color={CHART_COLORS[4]}
                   hint="Palavras-chave pagas ou termos de pesquisa."
+                  getCpl={makeGetCpl(data.spendByUtm?.term)}
+                  cplNote="CPL calculado a partir do gasto real dos anúncios com esse utm_term no período."
                 />
               )}
 
