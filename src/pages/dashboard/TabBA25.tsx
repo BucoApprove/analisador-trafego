@@ -319,35 +319,67 @@ export default function TabBA25({ token, enabled }: Props) {
 
           {/* Metas × Realizado */}
           {goals && (() => {
+            // Leads realizados por tag exata (metas de leads)
+            function leadsForTag(tag: string) {
+              return data!.byTag.find(t => t.tag === tag)?.countPeriod ?? 0
+            }
+            const leadsTrafico  = leadsForTag('BA25-Captura-Tráfego')
+            const leadsOrganico = leadsForTag('BA25-Captura-Orgânico')
+            const leadsManychat = leadsForTag('BA25-Captura-Manychat')
+            const totalLeadsRealizados = leadsTrafico + leadsOrganico + leadsManychat
             const totalMetaLeads = goals.metaLeadsTrafico + goals.metaLeadsOrganico + goals.metaLeadsManychat
 
-            // Leads por tag: soma countPeriod das tags que contêm cada palavra-chave
+            // Gasto por fase: filtragem composta case-insensitive sobre utm_campaign
+            function spendFor(predicate: (name: string) => boolean) {
+              if (!data!.spendByUtm?.campaign) return null
+              return Object.entries(data!.spendByUtm.campaign)
+                .filter(([k]) => predicate(k.toLowerCase()))
+                .reduce((s, [, v]) => s + v, 0)
+            }
+
+            // Leads por tag keyword (coluna "Leads (tag)" da tabela de fases)
             function leadsForKeyword(keyword: string) {
               return data!.byTag
                 .filter(t => t.tag.toLowerCase().includes(keyword.toLowerCase()))
                 .reduce((s, t) => s + t.countPeriod, 0)
             }
 
-            // Gasto por fase: soma spend das campanhas (utm_campaign) que contêm a palavra-chave
-            function spendForKeyword(keyword: string) {
-              if (!data!.spendByUtm?.campaign) return null
-              return Object.entries(data!.spendByUtm.campaign)
-                .filter(([k]) => k.toLowerCase().includes(keyword.toLowerCase()))
-                .reduce((s, [, v]) => s + v, 0)
-            }
-
-            const leadsCaptacao = leadsForKeyword(goals.tagsReferencia.captura)
-            const leadsDescoberta = leadsForKeyword(goals.tagsReferencia.descoberta)
-            const leadsAquecimento = leadsForKeyword(goals.tagsReferencia.aquecimento)
-            const leadsLembrete = leadsForKeyword(goals.tagsReferencia.lembrete)
-            const leadsRemarketingTag = leadsForKeyword(goals.tagsReferencia.remarketing)
-
             const fases = [
-              { label: 'Captura', keyword: goals.tagsReferencia.captura, orcamento: goals.orcamentoPorFase.captura, leads: leadsCaptacao },
-              { label: 'Descoberta', keyword: goals.tagsReferencia.descoberta, orcamento: goals.orcamentoPorFase.descoberta, leads: leadsDescoberta },
-              { label: 'Aquecimento', keyword: goals.tagsReferencia.aquecimento, orcamento: goals.orcamentoPorFase.aquecimento, leads: leadsAquecimento },
-              { label: 'Lembrete', keyword: goals.tagsReferencia.lembrete, orcamento: goals.orcamentoPorFase.lembrete, leads: leadsLembrete },
-              { label: 'Remarketing', keyword: goals.tagsReferencia.remarketing, orcamento: goals.orcamentoPorFase.remarketing, leads: leadsRemarketingTag },
+              {
+                label: 'Captura',
+                keyword: goals.tagsReferencia.captura,
+                orcamento: goals.orcamentoPorFase.captura,
+                leads: leadsForKeyword(goals.tagsReferencia.captura),
+                spendFn: (k: string) => k.includes('ba25') && k.includes('captura') && !k.includes('engajamento'),
+              },
+              {
+                label: 'Descoberta',
+                keyword: goals.tagsReferencia.descoberta,
+                orcamento: goals.orcamentoPorFase.descoberta,
+                leads: leadsForKeyword(goals.tagsReferencia.descoberta),
+                spendFn: (k: string) => k.includes('instagram'),
+              },
+              {
+                label: 'Aquecimento',
+                keyword: goals.tagsReferencia.aquecimento,
+                orcamento: goals.orcamentoPorFase.aquecimento,
+                leads: leadsForKeyword(goals.tagsReferencia.aquecimento),
+                spendFn: (k: string) => k.includes('engajamento'),
+              },
+              {
+                label: 'Lembrete',
+                keyword: goals.tagsReferencia.lembrete,
+                orcamento: goals.orcamentoPorFase.lembrete,
+                leads: leadsForKeyword(goals.tagsReferencia.lembrete),
+                spendFn: (k: string) => k.includes('lembrete'),
+              },
+              {
+                label: 'Remarketing',
+                keyword: goals.tagsReferencia.remarketing,
+                orcamento: goals.orcamentoPorFase.remarketing,
+                leads: leadsForKeyword(goals.tagsReferencia.remarketing),
+                spendFn: (k: string) => k.includes('remarketing'),
+              },
             ]
 
             const brl = (v: number) => v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -395,10 +427,10 @@ export default function TabBA25({ token, enabled }: Props) {
                     </thead>
                     <tbody className="divide-y">
                       {[
-                        { label: 'Total (tráfego + orgânico + manychat)', meta: totalMetaLeads, real: data!.totalUnique, color: CHART_COLORS[0] },
-                        { label: `Tráfego pago (Meta Ads)`, meta: goals.metaLeadsTrafico, real: leadsCaptacao, color: CHART_COLORS[1] },
-                        { label: `Orgânico`, meta: goals.metaLeadsOrganico, real: leadsDescoberta, color: CHART_COLORS[2] },
-                        { label: `ManyChat`, meta: goals.metaLeadsManychat, real: leadsAquecimento + leadsLembrete, color: CHART_COLORS[3] },
+                        { label: 'Total (tráfego + orgânico + manychat)', meta: totalMetaLeads, real: totalLeadsRealizados, color: CHART_COLORS[0] },
+                        { label: 'Tráfego pago (Meta Ads)', meta: goals.metaLeadsTrafico, real: leadsTrafico, color: CHART_COLORS[1] },
+                        { label: 'Orgânico', meta: goals.metaLeadsOrganico, real: leadsOrganico, color: CHART_COLORS[2] },
+                        { label: 'ManyChat', meta: goals.metaLeadsManychat, real: leadsManychat, color: CHART_COLORS[3] },
                       ].map(row => (
                         <tr key={row.label} className="hover:bg-muted/40">
                           <td className="px-3 py-2 font-medium">{row.label}</td>
@@ -436,7 +468,7 @@ export default function TabBA25({ token, enabled }: Props) {
                     </thead>
                     <tbody className="divide-y">
                       {fases.map((fase, i) => {
-                        const gasto = spendForKeyword(fase.keyword) ?? 0
+                        const gasto = spendFor(fase.spendFn) ?? 0
                         const cplFase = gasto > 0 && fase.leads > 0 ? gasto / fase.leads : null
                         return (
                           <tr key={fase.label} className="hover:bg-muted/40">
