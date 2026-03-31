@@ -255,26 +255,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               dUrl.searchParams.set('limit', '1000')
               dUrl.searchParams.set('access_token', accessToken)
 
-              // 2) Gasto por anúncio no período
+              // 2) Gasto por anúncio no período — inclui nomes para mapear UTMs
+              // utm_campaign = campaign_name, utm_medium = adset_name, utm_content = ad_name
               const aiUrl = new URL(`https://graph.facebook.com/v19.0/${adAccount}/insights`)
-              aiUrl.searchParams.set('fields', 'ad_id,ad_name,spend')
+              aiUrl.searchParams.set('fields', 'ad_id,ad_name,adset_name,campaign_name,spend')
               aiUrl.searchParams.set('time_range', timeRange)
               aiUrl.searchParams.set('level', 'ad')
               aiUrl.searchParams.set('filtering', filtering)
               aiUrl.searchParams.set('limit', '500')
               aiUrl.searchParams.set('access_token', accessToken)
 
-              // 3) url_tags de cada anúncio (contém os UTM params)
-              const adsUrl = new URL(`https://graph.facebook.com/v19.0/${adAccount}/ads`)
-              adsUrl.searchParams.set('fields', 'id,url_tags,creative{url_tags,object_story_spec{link_data{link,url_tags}}}')
-              adsUrl.searchParams.set('filtering', filtering)
-              adsUrl.searchParams.set('limit', '500')
-              adsUrl.searchParams.set('access_token', accessToken)
-
-              const [dRes, aiRes, adsRes] = await Promise.all([
+              const [dRes, aiRes] = await Promise.all([
                 fetch(dUrl.toString()),
                 fetch(aiUrl.toString()),
-                fetch(adsUrl.toString()),
               ])
 
               // Processa breakdown diário
@@ -311,129 +304,48 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                   }))
               }
 
-              // Processa gasto por UTM (ad-level)
+              // Processa gasto por UTM via nomes Meta → utm_campaign/medium/content
               if (!aiRes.ok) {
                 const errTxt = await aiRes.text()
                 console.error('Meta ad insights failed:', aiRes.status, errTxt)
                 _metaAdDebug.aiError = `${aiRes.status}: ${errTxt.substring(0, 200)}`
-              }
-              if (!adsRes.ok) {
-                const errTxt = await adsRes.text()
-                console.error('Meta ads fetch failed:', adsRes.status, errTxt)
-                _metaAdDebug.adsError = `${adsRes.status}: ${errTxt.substring(0, 200)}`
-              }
-              if (aiRes.ok && adsRes.ok) {
+              } else {
                 const aiData = await aiRes.json() as {
-                  data: Array<{ ad_id: string; ad_name?: string; spend: string }>
+                  data: Array<{ ad_id: string; ad_name?: string; adset_name?: string; campaign_name?: string; spend: string }>
                 }
-                type MetaAd = {
-                  id: string
-                  url_tags?: string
-                  creative?: {
-                    url_tags?: string
-                    object_story_spec?: {
-                      link_data?: { link?: string; url_tags?: string }
-                    }
-                  }
-                }
-                const adsData = await adsRes.json() as { data: MetaAd[] }
-
                 _metaAdDebug.aiRows = aiData.data?.length ?? 0
-                _metaAdDebug.adsRows = adsData.data?.length ?? 0
-                _metaAdDebug.firstAd = adsData.data?.[0]
-                  ? {
-                      id: adsData.data[0].id,
-                      url_tags: adsData.data[0].url_tags,
-                      creative_url_tags: adsData.data[0].creative?.url_tags,
-                      link: adsData.data[0].creative?.effective_object_story_spec?.link_data?.link,
-                    }
-                  : null
+                _metaAdDebug.firstRow = aiData.data?.[0] ?? null
 
-                // Map: ad_id → {spend, ad_name}
-                const adSpend = new Map<string, number>()
-                const adName = new Map<string, string>()
-                for (const row of aiData.data ?? []) {
-                  adSpend.set(row.ad_id, (adSpend.get(row.ad_id) ?? 0) + Number(row.spend ?? 0))
-                  if (row.ad_name) adName.set(row.ad_id, row.ad_name)
-                }
-
-                // Extrai UTM params de cada anúncio:
-                // Prioridade: ad.url_tags > creative.url_tags > creative.object_story_spec URL > ad_name UTMs
-                const adUtms = new Map<string, URLSearchParams>()
-                for (const ad of adsData.data ?? []) {
-                  let rawTags: string | undefined
-
-                  if (ad.url_tags) {
-                    rawTags = ad.url_tags
-                  } else if (ad.creative?.url_tags) {
-                    rawTags = ad.creative.url_tags
-                  } else if (ad.creative?.object_story_spec?.link_data?.url_tags) {
-                    rawTags = ad.creative.object_story_spec.link_data.url_tags
-                  } else {
-                    const linkUrl = ad.creative?.object_story_spec?.link_data?.link
-                    if (linkUrl) {
-                      try {
-                        const parsed = new URL(linkUrl)
-                        if (parsed.searchParams.has('utm_source') || parsed.searchParams.has('utm_medium')) {
-                          adUtms.set(ad.id, parsed.searchParams)
-                          continue
-                        }
-                      } catch { /* URL inválida */ }
-                    }
-                  }
-
-                  if (rawTags) {
-                    adUtms.set(ad.id, new URLSearchParams(rawTags))
-                  }
-                }
-
-                // Fallback: para anúncios sem UTMs no api, tenta parsear o ad_name
-                // Nomes como "[BA25][Captura][Teste] 01 [Env7d_Visit180d]" contêm info útil
-                // mas não mapeiam para utm_ fields — deixamos sem CPL nesse caso
-
-                _metaAdDebug.adsWithUtm = adUtms.size
-
-                // Agrega gasto por valor de UTM
-                const dims = ['source', 'medium', 'campaign', 'content', 'term'] as const
                 const utmSpend: Record<string, Record<string, number>> = {
                   source: {}, medium: {}, campaign: {}, content: {}, term: {},
                 }
-                // Para anúncios sem url_tags, usa o ad_name como fallback para utm_content
-                // (seu padrão: utm_content = nome do anúncio, ex: BA25_Ad_Captura_22)
-                for (const [adId, spend] of adSpend) {
-                  const utms = adUtms.get(adId)
-                  if (!utms) {
-                    // Fallback: ad_name → utm_content
-                    const name = adName.get(adId)
-                    if (name && spend > 0) {
-                      utmSpend['content'][name] = (utmSpend['content'][name] ?? 0) + spend
-                    }
-                    continue
+
+                for (const row of aiData.data ?? []) {
+                  const spend = Number(row.spend ?? 0)
+                  if (!spend) continue
+                  // campaign_name  →  utm_campaign
+                  if (row.campaign_name) {
+                    utmSpend.campaign[row.campaign_name] = (utmSpend.campaign[row.campaign_name] ?? 0) + spend
                   }
-                  for (const dim of dims) {
-                    const val = utms.get(`utm_${dim}`)
-                    if (val) {
-                      utmSpend[dim][val] = (utmSpend[dim][val] ?? 0) + spend
-                    }
+                  // adset_name  →  utm_medium
+                  if (row.adset_name) {
+                    utmSpend.medium[row.adset_name] = (utmSpend.medium[row.adset_name] ?? 0) + spend
+                  }
+                  // ad_name  →  utm_content
+                  if (row.ad_name) {
+                    utmSpend.content[row.ad_name] = (utmSpend.content[row.ad_name] ?? 0) + spend
                   }
                 }
 
                 // Arredonda
-                for (const dim of dims) {
+                for (const dim of ['source', 'medium', 'campaign', 'content', 'term'] as const) {
                   for (const key of Object.keys(utmSpend[dim])) {
                     utmSpend[dim][key] = Math.round(utmSpend[dim][key] * 100) / 100
                   }
                 }
 
-              spendByUtm = utmSpend
-                ;(spendByUtm as any)._debug = _metaAdDebug // eslint-disable-line @typescript-eslint/no-explicit-any
-              } else {
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                _metaAdDebug.skipped = true
+                spendByUtm = utmSpend
               }
-              // Expõe _metaAdDebug no response para diagnóstico (remover após confirmar)
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              ;(res as any)._metaAdDebug = _metaAdDebug
             }
           }
         } catch (err) {
