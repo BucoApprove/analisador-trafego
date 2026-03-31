@@ -117,13 +117,24 @@ export default function TabBA25({ token, enabled }: Props) {
     setStatus('loading')
     setErrorMsg(null)
     try {
-      const url = `/api/launch-data?prefix=${encodeURIComponent(FIXED_PREFIX)}&since=${since}&until=${until}&spendFilter=${encodeURIComponent(FIXED_SPEND_FILTER)}&orFilter=${encodeURIComponent(FIXED_OR_FILTER)}&broadSearch=true`
-      const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } })
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}))
-        throw new Error(body.error ?? `Erro ${res.status}`)
+      const bqUrl = `/api/launch-data?prefix=${encodeURIComponent(FIXED_PREFIX)}&since=${since}&until=${until}&broadSearch=true`
+      const bqRes = await fetch(bqUrl, { headers: { Authorization: `Bearer ${token}` } })
+      if (!bqRes.ok) {
+        const body = await bqRes.json().catch(() => ({}))
+        throw new Error(body.error ?? `Erro ${bqRes.status}`)
       }
-      setData(await res.json())
+      const bqData: LaunchData = await bqRes.json()
+
+      // Busca Meta spend em paralelo após ter o totalUnique
+      const metaUrl = `/api/meta-spend?since=${since}&until=${until}&spendFilter=${encodeURIComponent(FIXED_SPEND_FILTER)}&orFilter=${encodeURIComponent(FIXED_OR_FILTER)}&totalLeads=${bqData.totalUnique}`
+      const metaRes = await fetch(metaUrl, { headers: { Authorization: `Bearer ${token}` } })
+      if (metaRes.ok) {
+        const metaData = await metaRes.json()
+        setData({ ...bqData, ...metaData })
+      } else {
+        setData(bqData)
+      }
+
       setStatus('idle')
     } catch (e) {
       setStatus('error')

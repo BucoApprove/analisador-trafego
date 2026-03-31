@@ -1,7 +1,8 @@
 {
   "version": 2,
   "functions": {
-    "api/launch-data.ts": { "maxDuration": 60 },
+    "api/launch-data.ts": { "maxDuration": 30 },
+    "api/meta-spend.ts": { "maxDuration": 30 },
     "api/dashboard-data.ts": { "maxDuration": 60 },
     "api/meta-ads-data.ts": { "maxDuration": 60 }
   },
