@@ -265,11 +265,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
               // 2) Gasto por anúncio no período — inclui nomes para mapear UTMs
               // utm_campaign = campaign_name, utm_medium = adset_name, utm_content = ad_name
+              // Filtra apenas por keyword no nome de campanha (evita lista grande de IDs que excede limite Meta)
+              const aiFiltering = JSON.stringify([{
+                field: 'campaign.name',
+                operator: 'CONTAIN',
+                value: spendKeywords[0] ?? prefix,
+              }])
               const aiUrl = new URL(`https://graph.facebook.com/v19.0/${adAccount}/insights`)
               aiUrl.searchParams.set('fields', 'ad_id,ad_name,adset_name,campaign_name,spend')
               aiUrl.searchParams.set('time_range', timeRange)
               aiUrl.searchParams.set('level', 'ad')
-              aiUrl.searchParams.set('filtering', filtering)
+              aiUrl.searchParams.set('filtering', aiFiltering)
               aiUrl.searchParams.set('limit', '500')
               aiUrl.searchParams.set('access_token', accessToken)
 
