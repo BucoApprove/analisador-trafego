@@ -171,6 +171,32 @@ export interface LeadsData {
   nextCursor?: string
 }
 
+// ─── Metas (planilha Google Sheets) ─────────────────────────────────────────
+
+export interface GoalsData {
+  metaLeadsTrafico: number
+  metaLeadsOrganico: number
+  metaLeadsManychat: number
+  orcamentoTotal: number
+  inicioCaptacao: string
+  finalCaptacao: string
+  orcamentoPorFase: {
+    captura: number
+    descoberta: number
+    aquecimento: number
+    lembrete: number
+    remarketing: number
+  }
+  tagsReferencia: {
+    lancamento: string
+    captura: string
+    descoberta: string
+    aquecimento: string
+    lembrete: string
+    remarketing: string
+  }
+}
+
 // ─── Tipos de estado do hook ─────────────────────────────────────────────────
 
 export type FetchStatus = 'idle' | 'loading' | 'success' | 'error'

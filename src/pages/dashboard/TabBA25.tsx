@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from 'react'
-import type { LaunchData } from './types'
+import type { LaunchData, GoalsData } from './types'
 import {
   SectionHeader, TabLoading, TabError,
   ChartTooltip, CHART_COLORS,
@@ -101,6 +101,16 @@ export default function TabBA25({ token, enabled }: Props) {
   const [data, setData] = useState<LaunchData | null>(null)
   const [status, setStatus] = useState<'idle' | 'loading' | 'error'>('idle')
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
+  const [goals, setGoals] = useState<GoalsData | null>(null)
+
+  const loadGoals = useCallback(async () => {
+    try {
+      const res = await fetch('/api/goals-data', { headers: { Authorization: `Bearer ${token}` } })
+      if (res.ok) setGoals(await res.json())
+    } catch {
+      // silencioso — metas são complementares
+    }
+  }, [token])
 
   const load = useCallback(async () => {
     setStatus('loading')
@@ -122,7 +132,10 @@ export default function TabBA25({ token, enabled }: Props) {
 
   // Auto-load quando a aba fica ativa
   useEffect(() => {
-    if (enabled) load()
+    if (enabled) {
+      load()
+      loadGoals()
+    }
   }, [enabled]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const maxTagCount = data ? Math.max(...data.byTag.map(t => t.countAll), 1) : 1
@@ -303,6 +316,172 @@ export default function TabBA25({ token, enabled }: Props) {
               )}
             </div>
           )}
+
+          {/* Metas × Realizado */}
+          {goals && (() => {
+            const totalMetaLeads = goals.metaLeadsTrafico + goals.metaLeadsOrganico + goals.metaLeadsManychat
+
+            // Leads por tag: soma countPeriod das tags que contêm cada palavra-chave
+            function leadsForKeyword(keyword: string) {
+              return data!.byTag
+                .filter(t => t.tag.toLowerCase().includes(keyword.toLowerCase()))
+                .reduce((s, t) => s + t.countPeriod, 0)
+            }
+
+            // Gasto por fase: soma spend das campanhas (utm_campaign) que contêm a palavra-chave
+            function spendForKeyword(keyword: string) {
+              if (!data!.spendByUtm?.campaign) return null
+              return Object.entries(data!.spendByUtm.campaign)
+                .filter(([k]) => k.toLowerCase().includes(keyword.toLowerCase()))
+                .reduce((s, [, v]) => s + v, 0)
+            }
+
+            const leadsCaptacao = leadsForKeyword(goals.tagsReferencia.captura)
+            const leadsDescoberta = leadsForKeyword(goals.tagsReferencia.descoberta)
+            const leadsAquecimento = leadsForKeyword(goals.tagsReferencia.aquecimento)
+            const leadsLembrete = leadsForKeyword(goals.tagsReferencia.lembrete)
+            const leadsRemarketingTag = leadsForKeyword(goals.tagsReferencia.remarketing)
+
+            const fases = [
+              { label: 'Captura', keyword: goals.tagsReferencia.captura, orcamento: goals.orcamentoPorFase.captura, leads: leadsCaptacao },
+              { label: 'Descoberta', keyword: goals.tagsReferencia.descoberta, orcamento: goals.orcamentoPorFase.descoberta, leads: leadsDescoberta },
+              { label: 'Aquecimento', keyword: goals.tagsReferencia.aquecimento, orcamento: goals.orcamentoPorFase.aquecimento, leads: leadsAquecimento },
+              { label: 'Lembrete', keyword: goals.tagsReferencia.lembrete, orcamento: goals.orcamentoPorFase.lembrete, leads: leadsLembrete },
+              { label: 'Remarketing', keyword: goals.tagsReferencia.remarketing, orcamento: goals.orcamentoPorFase.remarketing, leads: leadsRemarketingTag },
+            ]
+
+            const brl = (v: number) => v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+            const pct = (real: number, meta: number) => meta > 0 ? Math.min((real / meta) * 100, 999) : 0
+
+            function ProgressBar({ value, max, color }: { value: number; max: number; color: string }) {
+              const p = Math.min((value / Math.max(max, 1)) * 100, 100)
+              return (
+                <div className="h-1.5 rounded-full bg-muted overflow-hidden w-full">
+                  <div className="h-full rounded-full transition-all" style={{ width: `${p}%`, backgroundColor: color }} />
+                </div>
+              )
+            }
+
+            function StatusBadge({ value, max }: { value: number; max: number }) {
+              const p = max > 0 ? (value / max) * 100 : 0
+              if (p >= 100) return <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400">Atingido</span>
+              if (p >= 70) return <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400">Em curso</span>
+              return <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400">Abaixo</span>
+            }
+
+            return (
+              <div className="space-y-4">
+                <SectionHeader
+                  title="Metas × Realizado"
+                  description={`Planilha de metas: ${goals.inicioCaptacao} → ${goals.finalCaptacao}`}
+                />
+
+                {/* Leads: metas gerais */}
+                <div className="rounded-lg border bg-card overflow-hidden">
+                  <div className="px-4 py-2 border-b bg-muted/40">
+                    <p className="text-xs font-semibold">Metas de Leads</p>
+                  </div>
+                  <table className="w-full text-sm">
+                    <thead className="bg-muted/60 text-xs">
+                      <tr>
+                        <th className="px-3 py-2 text-left font-medium">Categoria</th>
+                        <th className="px-3 py-2 text-right font-medium">Meta</th>
+                        <th className="px-3 py-2 text-right font-medium">Realizado</th>
+                        <th className="px-3 py-2 text-right font-medium">%</th>
+                        <th className="px-3 py-2 text-right font-medium">Faltam</th>
+                        <th className="px-3 py-2 w-28"></th>
+                        <th className="px-3 py-2"></th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {[
+                        { label: 'Total (tráfego + orgânico + manychat)', meta: totalMetaLeads, real: data!.totalUnique, color: CHART_COLORS[0] },
+                        { label: `Tráfego pago (Meta Ads)`, meta: goals.metaLeadsTrafico, real: leadsCaptacao, color: CHART_COLORS[1] },
+                        { label: `Orgânico`, meta: goals.metaLeadsOrganico, real: leadsDescoberta, color: CHART_COLORS[2] },
+                        { label: `ManyChat`, meta: goals.metaLeadsManychat, real: leadsAquecimento + leadsLembrete, color: CHART_COLORS[3] },
+                      ].map(row => (
+                        <tr key={row.label} className="hover:bg-muted/40">
+                          <td className="px-3 py-2 font-medium">{row.label}</td>
+                          <td className="px-3 py-2 text-right tabular-nums">{row.meta.toLocaleString('pt-BR')}</td>
+                          <td className="px-3 py-2 text-right tabular-nums font-semibold" style={{ color: row.color }}>{row.real.toLocaleString('pt-BR')}</td>
+                          <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">{pct(row.real, row.meta).toFixed(1)}%</td>
+                          <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">
+                            {row.real >= row.meta ? <span className="text-green-600 dark:text-green-400">—</span> : (row.meta - row.real).toLocaleString('pt-BR')}
+                          </td>
+                          <td className="px-3 py-2"><ProgressBar value={row.real} max={row.meta} color={row.color} /></td>
+                          <td className="px-3 py-2"><StatusBadge value={row.real} max={row.meta} /></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Orçamento por fase */}
+                <div className="rounded-lg border bg-card overflow-hidden">
+                  <div className="px-4 py-2 border-b bg-muted/40">
+                    <p className="text-xs font-semibold">Orçamento por Fase × Gasto Real (Meta Ads)</p>
+                  </div>
+                  <table className="w-full text-sm">
+                    <thead className="bg-muted/60 text-xs">
+                      <tr>
+                        <th className="px-3 py-2 text-left font-medium">Fase</th>
+                        <th className="px-3 py-2 text-left font-medium text-muted-foreground">Tag/Campanha</th>
+                        <th className="px-3 py-2 text-right font-medium">Orçamento</th>
+                        <th className="px-3 py-2 text-right font-medium">Investido</th>
+                        <th className="px-3 py-2 text-right font-medium">%</th>
+                        <th className="px-3 py-2 text-right font-medium">Leads (tag)</th>
+                        <th className="px-3 py-2 text-right font-medium">CPL</th>
+                        <th className="px-3 py-2 w-24"></th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {fases.map((fase, i) => {
+                        const gasto = spendForKeyword(fase.keyword) ?? 0
+                        const cplFase = gasto > 0 && fase.leads > 0 ? gasto / fase.leads : null
+                        return (
+                          <tr key={fase.label} className="hover:bg-muted/40">
+                            <td className="px-3 py-2 font-medium">{fase.label}</td>
+                            <td className="px-3 py-2 text-muted-foreground text-xs font-mono">{fase.keyword}</td>
+                            <td className="px-3 py-2 text-right tabular-nums">R$ {brl(fase.orcamento)}</td>
+                            <td className="px-3 py-2 text-right tabular-nums font-semibold" style={{ color: CHART_COLORS[i % CHART_COLORS.length] }}>
+                              {data!.spendByUtm?.campaign ? `R$ ${brl(gasto)}` : '—'}
+                            </td>
+                            <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">
+                              {data!.spendByUtm?.campaign ? `${pct(gasto, fase.orcamento).toFixed(1)}%` : '—'}
+                            </td>
+                            <td className="px-3 py-2 text-right tabular-nums">{fase.leads > 0 ? fase.leads.toLocaleString('pt-BR') : <span className="text-muted-foreground">0</span>}</td>
+                            <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">
+                              {cplFase != null ? `R$ ${brl(cplFase)}` : '—'}
+                            </td>
+                            <td className="px-3 py-2">
+                              {data!.spendByUtm?.campaign && <ProgressBar value={gasto} max={fase.orcamento} color={CHART_COLORS[i % CHART_COLORS.length]} />}
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                    <tfoot className="border-t-2 bg-muted/30 font-semibold text-xs">
+                      <tr>
+                        <td className="px-3 py-2" colSpan={2}>Total</td>
+                        <td className="px-3 py-2 text-right tabular-nums">R$ {brl(goals.orcamentoTotal)}</td>
+                        <td className="px-3 py-2 text-right tabular-nums" style={{ color: CHART_COLORS[0] }}>
+                          {data!.metaSpend !== undefined ? `R$ ${brl(data!.metaSpend)}` : '—'}
+                        </td>
+                        <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">
+                          {data!.metaSpend !== undefined ? `${pct(data!.metaSpend, goals.orcamentoTotal).toFixed(1)}%` : '—'}
+                        </td>
+                        <td className="px-3 py-2 text-right tabular-nums">{data!.totalUnique.toLocaleString('pt-BR')}</td>
+                        <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">
+                          {data!.cpl != null ? `R$ ${brl(data!.cpl)}` : '—'}
+                        </td>
+                        <td className="px-3 py-2" />
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              </div>
+            )
+          })()}
 
           {/* UTM breakdown */}
           <div>
