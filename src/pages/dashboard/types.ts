@@ -36,6 +36,7 @@ export interface LaunchData {
   metaSpend?: number
   cpl?: number | null
   metaCampaigns?: { name: string; spend: number }[]
+  dailyMeta?: { date: string; spend: number; clicks: number; linkClicks: number; pageViews: number }[]
 }
 
 export interface TagsListData {

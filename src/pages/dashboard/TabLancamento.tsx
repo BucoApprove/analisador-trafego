@@ -433,6 +433,105 @@ export default function TabLancamento({ token, enabled }: Props) {
 
             </div>
           </div>
+          {/* Evolução diária */}
+          {(data.leadsByDay.length > 0 || (data.dailyMeta?.length ?? 0) > 0) && (() => {
+            // Mescla dados BQ (leads) + Meta (spend/clicks)
+            const leadsMap = new Map(data.leadsByDay.map(d => [d.date, d.count]))
+            const metaMap = new Map((data.dailyMeta ?? []).map(d => [d.date, d]))
+            const allDates = [...new Set([...leadsMap.keys(), ...metaMap.keys()])].sort()
+            const hasMeta = (data.dailyMeta?.length ?? 0) > 0
+
+            // Totais para linha de rodapé
+            const totLeads = allDates.reduce((s, d) => s + (leadsMap.get(d) ?? 0), 0)
+            const totSpend = allDates.reduce((s, d) => s + (metaMap.get(d)?.spend ?? 0), 0)
+            const totClicks = allDates.reduce((s, d) => s + (metaMap.get(d)?.linkClicks ?? 0), 0)
+            const totPv = allDates.reduce((s, d) => s + (metaMap.get(d)?.pageViews ?? 0), 0)
+
+            return (
+              <div>
+                <p className="mb-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                  Evolução diária {hasMeta ? '— Investimento + Leads' : '— Leads'}
+                </p>
+                <div className="overflow-x-auto rounded-md border">
+                  <table className="w-full text-xs tabular-nums">
+                    <thead className="bg-muted/60 text-[11px]">
+                      <tr>
+                        <th className="px-3 py-1.5 text-left font-medium">Data</th>
+                        {hasMeta && <th className="px-3 py-1.5 text-right font-medium">Investimento</th>}
+                        <th className="px-3 py-1.5 text-right font-medium">Leads</th>
+                        {hasMeta && <th className="px-3 py-1.5 text-right font-medium">CPL</th>}
+                        {hasMeta && <th className="px-3 py-1.5 text-right font-medium">Cliques link</th>}
+                        {hasMeta && <th className="px-3 py-1.5 text-right font-medium">Conv. %</th>}
+                        {hasMeta && <th className="px-3 py-1.5 text-right font-medium">Page views</th>}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {allDates.map(date => {
+                        const leads = leadsMap.get(date) ?? 0
+                        const m = metaMap.get(date)
+                        const cplDay = m && leads > 0 ? m.spend / leads : null
+                        const conv = m && m.linkClicks > 0 ? (leads / m.linkClicks) * 100 : null
+                        return (
+                          <tr key={date} className="hover:bg-muted/40">
+                            <td className="px-3 py-1">{date.slice(5)}</td>
+                            {hasMeta && (
+                              <td className="px-3 py-1 text-right">
+                                {m ? `R$ ${m.spend.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}
+                              </td>
+                            )}
+                            <td className="px-3 py-1 text-right" style={{ color: leads > 0 ? CHART_COLORS[1] : undefined }}>
+                              {leads > 0 ? leads.toLocaleString('pt-BR') : <span className="text-muted-foreground">0</span>}
+                            </td>
+                            {hasMeta && (
+                              <td className="px-3 py-1 text-right text-muted-foreground">
+                                {cplDay != null ? `R$ ${cplDay.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}
+                              </td>
+                            )}
+                            {hasMeta && (
+                              <td className="px-3 py-1 text-right">{m ? m.linkClicks.toLocaleString('pt-BR') : '—'}</td>
+                            )}
+                            {hasMeta && (
+                              <td className="px-3 py-1 text-right text-muted-foreground">
+                                {conv != null ? `${conv.toFixed(1)}%` : '—'}
+                              </td>
+                            )}
+                            {hasMeta && (
+                              <td className="px-3 py-1 text-right">{m ? m.pageViews.toLocaleString('pt-BR') : '—'}</td>
+                            )}
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                    <tfoot className="border-t-2 bg-muted/30 font-semibold">
+                      <tr>
+                        <td className="px-3 py-1.5 text-xs">Total</td>
+                        {hasMeta && (
+                          <td className="px-3 py-1.5 text-right">
+                            R$ {totSpend.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </td>
+                        )}
+                        <td className="px-3 py-1.5 text-right" style={{ color: CHART_COLORS[1] }}>
+                          {totLeads.toLocaleString('pt-BR')}
+                        </td>
+                        {hasMeta && (
+                          <td className="px-3 py-1.5 text-right text-muted-foreground">
+                            {totLeads > 0 ? `R$ ${(totSpend / totLeads).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}
+                          </td>
+                        )}
+                        {hasMeta && <td className="px-3 py-1.5 text-right">{totClicks.toLocaleString('pt-BR')}</td>}
+                        {hasMeta && (
+                          <td className="px-3 py-1.5 text-right text-muted-foreground">
+                            {totClicks > 0 ? `${((totLeads / totClicks) * 100).toFixed(1)}%` : '—'}
+                          </td>
+                        )}
+                        {hasMeta && <td className="px-3 py-1.5 text-right">{totPv.toLocaleString('pt-BR')}</td>}
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              </div>
+            )
+          })()}
         </>
       )}
 

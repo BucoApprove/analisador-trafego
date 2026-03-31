@@ -205,6 +205,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     let metaSpend: number | null = null
     let cpl: number | null = null
     let metaCampaigns: { name: string; spend: number }[] = []
+    let dailyMeta: { date: string; spend: number; clicks: number; linkClicks: number; pageViews: number }[] = []
 
     if (spendKeywords.length > 0) {
       const accessToken = process.env.META_ACCESS_TOKEN ?? ''
@@ -224,16 +225,66 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               data: Array<{ id: string; name: string; insights?: { data: Array<{ spend: string }> } }>
             }
             let totalSpend = 0
+            const matchedIds: string[] = []
             for (const c of mData.data ?? []) {
               const nameLower = c.name.toLowerCase()
               if (spendKeywords.every((k) => nameLower.includes(k))) {
                 const s = Number(c.insights?.data?.[0]?.spend ?? 0)
                 totalSpend += s
                 metaCampaigns.push({ name: c.name, spend: Math.round(s * 100) / 100 })
+                matchedIds.push(c.id)
               }
             }
             metaSpend = Math.round(totalSpend * 100) / 100
             cpl = totalUniqueAll > 0 ? Math.round((metaSpend / totalUniqueAll) * 100) / 100 : null
+
+            // Busca breakdown diário para as campanhas encontradas
+            if (matchedIds.length > 0) {
+              const filtering = JSON.stringify([{ field: 'campaign.id', operator: 'IN', value: matchedIds }])
+              const dUrl = new URL(`https://graph.facebook.com/v19.0/${adAccount}/insights`)
+              dUrl.searchParams.set('fields', 'date_start,spend,clicks,actions')
+              dUrl.searchParams.set('time_increment', '1')
+              dUrl.searchParams.set('time_range', JSON.stringify({ since, until }))
+              dUrl.searchParams.set('level', 'campaign')
+              dUrl.searchParams.set('filtering', filtering)
+              dUrl.searchParams.set('limit', '1000')
+              dUrl.searchParams.set('access_token', accessToken)
+
+              const dRes = await fetch(dUrl.toString())
+              if (dRes.ok) {
+                const dData = await dRes.json() as {
+                  data: Array<{
+                    date_start: string
+                    spend: string
+                    clicks: string
+                    actions?: Array<{ action_type: string; value: string }>
+                  }>
+                }
+                // Agrega por data (soma todas as campanhas do dia)
+                const byDate = new Map<string, { spend: number; clicks: number; linkClicks: number; pageViews: number }>()
+                for (const row of dData.data ?? []) {
+                  const d = row.date_start
+                  const cur = byDate.get(d) ?? { spend: 0, clicks: 0, linkClicks: 0, pageViews: 0 }
+                  const actionVal = (type: string) =>
+                    Number(row.actions?.find(a => a.action_type === type)?.value ?? 0)
+                  byDate.set(d, {
+                    spend: cur.spend + Number(row.spend ?? 0),
+                    clicks: cur.clicks + Number(row.clicks ?? 0),
+                    linkClicks: cur.linkClicks + actionVal('link_click'),
+                    pageViews: cur.pageViews + actionVal('landing_page_view'),
+                  })
+                }
+                dailyMeta = Array.from(byDate.entries())
+                  .sort(([a], [b]) => a.localeCompare(b))
+                  .map(([date, v]) => ({
+                    date,
+                    spend: Math.round(v.spend * 100) / 100,
+                    clicks: v.clicks,
+                    linkClicks: v.linkClicks,
+                    pageViews: v.pageViews,
+                  }))
+              }
+            }
           }
         } catch (err) {
           console.error('launch-data Meta spend error:', err)
@@ -275,7 +326,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         value: parseInt(r.value ?? '0'),
       })),
       dateRange: { since, until },
-      ...(metaSpend !== null ? { metaSpend, cpl, metaCampaigns } : {}),
+      ...(metaSpend !== null ? { metaSpend, cpl, metaCampaigns, dailyMeta } : {}),
     })
   } catch (err) {
     console.error('launch-data error:', err)
