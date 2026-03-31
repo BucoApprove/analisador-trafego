@@ -47,6 +47,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const since = typeof req.query.since === 'string' ? req.query.since : firstOfMonthStr()
   const until = typeof req.query.until === 'string' ? req.query.until : todayStr()
   const containsPattern = `%${prefix}%`
+  const broadSearch = req.query.broadSearch === 'true'
+  // tagFilter: com broadSearch também captura leads sem tag mas com utm_campaign contendo o prefixo
+  const tagFilter = broadSearch
+    ? `(tag_name LIKE @pattern OR LOWER(COALESCE(utm_campaign,'')) LIKE @utmPattern)`
+    : `tag_name LIKE @pattern`
 
   // Palavras-chave para filtrar campanhas do Meta Ads (ex: "BA25,CAPTURA")
   const spendFilterRaw = typeof req.query.spendFilter === 'string' ? req.query.spendFilter : ''
@@ -57,12 +62,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   res.setHeader('Cache-Control', 's-maxage=120, stale-while-revalidate=60')
 
+  const broadParam = broadSearch ? [{ name: 'utmPattern', value: `%${prefix.toLowerCase()}%` }] : []
   const paramsDate = [
     { name: 'pattern', value: containsPattern },
     { name: 'since', value: since },
     { name: 'until', value: until },
+    ...broadParam,
   ]
-  const paramsAll = [{ name: 'pattern', value: containsPattern }]
+  const paramsAll = [{ name: 'pattern', value: containsPattern }, ...broadParam]
 
   try {
     const [rAllTags, rTotalAll, rTotal, rByTagDate, rByDay, rBySource, rByCampaign, rByMedium, rByContent, rByTerm] = await Promise.all([
@@ -70,7 +77,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       bqQuery(
         `SELECT tag_name, COUNT(DISTINCT lead_id) AS cnt_all
          FROM ${tLeads}
-         WHERE tag_name LIKE @pattern
+         WHERE ${tagFilter}
          GROUP BY tag_name
          ORDER BY cnt_all DESC`,
         paramsAll,
@@ -80,7 +87,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       bqQuery(
         `SELECT COUNT(DISTINCT lead_id) AS cnt
          FROM ${tLeads}
-         WHERE tag_name LIKE @pattern`,
+         WHERE ${tagFilter}`,
         paramsAll,
       ),
 
@@ -88,7 +95,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       bqQuery(
         `SELECT COUNT(DISTINCT lead_id) AS cnt
          FROM ${tLeads}
-         WHERE tag_name LIKE @pattern
+         WHERE ${tagFilter}
            AND DATE(lead_register) BETWEEN DATE(@since) AND DATE(@until)`,
         paramsDate,
       ),
@@ -97,7 +104,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       bqQuery(
         `SELECT tag_name, COUNT(DISTINCT lead_id) AS cnt
          FROM ${tLeads}
-         WHERE tag_name LIKE @pattern
+         WHERE ${tagFilter}
            AND DATE(lead_register) BETWEEN DATE(@since) AND DATE(@until)
          GROUP BY tag_name`,
         paramsDate,
@@ -109,7 +116,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
          FROM (
            SELECT lead_id, MIN(DATE(lead_register)) AS first_date
            FROM ${tLeads}
-           WHERE tag_name LIKE @pattern
+           WHERE ${tagFilter}
              AND DATE(lead_register) BETWEEN DATE(@since) AND DATE(@until)
            GROUP BY lead_id
          )
@@ -123,7 +130,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         `SELECT COALESCE(utm_source, '(direto)') AS name,
                 COUNT(DISTINCT lead_id) AS value
          FROM ${tLeads}
-         WHERE tag_name LIKE @pattern
+         WHERE ${tagFilter}
            AND DATE(lead_register) BETWEEN DATE(@since) AND DATE(@until)
          GROUP BY name
          ORDER BY value DESC
@@ -136,7 +143,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         `SELECT COALESCE(utm_campaign, '(sem campanha)') AS name,
                 COUNT(DISTINCT lead_id) AS value
          FROM ${tLeads}
-         WHERE tag_name LIKE @pattern
+         WHERE ${tagFilter}
            AND DATE(lead_register) BETWEEN DATE(@since) AND DATE(@until)
          GROUP BY name
          ORDER BY value DESC
@@ -149,7 +156,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         `SELECT COALESCE(utm_medium, '(não informado)') AS name,
                 COUNT(DISTINCT lead_id) AS value
          FROM ${tLeads}
-         WHERE tag_name LIKE @pattern
+         WHERE ${tagFilter}
            AND DATE(lead_register) BETWEEN DATE(@since) AND DATE(@until)
          GROUP BY name
          ORDER BY value DESC
@@ -162,7 +169,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         `SELECT COALESCE(utm_content, '(não informado)') AS name,
                 COUNT(DISTINCT lead_id) AS value
          FROM ${tLeads}
-         WHERE tag_name LIKE @pattern
+         WHERE ${tagFilter}
            AND DATE(lead_register) BETWEEN DATE(@since) AND DATE(@until)
          GROUP BY name
          ORDER BY value DESC
@@ -175,7 +182,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         `SELECT COALESCE(utm_term, '(não informado)') AS name,
                 COUNT(DISTINCT lead_id) AS value
          FROM ${tLeads}
-         WHERE tag_name LIKE @pattern
+         WHERE ${tagFilter}
            AND DATE(lead_register) BETWEEN DATE(@since) AND DATE(@until)
          GROUP BY name
          ORDER BY value DESC

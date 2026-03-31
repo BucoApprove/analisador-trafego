@@ -5,6 +5,7 @@ import { Separator } from '@/components/ui/separator'
 import { LogOut, BarChart2 } from 'lucide-react'
 import TabVisaoGeral from './TabVisaoGeral'
 import TabLancamento from './TabLancamento'
+import TabBA25 from './TabBA25'
 import TabLeads from './TabLeads'
 import TabInscritos from './TabInscritos'
 import TabInstagram from './TabInstagram'
@@ -21,6 +22,7 @@ const TABS = [
   { id: 'visao-geral', label: 'Visão Geral' },
   { id: 'campanhas', label: 'Campanhas' },
   { id: 'lancamento', label: 'Lançamento' },
+  { id: 'ba25', label: 'BA25 🚀' },
   { id: 'leads', label: 'Leads' },
   { id: 'inscritos', label: 'Inscritos' },
   { id: 'instagram', label: 'Instagram' },
@@ -67,6 +69,9 @@ export default function DashboardLayout({ token, onLogout }: DashboardLayoutProp
           </TabsContent>
           <TabsContent value="lancamento">
             <TabLancamento token={token} enabled={activeTab === 'lancamento'} />
+          </TabsContent>
+          <TabsContent value="ba25">
+            <TabBA25 token={token} enabled={activeTab === 'ba25'} />
           </TabsContent>
           <TabsContent value="leads">
             <TabLeads token={token} enabled={activeTab === 'leads'} />
