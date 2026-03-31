@@ -259,29 +259,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
             // Busca breakdown diário + gasto por anúncio (para CPL por UTM) em paralelo
             if (matchedIds.length > 0) {
-              const filtering = JSON.stringify([{ field: 'campaign.id', operator: 'IN', value: matchedIds }])
               const timeRange = JSON.stringify({ since, until })
+              // Set com todos os nomes de campanha coletados (AND + OR)
+              const matchedCampaignNames = new Set(metaCampaigns.map(c => c.name))
 
-              // 1) Breakdown diário (gráfico/tabela)
+              // 1) Breakdown diário — filtra por nome (BA25) para evitar lista longa de IDs
+              const dFiltering = JSON.stringify([{ field: 'campaign.name', operator: 'CONTAIN', value: spendKeywords[0] ?? prefix }])
               const dUrl = new URL(`https://graph.facebook.com/v19.0/${adAccount}/insights`)
               dUrl.searchParams.set('fields', 'date_start,spend,clicks,actions')
               dUrl.searchParams.set('time_increment', '1')
               dUrl.searchParams.set('time_range', timeRange)
               dUrl.searchParams.set('level', 'campaign')
-              dUrl.searchParams.set('filtering', filtering)
+              dUrl.searchParams.set('filtering', dFiltering)
               dUrl.searchParams.set('limit', '1000')
               dUrl.searchParams.set('access_token', accessToken)
 
-              // 2) Gasto por anúncio no período — inclui nomes para mapear UTMs
-              // utm_campaign = campaign_name, utm_medium = adset_name, utm_content = ad_name
-              // Usa o primeiro spendKeyword como filtro Meta-side; filtragem completa feita em JS
-              const aiFiltering = JSON.stringify([{
-                field: 'campaign.name',
-                operator: 'CONTAIN',
-                value: spendKeywords[0] ?? prefix,
-              }])
-              // Set com todos os nomes de campanha que já foram coletados (AND + OR)
-              const matchedCampaignNames = new Set(metaCampaigns.map(c => c.name))
+              // 2) Ad insights — uma chamada por BA25 + uma chamada cobrindo todas as OR keywords
+              //    Filtragem final feita em JS pelo matchedCampaignNames (evita múltiplas chamadas)
+              const aiFiltering = JSON.stringify([{ field: 'campaign.name', operator: 'CONTAIN', value: spendKeywords[0] ?? prefix }])
               const aiUrl = new URL(`https://graph.facebook.com/v19.0/${adAccount}/insights`)
               aiUrl.searchParams.set('fields', 'ad_id,ad_name,adset_name,campaign_name,spend')
               aiUrl.searchParams.set('time_range', timeRange)
@@ -290,9 +285,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               aiUrl.searchParams.set('limit', '500')
               aiUrl.searchParams.set('access_token', accessToken)
 
-              // Para campanhas OR (ex: Instagram) que não contêm o spendKeyword,
-              // fazemos chamadas paralelas por keyword OR
-              const orUrls = orKeywords.map(kw => {
+              // Chamada extra apenas para OR keywords (uma única chamada com o primeiro OR keyword como âncora)
+              // Os demais OR são filtrados em JS pelo matchedCampaignNames
+              const orAiUrls = orKeywords.slice(0, 1).map(kw => {
                 const u = new URL(`https://graph.facebook.com/v19.0/${adAccount}/insights`)
                 u.searchParams.set('fields', 'ad_id,ad_name,adset_name,campaign_name,spend')
                 u.searchParams.set('time_range', timeRange)
@@ -306,7 +301,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               const [dRes, aiRes, ...orAiReses] = await Promise.all([
                 fetch(dUrl.toString()),
                 fetch(aiUrl.toString()),
-                ...orUrls.map(u => fetch(u.toString())),
+                ...orAiUrls.map(u => fetch(u.toString())),
               ])
 
               // Processa breakdown diário

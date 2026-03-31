@@ -1,7 +1,13 @@
 {
   "version": 2,
+  "functions": {
+    "api/launch-data.ts": { "maxDuration": 60 },
+    "api/dashboard-data.ts": { "maxDuration": 60 },
+    "api/meta-ads-data.ts": { "maxDuration": 60 }
+  },
   "routes": [
     { "handle": "filesystem" },
     { "src": "/(.*)", "dest": "/index.html" }
   ]
 }
+
