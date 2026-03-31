@@ -53,9 +53,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     ? `(tag_name LIKE @pattern OR LOWER(COALESCE(utm_campaign,'')) LIKE @utmPattern)`
     : `tag_name LIKE @pattern`
 
-  // Palavras-chave para filtrar campanhas do Meta Ads (ex: "BA25,CAPTURA")
+  // Palavras-chave para filtrar campanhas do Meta Ads (ex: "BA25")
   const spendFilterRaw = typeof req.query.spendFilter === 'string' ? req.query.spendFilter : ''
   const spendKeywords = spendFilterRaw
+    .split(',')
+    .map((k) => k.trim().toLowerCase())
+    .filter(Boolean)
+
+  // Palavras-chave adicionais com lógica OR (ex: "instagram,engajamento,lembrete,remarketing")
+  const orFilterRaw = typeof req.query.orFilter === 'string' ? req.query.orFilter : ''
+  const orKeywords = orFilterRaw
     .split(',')
     .map((k) => k.trim().toLowerCase())
     .filter(Boolean)
@@ -238,7 +245,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             const matchedIds: string[] = []
             for (const c of mData.data ?? []) {
               const nameLower = c.name.toLowerCase()
-              if (spendKeywords.every((k) => nameLower.includes(k))) {
+              const matchesAnd = spendKeywords.length > 0 && spendKeywords.every((k) => nameLower.includes(k))
+              const matchesOr = orKeywords.length > 0 && orKeywords.some((k) => nameLower.includes(k))
+              if (matchesAnd || matchesOr) {
                 const s = Number(c.insights?.data?.[0]?.spend ?? 0)
                 totalSpend += s
                 metaCampaigns.push({ name: c.name, spend: Math.round(s * 100) / 100 })
@@ -265,12 +274,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
               // 2) Gasto por anúncio no período — inclui nomes para mapear UTMs
               // utm_campaign = campaign_name, utm_medium = adset_name, utm_content = ad_name
-              // Filtra apenas por keyword no nome de campanha (evita lista grande de IDs que excede limite Meta)
+              // Usa o primeiro spendKeyword como filtro Meta-side; filtragem completa feita em JS
               const aiFiltering = JSON.stringify([{
                 field: 'campaign.name',
                 operator: 'CONTAIN',
                 value: spendKeywords[0] ?? prefix,
               }])
+              // Set com todos os nomes de campanha que já foram coletados (AND + OR)
+              const matchedCampaignNames = new Set(metaCampaigns.map(c => c.name))
               const aiUrl = new URL(`https://graph.facebook.com/v19.0/${adAccount}/insights`)
               aiUrl.searchParams.set('fields', 'ad_id,ad_name,adset_name,campaign_name,spend')
               aiUrl.searchParams.set('time_range', timeRange)
@@ -279,9 +290,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               aiUrl.searchParams.set('limit', '500')
               aiUrl.searchParams.set('access_token', accessToken)
 
-              const [dRes, aiRes] = await Promise.all([
+              // Para campanhas OR (ex: Instagram) que não contêm o spendKeyword,
+              // fazemos chamadas paralelas por keyword OR
+              const orUrls = orKeywords.map(kw => {
+                const u = new URL(`https://graph.facebook.com/v19.0/${adAccount}/insights`)
+                u.searchParams.set('fields', 'ad_id,ad_name,adset_name,campaign_name,spend')
+                u.searchParams.set('time_range', timeRange)
+                u.searchParams.set('level', 'ad')
+                u.searchParams.set('filtering', JSON.stringify([{ field: 'campaign.name', operator: 'CONTAIN', value: kw }]))
+                u.searchParams.set('limit', '500')
+                u.searchParams.set('access_token', accessToken)
+                return u
+              })
+
+              const [dRes, aiRes, ...orAiReses] = await Promise.all([
                 fetch(dUrl.toString()),
                 fetch(aiUrl.toString()),
+                ...orUrls.map(u => fetch(u.toString())),
               ])
 
               // Processa breakdown diário
@@ -319,39 +344,50 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               }
 
               // Processa gasto por UTM via nomes Meta → utm_campaign/medium/content
+              type AdRow = { ad_id: string; ad_name?: string; adset_name?: string; campaign_name?: string; spend: string }
+              let allAdRows: AdRow[] = []
+
               if (!aiRes.ok) {
                 const errTxt = await aiRes.text()
                 console.error('Meta ad insights failed:', aiRes.status, errTxt)
                 _metaAdDebug.aiError = `${aiRes.status}: ${errTxt.substring(0, 200)}`
               } else {
-                const aiData = await aiRes.json() as {
-                  data: Array<{ ad_id: string; ad_name?: string; adset_name?: string; campaign_name?: string; spend: string }>
-                }
-                _metaAdDebug.aiRows = aiData.data?.length ?? 0
-                _metaAdDebug.firstRow = aiData.data?.[0] ?? null
+                const aiData = await aiRes.json() as { data: AdRow[] }
+                allAdRows = allAdRows.concat(aiData.data ?? [])
+              }
 
+              // Processa respostas das chamadas OR (ex: Instagram)
+              for (const orRes of orAiReses) {
+                if (orRes.ok) {
+                  const orData = await orRes.json() as { data: AdRow[] }
+                  allAdRows = allAdRows.concat(orData.data ?? [])
+                }
+              }
+
+              _metaAdDebug.aiRows = allAdRows.length
+              _metaAdDebug.firstRow = allAdRows[0] ?? null
+
+              if (allAdRows.length > 0) {
                 const utmSpend: Record<string, Record<string, number>> = {
                   source: {}, medium: {}, campaign: {}, content: {}, term: {},
                 }
 
-                for (const row of aiData.data ?? []) {
+                for (const row of allAdRows) {
+                  // Só processa linhas de campanhas que fazem parte deste lançamento
+                  if (row.campaign_name && !matchedCampaignNames.has(row.campaign_name)) continue
                   const spend = Number(row.spend ?? 0)
                   if (!spend) continue
-                  // campaign_name  →  utm_campaign
                   if (row.campaign_name) {
                     utmSpend.campaign[row.campaign_name] = (utmSpend.campaign[row.campaign_name] ?? 0) + spend
                   }
-                  // adset_name  →  utm_medium
                   if (row.adset_name) {
                     utmSpend.medium[row.adset_name] = (utmSpend.medium[row.adset_name] ?? 0) + spend
                   }
-                  // ad_name  →  utm_content
                   if (row.ad_name) {
                     utmSpend.content[row.ad_name] = (utmSpend.content[row.ad_name] ?? 0) + spend
                   }
                 }
 
-                // Arredonda
                 for (const dim of ['source', 'medium', 'campaign', 'content', 'term'] as const) {
                   for (const key of Object.keys(utmSpend[dim])) {
                     utmSpend[dim][key] = Math.round(utmSpend[dim][key] * 100) / 100

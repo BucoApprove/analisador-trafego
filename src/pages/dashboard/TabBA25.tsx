@@ -14,6 +14,7 @@ interface Props { token: string; enabled: boolean }
 
 const FIXED_PREFIX = 'BA25'
 const FIXED_SPEND_FILTER = 'BA25'
+const FIXED_OR_FILTER = 'instagram,engajamento,lembrete,remarketing'
 const FIXED_SINCE = '2026-03-01'
 
 function todayStr() {
@@ -116,7 +117,7 @@ export default function TabBA25({ token, enabled }: Props) {
     setStatus('loading')
     setErrorMsg(null)
     try {
-      const url = `/api/launch-data?prefix=${encodeURIComponent(FIXED_PREFIX)}&since=${since}&until=${until}&spendFilter=${encodeURIComponent(FIXED_SPEND_FILTER)}&broadSearch=true`
+      const url = `/api/launch-data?prefix=${encodeURIComponent(FIXED_PREFIX)}&since=${since}&until=${until}&spendFilter=${encodeURIComponent(FIXED_SPEND_FILTER)}&orFilter=${encodeURIComponent(FIXED_OR_FILTER)}&broadSearch=true`
       const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } })
       if (!res.ok) {
         const body = await res.json().catch(() => ({}))
