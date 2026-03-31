@@ -207,6 +207,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     let metaCampaigns: { name: string; spend: number }[] = []
     let dailyMeta: { date: string; spend: number; clicks: number; linkClicks: number; pageViews: number }[] = []
     let spendByUtm: { source: Record<string, number>; medium: Record<string, number>; campaign: Record<string, number>; content: Record<string, number>; term: Record<string, number> } | undefined = undefined
+    let _metaAdDebug: Record<string, unknown> = {}
 
     if (spendKeywords.length > 0) {
       const accessToken = process.env.META_ACCESS_TOKEN ?? ''
@@ -264,8 +265,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               aiUrl.searchParams.set('access_token', accessToken)
 
               // 3) url_tags de cada anúncio (contém os UTM params)
+              // Tenta: url_tags no anúncio > url_tags no criativo > link do criativo (UTMs na URL)
               const adsUrl = new URL(`https://graph.facebook.com/v19.0/${adAccount}/ads`)
-              adsUrl.searchParams.set('fields', 'id,url_tags')
+              adsUrl.searchParams.set('fields', 'id,url_tags,creative{url_tags,effective_object_story_spec{link_data{link,url_tags},video_data{call_to_action{value{link}}}}}')
               adsUrl.searchParams.set('filtering', filtering)
               adsUrl.searchParams.set('limit', '500')
               adsUrl.searchParams.set('access_token', accessToken)
@@ -311,13 +313,43 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               }
 
               // Processa gasto por UTM (ad-level)
+              if (!aiRes.ok) {
+                const errTxt = await aiRes.text()
+                console.error('Meta ad insights failed:', aiRes.status, errTxt)
+                _metaAdDebug.aiError = `${aiRes.status}: ${errTxt.substring(0, 200)}`
+              }
+              if (!adsRes.ok) {
+                const errTxt = await adsRes.text()
+                console.error('Meta ads fetch failed:', adsRes.status, errTxt)
+                _metaAdDebug.adsError = `${adsRes.status}: ${errTxt.substring(0, 200)}`
+              }
               if (aiRes.ok && adsRes.ok) {
                 const aiData = await aiRes.json() as {
                   data: Array<{ ad_id: string; spend: string }>
                 }
-                const adsData = await adsRes.json() as {
-                  data: Array<{ id: string; url_tags?: string }>
+                type MetaAd = {
+                  id: string
+                  url_tags?: string
+                  creative?: {
+                    url_tags?: string
+                    effective_object_story_spec?: {
+                      link_data?: { link?: string; url_tags?: string }
+                      video_data?: { call_to_action?: { value?: { link?: string } } }
+                    }
+                  }
                 }
+                const adsData = await adsRes.json() as { data: MetaAd[] }
+
+                _metaAdDebug.aiRows = aiData.data?.length ?? 0
+                _metaAdDebug.adsRows = adsData.data?.length ?? 0
+                _metaAdDebug.firstAd = adsData.data?.[0]
+                  ? {
+                      id: adsData.data[0].id,
+                      url_tags: adsData.data[0].url_tags,
+                      creative_url_tags: adsData.data[0].creative?.url_tags,
+                      link: adsData.data[0].creative?.effective_object_story_spec?.link_data?.link,
+                    }
+                  : null
 
                 // Map: ad_id → gasto
                 const adSpend = new Map<string, number>()
@@ -325,13 +357,41 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                   adSpend.set(row.ad_id, (adSpend.get(row.ad_id) ?? 0) + Number(row.spend ?? 0))
                 }
 
-                // Map: ad_id → UTM params
+                // Extrai UTM params de cada anúncio:
+                // Prioridade: ad.url_tags > creative.url_tags > URL completa do creative (query string)
                 const adUtms = new Map<string, URLSearchParams>()
                 for (const ad of adsData.data ?? []) {
+                  let rawTags: string | undefined
+
                   if (ad.url_tags) {
-                    adUtms.set(ad.id, new URLSearchParams(ad.url_tags))
+                    rawTags = ad.url_tags
+                  } else if (ad.creative?.url_tags) {
+                    rawTags = ad.creative.url_tags
+                  } else if (ad.creative?.effective_object_story_spec?.link_data?.url_tags) {
+                    rawTags = ad.creative.effective_object_story_spec.link_data.url_tags
+                  } else {
+                    // Tenta extrair UTMs da URL de destino do criativo
+                    const linkUrl =
+                      ad.creative?.effective_object_story_spec?.link_data?.link ??
+                      ad.creative?.effective_object_story_spec?.video_data?.call_to_action?.value?.link
+                    if (linkUrl) {
+                      try {
+                        const parsed = new URL(linkUrl)
+                        // Só usa se tiver ao menos um utm_
+                        if (parsed.searchParams.has('utm_source') || parsed.searchParams.has('utm_medium')) {
+                          adUtms.set(ad.id, parsed.searchParams)
+                          continue
+                        }
+                      } catch { /* URL inválida */ }
+                    }
+                  }
+
+                  if (rawTags) {
+                    adUtms.set(ad.id, new URLSearchParams(rawTags))
                   }
                 }
+
+                _metaAdDebug.adsWithUtm = adUtms.size
 
                 // Agrega gasto por valor de UTM
                 const utmSpend: Record<string, Record<string, number>> = {
@@ -356,8 +416,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                   }
                 }
 
-                spendByUtm = utmSpend
+              spendByUtm = utmSpend
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                ;(spendByUtm as any)._debug = _metaAdDebug
+              } else {
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                _metaAdDebug.skipped = true
               }
+              // Expõe _metaAdDebug no response para diagnóstico (remover após confirmar)
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              ;(res as any)._metaAdDebug = _metaAdDebug
             }
           }
         } catch (err) {
@@ -400,7 +468,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         value: parseInt(r.value ?? '0'),
       })),
       dateRange: { since, until },
-      ...(metaSpend !== null ? { metaSpend, cpl, metaCampaigns, dailyMeta, ...(spendByUtm ? { spendByUtm } : {}) } : {}),
+      ...(metaSpend !== null ? { metaSpend, cpl, metaCampaigns, dailyMeta, ...(spendByUtm ? { spendByUtm } : {}), _metaAdDebug } : {}),
     })
   } catch (err) {
     console.error('launch-data error:', err)
