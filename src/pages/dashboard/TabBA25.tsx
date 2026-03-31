@@ -13,7 +13,7 @@ import { AlertTriangle, RefreshCw } from 'lucide-react'
 interface Props { token: string; enabled: boolean }
 
 const FIXED_PREFIX = 'BA25'
-const FIXED_SPEND_FILTER = 'BA25,CAPTURA'
+const FIXED_SPEND_FILTER = 'BA25'
 const FIXED_SINCE = '2026-03-01'
 
 function todayStr() {
@@ -178,7 +178,7 @@ export default function TabBA25({ token, enabled }: Props) {
           </button>
           <div className="flex gap-2 ml-auto text-xs text-muted-foreground items-center">
             <span className="rounded-full bg-muted px-2 py-0.5 font-mono">Prefixo: {FIXED_PREFIX}</span>
-            <span className="rounded-full bg-muted px-2 py-0.5 font-mono">Meta: {FIXED_SPEND_FILTER}</span>
+            <span className="rounded-full bg-muted px-2 py-0.5 font-mono">Meta: todas campanhas BA25</span>
             <span className="rounded-full bg-muted px-2 py-0.5">Busca ampliada ✓</span>
           </div>
         </div>
