@@ -78,10 +78,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return
   }
 
-  // Período configurável via ?days= (padrão: 30)
-  const days = Math.min(Math.max(parseInt(typeof req.query.days === 'string' ? req.query.days : '30') || 30, 1), 90)
-  const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
-  const until = new Date().toISOString().split('T')[0]
+  // Período: ?since=YYYY-MM-DD&until=YYYY-MM-DD  OU  ?days=N (padrão 30)
+  const today = new Date().toISOString().split('T')[0]
+  let since: string
+  let until: string
+  if (typeof req.query.since === 'string' && typeof req.query.until === 'string') {
+    since = req.query.since.match(/^\d{4}-\d{2}-\d{2}$/) ? req.query.since : today
+    until = req.query.until.match(/^\d{4}-\d{2}-\d{2}$/) ? req.query.until : today
+  } else {
+    const days = Math.min(Math.max(parseInt(typeof req.query.days === 'string' ? req.query.days : '30') || 30, 1), 90)
+    since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+    until = today
+  }
 
   const insightFields = [
     'campaign_id', 'campaign_name', 'spend', 'clicks', 'impressions',

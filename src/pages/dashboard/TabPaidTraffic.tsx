@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useCallback } from 'react'
 import { useDashboardFetch } from './hooks'
 import type { MetaAdsData } from './types'
 import {
@@ -8,15 +8,9 @@ import {
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts'
+import { ChevronUp, ChevronDown, ChevronsUpDown } from 'lucide-react'
 
 interface Props { token: string; enabled: boolean }
-
-const PERIOD_OPTIONS = [
-  { label: '7 dias', value: 7 },
-  { label: '14 dias', value: 14 },
-  { label: '30 dias', value: 30 },
-  { label: '60 dias', value: 60 },
-]
 
 const GROUP_LABELS: Record<string, string> = {
   captacao: 'Captação',
@@ -24,21 +18,52 @@ const GROUP_LABELS: Record<string, string> = {
   boosts: 'Posts Impulsionados',
 }
 
-export default function TabPaidTraffic({ token, enabled }: Props) {
-  const [days, setDays] = useState(30)
-  const url = `/api/meta-ads-data?days=${days}`
+function todayStr() { return new Date().toISOString().split('T')[0] }
+function daysAgoStr(n: number) {
+  return new Date(Date.now() - n * 86400000).toISOString().split('T')[0]
+}
 
+const PRESETS = [
+  { label: '7d', days: 7 },
+  { label: '14d', days: 14 },
+  { label: '30d', days: 30 },
+  { label: '60d', days: 60 },
+  { label: '90d', days: 90 },
+]
+
+type SortKey = 'name' | 'group' | 'status' | 'spend' | 'impressions' | 'clicks' | 'ctr' | 'cpc' | 'leads' | 'cpl' | 'purchases'
+type SortDir = 'asc' | 'desc'
+
+export default function TabPaidTraffic({ token, enabled }: Props) {
+  const [since, setSince] = useState(() => daysAgoStr(30))
+  const [until, setUntil] = useState(todayStr)
+  const [pendingSince, setPendingSince] = useState(() => daysAgoStr(30))
+  const [pendingUntil, setPendingUntil] = useState(todayStr)
+  const [nameFilter, setNameFilter] = useState('')
+  const [sortKey, setSortKey] = useState<SortKey>('spend')
+  const [sortDir, setSortDir] = useState<SortDir>('desc')
+
+  const url = `/api/meta-ads-data?since=${since}&until=${until}`
   const { data, status, error, refetch } = useDashboardFetch<MetaAdsData>(
-    url,
-    token,
-    { enabled, refreshInterval: 10 * 60 * 1000 }
+    url, token, { enabled, refreshInterval: 10 * 60 * 1000 }
   )
 
-  // Re-fetcher quando o período muda (após o primeiro carregamento)
-  useEffect(() => {
-    if (enabled) refetch()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [days])
+  const applyDates = useCallback(() => {
+    setSince(pendingSince)
+    setUntil(pendingUntil)
+  }, [pendingSince, pendingUntil])
+
+  const applyPreset = (days: number) => {
+    const s = daysAgoStr(days)
+    const u = todayStr()
+    setPendingSince(s); setPendingUntil(u)
+    setSince(s); setUntil(u)
+  }
+
+  const toggleSort = (key: SortKey) => {
+    if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
+    else { setSortKey(key); setSortDir('desc') }
+  }
 
   if (status === 'loading' || status === 'idle') return <TabLoading />
   if (status === 'error') return <TabError message={error ?? 'Erro ao carregar'} onRetry={refetch} />
@@ -53,36 +78,113 @@ export default function TabPaidTraffic({ token, enabled }: Props) {
     { name: 'Boosts', spend: data.boosts.spend, leads: data.boosts.leads },
   ]
 
-  // Todas as campanhas ordenadas por gasto
   const allCampaigns = [
     ...data.captacao.campaigns.map(c => ({ ...c, group: 'captacao' })),
     ...data.vendaDireta.campaigns.map(c => ({ ...c, group: 'vendaDireta' })),
     ...data.boosts.campaigns.map(c => ({ ...c, group: 'boosts' })),
-  ].sort((a, b) => b.spend - a.spend)
+  ]
+
+  // Filtro por nome
+  const filtered = nameFilter.trim()
+    ? allCampaigns.filter(c => c.name.toLowerCase().includes(nameFilter.trim().toLowerCase()))
+    : allCampaigns
+
+  // Ordenação
+  const sorted = [...filtered].sort((a, b) => {
+    let va: number | string, vb: number | string
+    switch (sortKey) {
+      case 'name':    va = a.name; vb = b.name; break
+      case 'group':   va = a.group; vb = b.group; break
+      case 'status':  va = a.status; vb = b.status; break
+      case 'spend':   va = a.spend; vb = b.spend; break
+      case 'impressions': va = a.impressions; vb = b.impressions; break
+      case 'clicks':  va = a.clicks; vb = b.clicks; break
+      case 'ctr':     va = a.ctr; vb = b.ctr; break
+      case 'cpc':     va = a.cpc; vb = b.cpc; break
+      case 'leads':   va = a.leads; vb = b.leads; break
+      case 'cpl':     va = a.leads > 0 ? a.spend / a.leads : 0; vb = b.leads > 0 ? b.spend / b.leads : 0; break
+      case 'purchases': va = a.purchases; vb = b.purchases; break
+      default:        va = 0; vb = 0
+    }
+    if (typeof va === 'string') return sortDir === 'asc' ? va.localeCompare(vb as string) : (vb as string).localeCompare(va)
+    return sortDir === 'asc' ? (va as number) - (vb as number) : (vb as number) - (va as number)
+  })
+
+  function SortIcon({ k }: { k: SortKey }) {
+    if (sortKey !== k) return <ChevronsUpDown className="inline h-3 w-3 ml-0.5 text-muted-foreground/50" />
+    return sortDir === 'asc'
+      ? <ChevronUp className="inline h-3 w-3 ml-0.5" />
+      : <ChevronDown className="inline h-3 w-3 ml-0.5" />
+  }
+
+  function Th({ k, children, right }: { k: SortKey; children: React.ReactNode; right?: boolean }) {
+    return (
+      <th
+        className={`px-3 py-2 font-medium cursor-pointer select-none hover:bg-muted/80 whitespace-nowrap ${right ? 'text-right' : 'text-left'}`}
+        onClick={() => toggleSort(k)}
+      >
+        {children}<SortIcon k={k} />
+      </th>
+    )
+  }
 
   return (
     <div className="space-y-6">
       {alerts.length > 0 && <HealthBanner messages={alerts} />}
 
       {/* Seletor de período */}
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="text-sm font-medium text-muted-foreground">Período:</span>
-        {PERIOD_OPTIONS.map(opt => (
+      <div className="rounded-lg border bg-card p-3">
+        <div className="flex flex-wrap items-end gap-3">
+          {/* Presets rápidos */}
+          <div>
+            <p className="mb-1 text-xs text-muted-foreground">Atalhos</p>
+            <div className="flex gap-1">
+              {PRESETS.map(p => (
+                <button
+                  key={p.days}
+                  onClick={() => applyPreset(p.days)}
+                  className={`rounded px-2.5 py-1 text-xs font-medium transition-colors ${
+                    since === daysAgoStr(p.days) && until === todayStr()
+                      ? 'bg-primary text-primary-foreground'
+                      : 'bg-muted text-muted-foreground hover:bg-muted/80'
+                  }`}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Date pickers */}
+          <div>
+            <p className="mb-1 text-xs text-muted-foreground">De</p>
+            <input
+              type="date"
+              value={pendingSince}
+              onChange={e => setPendingSince(e.target.value)}
+              className="rounded-md border bg-background px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+            />
+          </div>
+          <div>
+            <p className="mb-1 text-xs text-muted-foreground">Até</p>
+            <input
+              type="date"
+              value={pendingUntil}
+              onChange={e => setPendingUntil(e.target.value)}
+              className="rounded-md border bg-background px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+            />
+          </div>
           <button
-            key={opt.value}
-            onClick={() => setDays(opt.value)}
-            className={`rounded-md px-3 py-1 text-sm font-medium transition-colors ${
-              days === opt.value
-                ? 'bg-primary text-primary-foreground'
-                : 'bg-muted text-muted-foreground hover:bg-muted/80'
-            }`}
+            onClick={applyDates}
+            disabled={pendingSince === since && pendingUntil === until}
+            className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground transition-opacity disabled:opacity-40"
           >
-            {opt.label}
+            Buscar
           </button>
-        ))}
-        <span className="ml-auto text-xs text-muted-foreground">
-          {data.dateRange.start} → {data.dateRange.end}
-        </span>
+          <span className="ml-auto self-end text-xs text-muted-foreground pb-1">
+            {data.dateRange.start} → {data.dateRange.end}
+          </span>
+        </div>
       </div>
 
       {/* KPIs globais */}
@@ -142,46 +244,62 @@ export default function TabPaidTraffic({ token, enabled }: Props) {
       {/* Tabela completa de campanhas */}
       {allCampaigns.length > 0 && (
         <div>
-          <SectionHeader title="Todas as campanhas" description="Ordenadas por gasto" />
+          <div className="mb-2 flex flex-wrap items-center gap-3">
+            <SectionHeader title="Todas as campanhas" />
+            <div className="ml-auto">
+              <input
+                type="text"
+                placeholder="Filtrar por nome…"
+                value={nameFilter}
+                onChange={e => setNameFilter(e.target.value)}
+                className="rounded-md border bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring w-56"
+              />
+            </div>
+          </div>
+          {nameFilter && (
+            <p className="mb-2 text-xs text-muted-foreground">
+              {sorted.length} de {allCampaigns.length} campanha(s)
+            </p>
+          )}
           <div className="overflow-x-auto rounded-md border">
             <table className="w-full text-sm">
-              <thead className="bg-muted">
+              <thead className="bg-muted text-xs">
                 <tr>
-                  <th className="px-3 py-2 text-left font-medium">Campanha</th>
-                  <th className="px-3 py-2 text-left font-medium">Grupo</th>
-                  <th className="px-3 py-2 text-right font-medium">Status</th>
-                  <th className="px-3 py-2 text-right font-medium">Gasto</th>
-                  <th className="px-3 py-2 text-right font-medium">Impressões</th>
-                  <th className="px-3 py-2 text-right font-medium">Cliques</th>
-                  <th className="px-3 py-2 text-right font-medium">CTR</th>
-                  <th className="px-3 py-2 text-right font-medium">CPC</th>
-                  <th className="px-3 py-2 text-right font-medium">Leads</th>
-                  <th className="px-3 py-2 text-right font-medium">CPL</th>
-                  <th className="px-3 py-2 text-right font-medium">Compras</th>
+                  <Th k="name">Campanha</Th>
+                  <Th k="group">Grupo</Th>
+                  <Th k="status">Status</Th>
+                  <Th k="spend" right>Gasto</Th>
+                  <Th k="impressions" right>Impressões</Th>
+                  <Th k="clicks" right>Cliques</Th>
+                  <Th k="ctr" right>CTR</Th>
+                  <Th k="cpc" right>CPC</Th>
+                  <Th k="leads" right>Leads</Th>
+                  <Th k="cpl" right>CPL</Th>
+                  <Th k="purchases" right>Compras</Th>
                 </tr>
               </thead>
               <tbody className="divide-y">
-                {allCampaigns.map(c => (
+                {sorted.map(c => (
                   <tr key={c.id} className="hover:bg-muted/50">
                     <td className="max-w-[200px] truncate px-3 py-2 font-medium">{c.name}</td>
                     <td className="px-3 py-2 text-muted-foreground">{GROUP_LABELS[c.group]}</td>
-                    <td className="px-3 py-2 text-right">
+                    <td className="px-3 py-2">
                       <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${
                         c.status === 'ACTIVE'
-                          ? 'bg-green-100 text-green-700'
+                          ? 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-400'
                           : 'bg-muted text-muted-foreground'
                       }`}>
                         {c.status}
                       </span>
                     </td>
-                    <td className="px-3 py-2 text-right">{formatBRL(c.spend)}</td>
-                    <td className="px-3 py-2 text-right">{c.impressions.toLocaleString('pt-BR')}</td>
-                    <td className="px-3 py-2 text-right">{c.clicks.toLocaleString('pt-BR')}</td>
-                    <td className="px-3 py-2 text-right">{formatPercent(c.ctr)}</td>
-                    <td className="px-3 py-2 text-right">{formatBRL(c.cpc)}</td>
-                    <td className="px-3 py-2 text-right">{c.leads}</td>
-                    <td className="px-3 py-2 text-right">{c.leads > 0 ? formatBRL(c.spend / c.leads) : '—'}</td>
-                    <td className="px-3 py-2 text-right">{c.purchases}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">{formatBRL(c.spend)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">{c.impressions.toLocaleString('pt-BR')}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">{c.clicks.toLocaleString('pt-BR')}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">{formatPercent(c.ctr)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">{formatBRL(c.cpc)}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">{c.leads}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">{c.leads > 0 ? formatBRL(c.spend / c.leads) : '—'}</td>
+                    <td className="px-3 py-2 text-right tabular-nums">{c.purchases}</td>
                   </tr>
                 ))}
               </tbody>
