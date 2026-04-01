@@ -115,21 +115,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return items
     }
 
-    // Busca APPROVED e COMPLETE em paralelo e combina
-    const [approvedItems, completeItems] = await Promise.all([
-      fetchByStatus('APPROVED'),
-      fetchByStatus('COMPLETE'),
-    ])
-
-    // Deduplica por transaction code
-    const seenTransactions = new Set<string>()
-    const allItems: HotmartItem[] = []
-    for (const item of [...approvedItems, ...completeItems]) {
-      const tx = item.transaction ?? ''
-      if (tx && seenTransactions.has(tx)) continue
-      if (tx) seenTransactions.add(tx)
-      allItems.push(item)
-    }
+    // Apenas APPROVED: data de aprovação da venda naquele mês
+    // COMPLETE traz vendas antigas cujo período de garantia encerrou no mês → inflaria o total
+    const allItems = await fetchByStatus('APPROVED')
 
     // Agrupa por produto
     const byProduct = new Map<string, { id: number; name: string; total: number; count: number }>()
@@ -161,11 +149,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       products,
       grandTotal,
       totalTransactions: allItems.length,
-      _debug: {
-        approvedCount: approvedItems.length,
-        completeCount: completeItems.length,
-        afterDedup: allItems.length,
-      },
     })
   } catch (err) {
     console.error('hotmart-sales error:', err)
