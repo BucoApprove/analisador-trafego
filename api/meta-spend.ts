@@ -87,8 +87,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const timeRange = JSON.stringify({ since, until })
 
-    // 2) Ad insights — nível de anúncio, cobre AND keyword
-    //    OR keywords filtradas em JS pelo matchedCampaignNames (sem chamada extra)
+    // 2) Breakdown diário + ad insights em paralelo
+    const dUrl = new URL(`https://graph.facebook.com/v19.0/${adAccount}/insights`)
+    dUrl.searchParams.set('fields', 'date_start,spend,clicks,actions')
+    dUrl.searchParams.set('time_increment', '1')
+    dUrl.searchParams.set('time_range', timeRange)
+    dUrl.searchParams.set('level', 'campaign')
+    dUrl.searchParams.set('filtering', JSON.stringify([{ field: 'campaign.name', operator: 'CONTAIN', value: spendKeywords[0] ?? '' }]))
+    dUrl.searchParams.set('limit', '1000')
+    dUrl.searchParams.set('access_token', accessToken)
+
     const aiUrl = new URL(`https://graph.facebook.com/v19.0/${adAccount}/insights`)
     aiUrl.searchParams.set('fields', 'ad_name,adset_name,campaign_name,spend')
     aiUrl.searchParams.set('time_range', timeRange)
@@ -97,7 +105,30 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     aiUrl.searchParams.set('limit', '500')
     aiUrl.searchParams.set('access_token', accessToken)
 
-    const aiRes = await fetch(aiUrl.toString())
+    const [dRes, aiRes] = await Promise.all([fetch(dUrl.toString()), fetch(aiUrl.toString())])
+
+    // Processa breakdown diário
+    let dailyMeta: { date: string; spend: number; clicks: number; linkClicks: number; pageViews: number }[] = []
+    if (dRes.ok) {
+      const dData = await dRes.json() as {
+        data: Array<{ date_start: string; spend: string; clicks: string; actions?: Array<{ action_type: string; value: string }> }>
+      }
+      const byDate = new Map<string, { spend: number; clicks: number; linkClicks: number; pageViews: number }>()
+      for (const row of dData.data ?? []) {
+        const d = row.date_start
+        const cur = byDate.get(d) ?? { spend: 0, clicks: 0, linkClicks: 0, pageViews: 0 }
+        const av = (type: string) => Number(row.actions?.find(a => a.action_type === type)?.value ?? 0)
+        byDate.set(d, {
+          spend: cur.spend + Number(row.spend ?? 0),
+          clicks: cur.clicks + Number(row.clicks ?? 0),
+          linkClicks: cur.linkClicks + av('link_click'),
+          pageViews: cur.pageViews + av('landing_page_view'),
+        })
+      }
+      dailyMeta = Array.from(byDate.entries()).sort(([a], [b]) => a.localeCompare(b)).map(([date, v]) => ({
+        date, spend: Math.round(v.spend * 100) / 100, clicks: v.clicks, linkClicks: v.linkClicks, pageViews: v.pageViews,
+      }))
+    }
 
     // Processa ad insights
     type AdRow = { ad_name?: string; adset_name?: string; campaign_name?: string; spend: string }
@@ -106,8 +137,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const d = await aiRes.json() as { data: AdRow[] }
       allAdRows = d.data ?? []
     }
-
-    const dailyMeta: never[] = []
 
     // spendByUtm.campaign vem direto de metaCampaigns (já cobre AND + OR)
     // spendByUtm.medium e .content vem do ad insights (só BA25, sem Instagram)

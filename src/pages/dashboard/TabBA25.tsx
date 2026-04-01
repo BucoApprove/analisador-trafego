@@ -386,52 +386,40 @@ export default function TabBA25({ token, enabled }: Props) {
           </div>
 
           {/* Meta Ads spend */}
-          {data.metaSpend !== undefined && (
-            <div className="rounded-lg border bg-card overflow-hidden">
-              <div className="flex flex-wrap gap-px border-b">
-                <div className="flex-1 min-w-[130px] px-4 py-2">
-                  <p className="text-[10px] text-muted-foreground">Gasto Meta Ads</p>
-                  <p className="text-lg font-bold tabular-nums" style={{ color: CHART_COLORS[3] }}>
-                    R$ {data.metaSpend.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                  </p>
-                  <p className="text-[9px] text-muted-foreground">{data.metaCampaigns?.length ?? 0} campanha(s)</p>
+          {data.metaSpend !== undefined && (() => {
+            const brl2 = (v: number) => v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+            const campaigns = data.metaCampaigns ?? []
+
+            // Gasto Captura: campanhas com ba25 E captura, sem engajamento
+            const gastoCaptura = campaigns
+              .filter(c => { const n = c.name.toLowerCase(); return n.includes('ba25') && n.includes('captura') && !n.includes('engajamento') })
+              .reduce((s, c) => s + c.spend, 0)
+
+            const leadsCaptura = data.byTag.find(t => t.tag === 'BA25-Captura-Tráfego')?.countPeriod ?? 0
+            const totalLeads = data.totalUnique
+
+            const cpl  = totalLeads > 0 && gastoCaptura > 0 ? gastoCaptura / totalLeads : null
+            const cplc = leadsCaptura > 0 && gastoCaptura > 0 ? gastoCaptura / leadsCaptura : null
+
+            return (
+              <div className="rounded-lg border bg-card overflow-hidden">
+                <div className="flex flex-wrap gap-px">
+                  {[
+                    { label: 'Gasto Meta Ads', value: `R$ ${brl2(data.metaSpend)}`, sub: `${campaigns.length} campanha(s)`, color: CHART_COLORS[3] },
+                    { label: 'Gasto Captura', value: `R$ ${brl2(gastoCaptura)}`, sub: 'BA25 + Captura, sem Engajamento', color: CHART_COLORS[0] },
+                    { label: 'CPL', value: cpl != null ? `R$ ${brl2(cpl)}` : '—', sub: 'gasto captura ÷ total leads', color: CHART_COLORS[4] },
+                    { label: 'CPLC', value: cplc != null ? `R$ ${brl2(cplc)}` : '—', sub: 'gasto captura ÷ leads captura', color: CHART_COLORS[2] },
+                  ].map(k => (
+                    <div key={k.label} className="flex-1 min-w-[140px] px-4 py-3">
+                      <p className="text-[10px] text-muted-foreground">{k.label}</p>
+                      <p className="text-lg font-bold tabular-nums leading-tight" style={{ color: k.color }}>{k.value}</p>
+                      <p className="text-[9px] text-muted-foreground">{k.sub}</p>
+                    </div>
+                  ))}
                 </div>
-                <div className="flex-1 min-w-[130px] px-4 py-2">
-                  <p className="text-[10px] text-muted-foreground">CPL</p>
-                  <p className="text-lg font-bold tabular-nums" style={{ color: CHART_COLORS[4] }}>
-                    {data.cpl != null ? `R$ ${data.cpl.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}
-                  </p>
-                  <p className="text-[9px] text-muted-foreground">gasto ÷ leads únicos no período</p>
-                </div>
-                {data.metaSpend === 0 && (
-                  <div className="flex items-center gap-2 px-4 py-2 text-xs text-yellow-700 dark:text-yellow-300">
-                    <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-                    Nenhuma campanha encontrada com o filtro BA25 + CAPTURA.
-                  </div>
-                )}
               </div>
-              {(data.metaCampaigns?.length ?? 0) > 0 && (
-                <table className="w-full text-xs">
-                  <thead className="bg-muted/60">
-                    <tr>
-                      <th className="px-3 py-1 text-left font-medium">Campanha</th>
-                      <th className="px-3 py-1 text-right font-medium">Gasto</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y">
-                    {data.metaCampaigns!.map(c => (
-                      <tr key={c.name + c.spend} className="hover:bg-muted/40">
-                        <td className="px-3 py-1">{c.name}</td>
-                        <td className="px-3 py-1 text-right tabular-nums">
-                          R$ {c.spend.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </div>
-          )}
+            )
+          })()}
 
           {/* Metas × Realizado */}
           {goals && (() => {
@@ -795,6 +783,33 @@ export default function TabBA25({ token, enabled }: Props) {
               </div>
             )
           })()}
+
+          {/* Lista de campanhas */}
+          {(data.metaCampaigns?.length ?? 0) > 0 && (
+            <div className="rounded-lg border bg-card overflow-hidden">
+              <div className="px-4 py-2 border-b bg-muted/40">
+                <p className="text-xs font-semibold">Campanhas Meta Ads</p>
+              </div>
+              <table className="w-full text-xs">
+                <thead className="bg-muted/60">
+                  <tr>
+                    <th className="px-3 py-1 text-left font-medium">Campanha</th>
+                    <th className="px-3 py-1 text-right font-medium">Gasto</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {data.metaCampaigns!.map(c => (
+                    <tr key={c.name + c.spend} className="hover:bg-muted/40">
+                      <td className="px-3 py-1">{c.name}</td>
+                      <td className="px-3 py-1 text-right tabular-nums">
+                        R$ {c.spend.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </>
       )}
     </div>
