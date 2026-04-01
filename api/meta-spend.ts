@@ -28,7 +28,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const since = typeof req.query.since === 'string' ? req.query.since : ''
   const until = typeof req.query.until === 'string' ? req.query.until : ''
-  const totalLeads = parseInt(typeof req.query.totalLeads === 'string' ? req.query.totalLeads : '0') || 0
+  const totalLeads = 0 // CPL calculado no frontend com dados BQ
 
   const spendKeywords = (typeof req.query.spendFilter === 'string' ? req.query.spendFilter : '')
     .split(',').map(k => k.trim().toLowerCase()).filter(Boolean)

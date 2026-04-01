@@ -117,20 +117,30 @@ export default function TabBA25({ token, enabled }: Props) {
     setStatus('loading')
     setErrorMsg(null)
     try {
+      const headers = { Authorization: `Bearer ${token}` }
       const bqUrl = `/api/launch-data?prefix=${encodeURIComponent(FIXED_PREFIX)}&since=${since}&until=${until}&broadSearch=true`
-      const bqRes = await fetch(bqUrl, { headers: { Authorization: `Bearer ${token}` } })
+      const metaUrl = `/api/meta-spend?since=${since}&until=${until}&spendFilter=${encodeURIComponent(FIXED_SPEND_FILTER)}&orFilter=${encodeURIComponent(FIXED_OR_FILTER)}`
+
+      // Dispara BQ e Meta em paralelo
+      const [bqRes, metaRes] = await Promise.all([
+        fetch(bqUrl, { headers }),
+        fetch(metaUrl, { headers }),
+      ])
+
       if (!bqRes.ok) {
         const body = await bqRes.json().catch(() => ({}))
         throw new Error(body.error ?? `Erro ${bqRes.status}`)
       }
+
       const bqData: LaunchData = await bqRes.json()
 
-      // Busca Meta spend em paralelo após ter o totalUnique
-      const metaUrl = `/api/meta-spend?since=${since}&until=${until}&spendFilter=${encodeURIComponent(FIXED_SPEND_FILTER)}&orFilter=${encodeURIComponent(FIXED_OR_FILTER)}&totalLeads=${bqData.totalUnique}`
-      const metaRes = await fetch(metaUrl, { headers: { Authorization: `Bearer ${token}` } })
       if (metaRes.ok) {
         const metaData = await metaRes.json()
-        setData({ ...bqData, ...metaData })
+        // CPL calculado no frontend com totalUnique do BQ
+        const cpl = bqData.totalUnique > 0 && metaData.metaSpend > 0
+          ? Math.round((metaData.metaSpend / bqData.totalUnique) * 100) / 100
+          : null
+        setData({ ...bqData, ...metaData, cpl })
       } else {
         setData(bqData)
       }
