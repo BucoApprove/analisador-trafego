@@ -130,7 +130,7 @@ export default function TabBA25({ token, enabled }: Props) {
 
       if (!bqRes.ok) {
         const body = await bqRes.json().catch(() => ({}))
-        throw new Error(`[launch-data ${bqRes.status}] ${body.error ?? body.detail ?? 'sem detalhe'}`)
+        throw new Error(`[launch-data ${bqRes.status}] ${body.detail ?? body.error ?? 'sem detalhe'}`)
       }
 
       const t1 = Date.now()
