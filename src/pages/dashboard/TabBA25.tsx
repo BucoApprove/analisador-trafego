@@ -212,11 +212,10 @@ export default function TabBA25({ token, enabled }: Props) {
         }
       }
 
-      const mapToArr = (m: Map<string, Set<string>>, label: string, limit = 15) =>
+      const mapToArr = (m: Map<string, Set<string>>, label: string) =>
         [...m.entries()]
           .map(([name, s]) => ({ name: name || label, value: s.size }))
           .sort((a, b) => b.value - a.value)
-          .slice(0, limit)
 
       const byTag = [...tagAll.entries()].map(([tag, s]) => ({
         tag,
