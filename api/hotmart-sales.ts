@@ -115,26 +115,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return items
     }
 
-    // Busca APPROVED e COMPLETE sem filtro de data na API (o filtro start_date/end_date
-    // do endpoint COMPLETE filtra pela data de conclusão, não pela data de compra).
-    // Filtramos aqui pelo approved_date para garantir que só entram vendas do mês.
+    // Busca APPROVED e COMPLETE — start_date/end_date filtra pela data da compra em ambos
     const [approvedItems, completeItems] = await Promise.all([
       fetchByStatus('APPROVED'),
       fetchByStatus('COMPLETE'),
     ])
 
-    // Mantém só itens com approved_date dentro do mês alvo
-    const approvedDateFilter = (item: HotmartItem) => {
-      const d = item.purchase?.approved_date
-      if (!d) return false
-      return d >= startMs && d <= endMs
-    }
-
-    // Deduplica por transaction code e filtra por data de aprovação
+    // Deduplica por transaction code (caso a mesma venda apareça nos dois status)
     const seenTransactions = new Set<string>()
     const allItems: HotmartItem[] = []
     for (const item of [...approvedItems, ...completeItems]) {
-      if (!approvedDateFilter(item)) continue
       const tx = item.transaction ?? ''
       if (tx && seenTransactions.has(tx)) continue
       if (tx) seenTransactions.add(tx)
