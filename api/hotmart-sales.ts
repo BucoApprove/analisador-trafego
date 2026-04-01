@@ -93,7 +93,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     do {
       const url = new URL('https://developers.hotmart.com/payments/api/v1/sales/history')
-      url.searchParams.set('transaction_status', 'COMPLETE')
+      url.searchParams.set('transaction_status', 'APPROVED')
       url.searchParams.set('start_date', String(startMs))
       url.searchParams.set('end_date', String(endMs))
       url.searchParams.set('max_results', '500')
