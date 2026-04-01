@@ -517,11 +517,20 @@ export default function TabBA25({ token, enabled }: Props) {
               return <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400">Abaixo</span>
             }
 
+            // Dias restantes até fim da captação (inclusive hoje)
+            const parseFinalDate = (s: string) => {
+              const [d, m, y] = s.split('/').map(Number)
+              return new Date(y, m - 1, d)
+            }
+            const today = new Date(); today.setHours(0,0,0,0)
+            const finalDate = parseFinalDate(goals.finalCaptacao)
+            const diasRestantes = Math.max(1, Math.ceil((finalDate.getTime() - today.getTime()) / 86400000) + 1)
+
             return (
               <div className="space-y-4">
                 <SectionHeader
                   title="Metas × Realizado"
-                  description={`Planilha de metas: ${goals.inicioCaptacao} → ${goals.finalCaptacao}`}
+                  description={`Planilha de metas: ${goals.inicioCaptacao} → ${goals.finalCaptacao} · ${diasRestantes} dia(s) restante(s)`}
                 />
 
                 {/* Leads: metas gerais */}
@@ -537,6 +546,7 @@ export default function TabBA25({ token, enabled }: Props) {
                         <th className="px-3 py-2 text-right font-medium">Realizado</th>
                         <th className="px-3 py-2 text-right font-medium">%</th>
                         <th className="px-3 py-2 text-right font-medium">Faltam</th>
+                        <th className="px-3 py-2 text-right font-medium">Meta/dia</th>
                         <th className="px-3 py-2 w-28"></th>
                         <th className="px-3 py-2"></th>
                       </tr>
@@ -555,6 +565,11 @@ export default function TabBA25({ token, enabled }: Props) {
                           <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">{pct(row.real, row.meta).toFixed(1)}%</td>
                           <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">
                             {row.real >= row.meta ? <span className="text-green-600 dark:text-green-400">—</span> : (row.meta - row.real).toLocaleString('pt-BR')}
+                          </td>
+                          <td className="px-3 py-2 text-right tabular-nums">
+                            {row.real >= row.meta
+                              ? <span className="text-green-600 dark:text-green-400">—</span>
+                              : <span className="font-medium" style={{ color: row.color }}>{Math.ceil((row.meta - row.real) / diasRestantes).toLocaleString('pt-BR')}/dia</span>}
                           </td>
                           <td className="px-3 py-2"><ProgressBar value={row.real} max={row.meta} color={row.color} /></td>
                           <td className="px-3 py-2"><StatusBadge value={row.real} max={row.meta} /></td>
