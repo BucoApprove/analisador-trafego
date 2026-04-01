@@ -87,34 +87,49 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     const accessToken = await getAccessToken()
 
-    // Busca paginada — Hotmart retorna até 500 por página
-    let allItems: HotmartItem[] = []
-    let nextPageToken: string | undefined
+    // Busca paginada para um status específico
+    async function fetchByStatus(status: string): Promise<HotmartItem[]> {
+      const items: HotmartItem[] = []
+      let nextPageToken: string | undefined
+      do {
+        const url = new URL('https://developers.hotmart.com/payments/api/v1/sales/history')
+        url.searchParams.set('transaction_status', status)
+        url.searchParams.set('start_date', String(startMs))
+        url.searchParams.set('end_date', String(endMs))
+        url.searchParams.set('max_results', '500')
+        if (nextPageToken) url.searchParams.set('page_token', nextPageToken)
 
-    do {
-      const url = new URL('https://developers.hotmart.com/payments/api/v1/sales/history')
-      url.searchParams.set('transaction_status', 'APPROVED')
-      url.searchParams.set('start_date', String(startMs))
-      url.searchParams.set('end_date', String(endMs))
-      url.searchParams.set('max_results', '500')
-      if (nextPageToken) url.searchParams.set('page_token', nextPageToken)
+        const response = await fetch(url.toString(), {
+          headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+        })
 
-      const response = await fetch(url.toString(), {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          'Content-Type': 'application/json',
-        },
-      })
+        if (!response.ok) {
+          const txt = await response.text()
+          throw new Error(`Hotmart API error ${response.status} (${status}): ${txt.substring(0, 200)}`)
+        }
 
-      if (!response.ok) {
-        const txt = await response.text()
-        return res.status(502).json({ error: `Hotmart API error ${response.status}`, detail: txt.substring(0, 300) })
-      }
+        const data: HotmartResponse = await response.json()
+        items.push(...(data.items ?? []))
+        nextPageToken = data.page_info?.next_page_token
+      } while (nextPageToken)
+      return items
+    }
 
-      const data: HotmartResponse = await response.json()
-      allItems = allItems.concat(data.items ?? [])
-      nextPageToken = data.page_info?.next_page_token
-    } while (nextPageToken)
+    // Busca APPROVED e COMPLETE em paralelo e combina
+    const [approvedItems, completeItems] = await Promise.all([
+      fetchByStatus('APPROVED'),
+      fetchByStatus('COMPLETE'),
+    ])
+
+    // Deduplica por transaction code
+    const seenTransactions = new Set<string>()
+    const allItems: HotmartItem[] = []
+    for (const item of [...approvedItems, ...completeItems]) {
+      const tx = item.transaction ?? ''
+      if (tx && seenTransactions.has(tx)) continue
+      if (tx) seenTransactions.add(tx)
+      allItems.push(item)
+    }
 
     // Agrupa por produto
     const byProduct = new Map<string, { id: number; name: string; total: number; count: number }>()
