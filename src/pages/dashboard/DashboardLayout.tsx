@@ -19,10 +19,10 @@ interface DashboardLayoutProps {
 }
 
 const TABS = [
+  { id: 'ba25', label: 'BA25 🚀' },
   { id: 'visao-geral', label: 'Visão Geral' },
   { id: 'campanhas', label: 'Campanhas' },
   { id: 'lancamento', label: 'Lançamento' },
-  { id: 'ba25', label: 'BA25 🚀' },
   { id: 'leads', label: 'Leads' },
   { id: 'inscritos', label: 'Inscritos' },
   { id: 'instagram', label: 'Instagram' },
@@ -31,7 +31,7 @@ const TABS = [
 ]
 
 export default function DashboardLayout({ token, onLogout }: DashboardLayoutProps) {
-  const [activeTab, setActiveTab] = useState('visao-geral')
+  const [activeTab, setActiveTab] = useState('ba25')
 
   return (
     <div className="min-h-screen bg-background">

@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import type { LaunchData, GoalsData, RawLaunchResponse } from './types'
 import {
   SectionHeader, TabLoading, TabError,
@@ -8,7 +8,7 @@ import {
   LineChart, Line,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts'
-import { RefreshCw } from 'lucide-react'
+import { RefreshCw, ChevronDown } from 'lucide-react'
 
 interface Props { token: string; enabled: boolean }
 
@@ -28,6 +28,29 @@ function makeGetCpl(map: Record<string, number> | undefined) {
     if (spend == null || leads === 0) return null
     return Math.round((spend / leads) * 100) / 100
   }
+}
+
+function AccordionItem({ title, children, defaultOpen = false }: { title: string; children: React.ReactNode; defaultOpen?: boolean }) {
+  const [open, setOpen] = useState(defaultOpen)
+  const bodyRef = useRef<HTMLDivElement>(null)
+  return (
+    <div className="rounded-lg border bg-card overflow-hidden">
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="w-full flex items-center justify-between px-4 py-3 text-sm font-semibold hover:bg-muted/40 transition-colors"
+      >
+        {title}
+        <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform duration-200 ${open ? 'rotate-180' : ''}`} />
+      </button>
+      <div
+        ref={bodyRef}
+        className="overflow-hidden transition-all duration-200"
+        style={{ maxHeight: open ? '9999px' : '0px' }}
+      >
+        <div className="border-t">{children}</div>
+      </div>
+    </div>
+  )
 }
 
 function UtmTable({
@@ -635,60 +658,57 @@ export default function TabBA25({ token, enabled }: Props) {
             )
           })()}
 
-          {/* UTM breakdown */}
-          <div>
-            <SectionHeader
-              title="Análise de UTMs"
-              description="Leads únicos no período por canal, público, campanha e criativo. A coluna CPL usa o gasto real do anúncio via Meta Ads API."
-            />
-            <div className="grid gap-6 lg:grid-cols-2">
-              {data.bySource.length > 0 && (
-                <UtmTable
-                  title="Fonte (utm_source)"
-                  rows={data.bySource}
-                  total={data.totalUnique}
-                  color={CHART_COLORS[0]}
-                  getCpl={makeGetCpl(data.spendByUtm?.source)}
-                  cplNote="CPL calculado a partir do gasto real dos anúncios com esse utm_source no período."
-                />
-              )}
-              {data.byMedium.length > 0 && (
-                <UtmTable
-                  title="Público (utm_medium)"
-                  rows={data.byMedium}
-                  total={data.totalUnique}
-                  color={CHART_COLORS[1]}
-                  hint="No BA25 corresponde ao nome do conjunto de anúncios (adset), ex: Env7d_Visitantes180d."
-                  getCpl={makeGetCpl(data.spendByUtm?.medium)}
-                  cplNote="CPL calculado a partir do gasto real por conjunto de anúncios (adset) no período."
-                />
-              )}
-              {data.byCampaign.length > 0 && (
-                <UtmTable
-                  title="Campanha (utm_campaign)"
-                  rows={data.byCampaign}
-                  total={data.totalUnique}
-                  color={CHART_COLORS[2]}
-                  getCpl={makeGetCpl(data.spendByUtm?.campaign)}
-                  cplNote="CPL calculado a partir do gasto real da campanha no período."
-                />
-              )}
-              {data.byContent.filter(r => r.name !== '(não informado)').length > 0 && (
-                <UtmTable
-                  title="Criativo (utm_content)"
-                  rows={data.byContent}
-                  total={data.totalUnique}
-                  color={CHART_COLORS[3]}
-                  hint="No BA25 corresponde ao nome do anúncio (ad), ex: BA25_Ad_Captura_22."
-                  getCpl={makeGetCpl(data.spendByUtm?.content)}
-                  cplNote="CPL calculado a partir do gasto real por anúncio no período."
-                />
-              )}
-            </div>
-          </div>
+          {/* Acordeão: UTMs + Evolução diária + Campanhas */}
+          <div className="space-y-2">
+            <AccordionItem title="Análise de UTMs">
+              <div className="p-4 grid gap-6 lg:grid-cols-2">
+                {data.bySource.length > 0 && (
+                  <UtmTable
+                    title="Fonte (utm_source)"
+                    rows={data.bySource}
+                    total={data.totalUnique}
+                    color={CHART_COLORS[0]}
+                    getCpl={makeGetCpl(data.spendByUtm?.source)}
+                    cplNote="CPL calculado a partir do gasto real dos anúncios com esse utm_source no período."
+                  />
+                )}
+                {data.byMedium.length > 0 && (
+                  <UtmTable
+                    title="Público (utm_medium)"
+                    rows={data.byMedium}
+                    total={data.totalUnique}
+                    color={CHART_COLORS[1]}
+                    hint="No BA25 corresponde ao nome do conjunto de anúncios (adset), ex: Env7d_Visitantes180d."
+                    getCpl={makeGetCpl(data.spendByUtm?.medium)}
+                    cplNote="CPL calculado a partir do gasto real por conjunto de anúncios (adset) no período."
+                  />
+                )}
+                {data.byCampaign.length > 0 && (
+                  <UtmTable
+                    title="Campanha (utm_campaign)"
+                    rows={data.byCampaign}
+                    total={data.totalUnique}
+                    color={CHART_COLORS[2]}
+                    getCpl={makeGetCpl(data.spendByUtm?.campaign)}
+                    cplNote="CPL calculado a partir do gasto real da campanha no período."
+                  />
+                )}
+                {data.byContent.filter(r => r.name !== '(não informado)').length > 0 && (
+                  <UtmTable
+                    title="Criativo (utm_content)"
+                    rows={data.byContent}
+                    total={data.totalUnique}
+                    color={CHART_COLORS[3]}
+                    hint="No BA25 corresponde ao nome do anúncio (ad), ex: BA25_Ad_Captura_22."
+                    getCpl={makeGetCpl(data.spendByUtm?.content)}
+                    cplNote="CPL calculado a partir do gasto real por anúncio no período."
+                  />
+                )}
+              </div>
+            </AccordionItem>
 
-          {/* Evolução diária */}
-          {(data.leadsByDay.length > 0 || (data.dailyMeta?.length ?? 0) > 0) && (() => {
+            <AccordionItem title="Evolução Diária">
+            {(data.leadsByDay.length > 0 || (data.dailyMeta?.length ?? 0) > 0) ? (() => {
             const leadsMap = new Map(data.leadsByDay.map(d => [d.date, d.count]))
             const metaMap = new Map((data.dailyMeta ?? []).map(d => [d.date, d]))
             const allDates = [...new Set([...leadsMap.keys(), ...metaMap.keys()])].sort()
@@ -700,10 +720,7 @@ export default function TabBA25({ token, enabled }: Props) {
             const totPv = allDates.reduce((s, d) => s + (metaMap.get(d)?.pageViews ?? 0), 0)
 
             return (
-              <div>
-                <p className="mb-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                  Evolução diária {hasMeta ? '— Investimento + Leads' : '— Leads'}
-                </p>
+              <div className="p-4">
                 <div className="overflow-x-auto rounded-md border">
                   <table className="w-full text-xs tabular-nums">
                     <thead className="bg-muted/60 text-[11px]">
@@ -783,35 +800,34 @@ export default function TabBA25({ token, enabled }: Props) {
                 </div>
               </div>
             )
-          })()}
+          })() : <p className="p-4 text-xs text-muted-foreground">Sem dados no período.</p>}
+            </AccordionItem>
 
-          {/* Lista de campanhas */}
-          {(data.metaCampaigns?.length ?? 0) > 0 && (
-            <div className="rounded-lg border bg-card overflow-hidden">
-              <div className="px-4 py-2 border-b bg-muted/40">
-                <p className="text-xs font-semibold">Campanhas Meta Ads</p>
-              </div>
-              <table className="w-full text-xs">
-                <thead className="bg-muted/60">
-                  <tr>
-                    <th className="px-3 py-1 text-left font-medium">Campanha</th>
-                    <th className="px-3 py-1 text-right font-medium">Gasto</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y">
-                  {data.metaCampaigns!.map(c => (
-                    <tr key={c.name + c.spend} className="hover:bg-muted/40">
-                      <td className="px-3 py-1">{c.name}</td>
-                      <td className="px-3 py-1 text-right tabular-nums">
-                        R$ {c.spend.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </td>
+            <AccordionItem title={`Campanhas Meta Ads (${data.metaCampaigns?.length ?? 0})`}>
+              {(data.metaCampaigns?.length ?? 0) > 0 ? (
+                <table className="w-full text-xs">
+                  <thead className="bg-muted/60">
+                    <tr>
+                      <th className="px-3 py-1 text-left font-medium">Campanha</th>
+                      <th className="px-3 py-1 text-right font-medium">Gasto</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+                  </thead>
+                  <tbody className="divide-y">
+                    {data.metaCampaigns!.map(c => (
+                      <tr key={c.name + c.spend} className="hover:bg-muted/40">
+                        <td className="px-3 py-1">{c.name}</td>
+                        <td className="px-3 py-1 text-right tabular-nums">
+                          R$ {c.spend.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : <p className="p-4 text-xs text-muted-foreground">Sem campanhas.</p>}
+            </AccordionItem>
+          </div>
         </>
+
       )}
     </div>
   )
