@@ -87,80 +87,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const timeRange = JSON.stringify({ since, until })
 
-    // 2) Breakdown diário (filtro por AND keyword)
-    const dUrl = new URL(`https://graph.facebook.com/v19.0/${adAccount}/insights`)
-    dUrl.searchParams.set('fields', 'date_start,spend,clicks,actions')
-    dUrl.searchParams.set('time_increment', '1')
-    dUrl.searchParams.set('time_range', timeRange)
-    dUrl.searchParams.set('level', 'campaign')
-    dUrl.searchParams.set('filtering', JSON.stringify([{ field: 'campaign.name', operator: 'CONTAIN', value: spendKeywords[0] ?? '' }]))
-    dUrl.searchParams.set('limit', '1000')
-    dUrl.searchParams.set('access_token', accessToken)
-
-    // 3) Ad insights AND keyword
+    // 2) Ad insights — nível de anúncio, cobre AND keyword
+    //    OR keywords filtradas em JS pelo matchedCampaignNames (sem chamada extra)
     const aiUrl = new URL(`https://graph.facebook.com/v19.0/${adAccount}/insights`)
-    aiUrl.searchParams.set('fields', 'ad_id,ad_name,adset_name,campaign_name,spend')
+    aiUrl.searchParams.set('fields', 'ad_name,adset_name,campaign_name,spend')
     aiUrl.searchParams.set('time_range', timeRange)
     aiUrl.searchParams.set('level', 'ad')
     aiUrl.searchParams.set('filtering', JSON.stringify([{ field: 'campaign.name', operator: 'CONTAIN', value: spendKeywords[0] ?? '' }]))
     aiUrl.searchParams.set('limit', '500')
     aiUrl.searchParams.set('access_token', accessToken)
 
-    // 4) Ad insights OR keyword (apenas primeiro, o resto é filtrado por matchedCampaignNames)
-    const orAiUrl = orKeywords.length > 0 ? (() => {
-      const u = new URL(`https://graph.facebook.com/v19.0/${adAccount}/insights`)
-      u.searchParams.set('fields', 'ad_id,ad_name,adset_name,campaign_name,spend')
-      u.searchParams.set('time_range', timeRange)
-      u.searchParams.set('level', 'ad')
-      u.searchParams.set('filtering', JSON.stringify([{ field: 'campaign.name', operator: 'CONTAIN', value: orKeywords[0] }]))
-      u.searchParams.set('limit', '500')
-      u.searchParams.set('access_token', accessToken)
-      return u
-    })() : null
-
-    const fetches: Promise<Response>[] = [fetch(dUrl.toString()), fetch(aiUrl.toString())]
-    if (orAiUrl) fetches.push(fetch(orAiUrl.toString()))
-
-    const [dRes, aiRes, orAiRes] = await Promise.all(fetches)
-
-    // Processa breakdown diário
-    let dailyMeta: { date: string; spend: number; clicks: number; linkClicks: number; pageViews: number }[] = []
-    if (dRes.ok) {
-      const dData = await dRes.json() as {
-        data: Array<{ date_start: string; spend: string; clicks: string; actions?: Array<{ action_type: string; value: string }> }>
-      }
-      const byDate = new Map<string, { spend: number; clicks: number; linkClicks: number; pageViews: number }>()
-      for (const row of dData.data ?? []) {
-        const d = row.date_start
-        const cur = byDate.get(d) ?? { spend: 0, clicks: 0, linkClicks: 0, pageViews: 0 }
-        const actionVal = (type: string) => Number(row.actions?.find(a => a.action_type === type)?.value ?? 0)
-        byDate.set(d, {
-          spend: cur.spend + Number(row.spend ?? 0),
-          clicks: cur.clicks + Number(row.clicks ?? 0),
-          linkClicks: cur.linkClicks + actionVal('link_click'),
-          pageViews: cur.pageViews + actionVal('landing_page_view'),
-        })
-      }
-      dailyMeta = Array.from(byDate.entries()).sort(([a], [b]) => a.localeCompare(b)).map(([date, v]) => ({
-        date,
-        spend: Math.round(v.spend * 100) / 100,
-        clicks: v.clicks,
-        linkClicks: v.linkClicks,
-        pageViews: v.pageViews,
-      }))
-    }
+    const aiRes = await fetch(aiUrl.toString())
 
     // Processa ad insights
-    type AdRow = { ad_id: string; ad_name?: string; adset_name?: string; campaign_name?: string; spend: string }
+    type AdRow = { ad_name?: string; adset_name?: string; campaign_name?: string; spend: string }
     let allAdRows: AdRow[] = []
     if (aiRes.ok) {
       const d = await aiRes.json() as { data: AdRow[] }
-      allAdRows = allAdRows.concat(d.data ?? [])
+      allAdRows = d.data ?? []
     }
-    if (orAiRes?.ok) {
-      const d = await orAiRes.json() as { data: AdRow[] }
-      allAdRows = allAdRows.concat(d.data ?? [])
-    }
+
+    // dailyMeta removido para evitar rate limit Meta — campo retornado vazio
+    const dailyMeta: never[] = []
 
     let spendByUtm: { source: Record<string, number>; medium: Record<string, number>; campaign: Record<string, number>; content: Record<string, number>; term: Record<string, number> } | undefined
 
