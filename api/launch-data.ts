@@ -65,19 +65,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const paramsAll = [{ name: 'pattern', value: containsPattern }, ...broadParam]
 
   try {
-    // Uma única query traz todas as linhas brutas; frontend faz todos os cálculos
+    // Query deduplicada por email+tag+data — frontend faz os cálculos
     const result = await bqQuery(
       `SELECT
          lead_email,
          tag_name,
-         DATE(lead_register) AS date,
-         utm_source,
-         utm_campaign,
-         utm_medium,
-         utm_content,
-         utm_term
+         MIN(DATE(lead_register)) AS date,
+         ANY_VALUE(utm_source)   AS utm_source,
+         ANY_VALUE(utm_campaign) AS utm_campaign,
+         ANY_VALUE(utm_medium)   AS utm_medium,
+         ANY_VALUE(utm_content)  AS utm_content,
+         ANY_VALUE(utm_term)     AS utm_term
        FROM ${tLeads}
-       WHERE ${tagFilter}`,
+       WHERE ${tagFilter}
+       GROUP BY lead_email, tag_name`,
       paramsAll,
     )
 
@@ -89,6 +90,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     })
   } catch (err) {
     console.error('launch-data error:', err)
-    res.status(500).json({ error: 'Erro interno' })
+    res.status(500).json({ error: 'Erro interno', detail: (err as Error).message })
   }
 }
