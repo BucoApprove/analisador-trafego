@@ -1,6 +1,39 @@
 import { useState, useCallback, useEffect } from 'react'
 import { RefreshCw, ChevronDown, ChevronUp } from 'lucide-react'
 
+function ExpandableRow({ children, stripe, sources }: {
+  children: React.ReactNode
+  stripe: boolean
+  sources: HotmartProduct[]
+}) {
+  const [open, setOpen] = useState(false)
+  const cols = 7
+  return (
+    <>
+      <tr
+        className={`border-b ${stripe ? 'bg-muted/20' : ''} ${sources.length > 0 ? 'cursor-pointer hover:bg-muted/30' : ''}`}
+        onClick={() => sources.length > 0 && setOpen(o => !o)}
+      >
+        {children}
+        <td className="pr-2 text-right">
+          {sources.length > 0 && (
+            open ? <ChevronUp className="h-3 w-3 inline text-muted-foreground" />
+                 : <ChevronDown className="h-3 w-3 inline text-muted-foreground" />
+          )}
+        </td>
+      </tr>
+      {open && sources.map(p => (
+        <tr key={p.id} className="border-b bg-muted/5 text-xs text-muted-foreground">
+          <td className="pl-8 py-1.5 italic">{p.name}</td>
+          <td />
+          <td className="px-4 py-1.5 text-right">{fmtBRL(p.total)}</td>
+          <td colSpan={cols - 3} className="px-4 py-1.5 text-right">{p.count} venda{p.count !== 1 ? 's' : ''}</td>
+        </tr>
+      ))}
+    </>
+  )
+}
+
 interface Props { token: string; enabled: boolean }
 
 interface GoalItem { name: string; meta: number }
@@ -95,6 +128,7 @@ export default function TabMetasMensais({ token, enabled }: Props) {
 
   // Build faturado map from Hotmart → planilha names
   const faturadoMap: Record<string, number> = {}
+  const sourcesMap: Record<string, HotmartProduct[]> = {}
   const unmappedProducts: HotmartProduct[] = []
 
   if (hotmartData) {
@@ -102,10 +136,11 @@ export default function TabMetasMensais({ token, enabled }: Props) {
       const planilhaName = matchHotmart(p.name)
       if (planilhaName) {
         faturadoMap[planilhaName] = (faturadoMap[planilhaName] ?? 0) + p.total
+        sourcesMap[planilhaName] = [...(sourcesMap[planilhaName] ?? []), p]
       } else {
         unmappedProducts.push(p)
-        // Accumulate in Outros
         faturadoMap['Outros'] = (faturadoMap['Outros'] ?? 0) + p.total
+        sourcesMap['Outros'] = [...(sourcesMap['Outros'] ?? []), p]
       }
     }
   }
@@ -196,6 +231,7 @@ export default function TabMetasMensais({ token, enabled }: Props) {
                 <th className="text-right px-4 py-2.5 font-medium">Meta/Dia</th>
                 <th className="text-right px-4 py-2.5 font-medium">% Meta</th>
                 <th className="text-center px-4 py-2.5 font-medium">Status</th>
+                <th className="w-4" />
               </tr>
             </thead>
             <tbody>
@@ -208,8 +244,9 @@ export default function TabMetasMensais({ token, enabled }: Props) {
                   : pct >= 100 ? '✅ Atingido'
                   : pct >= 70 ? '🟡 Em andamento'
                   : '🔴 Abaixo'
+                const sources = sourcesMap[g.name] ?? []
                 return (
-                  <tr key={g.name} className={`border-b last:border-0 ${i % 2 === 0 ? '' : 'bg-muted/20'}`}>
+                  <ExpandableRow key={g.name} stripe={i % 2 !== 0} sources={sources}>
                     <td className="px-4 py-2.5 font-medium">{g.name}</td>
                     <td className="px-4 py-2.5 text-right text-muted-foreground">{g.meta > 0 ? fmtBRL(g.meta) : '—'}</td>
                     <td className="px-4 py-2.5 text-right font-semibold">{fat > 0 ? fmtBRL(fat) : '—'}</td>
@@ -227,7 +264,7 @@ export default function TabMetasMensais({ token, enabled }: Props) {
                       ) : '—'}
                     </td>
                     <td className="px-4 py-2.5 text-center text-xs">{status}</td>
-                  </tr>
+                  </ExpandableRow>
                 )
               })}
             </tbody>
@@ -245,6 +282,7 @@ export default function TabMetasMensais({ token, enabled }: Props) {
                     </span>
                   ) : '—'}
                 </td>
+                <td />
                 <td />
               </tr>
             </tfoot>
