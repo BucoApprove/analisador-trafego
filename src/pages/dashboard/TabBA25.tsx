@@ -433,12 +433,13 @@ export default function TabBA25({ token, enabled }: Props) {
             const totalLeadsRealizados = leadsTrafico + leadsOrganico + leadsManychat
             const totalMetaLeads = goals.metaLeadsTrafico + goals.metaLeadsOrganico + goals.metaLeadsManychat
 
-            // Gasto por fase: filtragem composta case-insensitive sobre utm_campaign
+            // Gasto por fase: usa metaCampaigns como fonte única (mesma fonte do KPI)
             function spendFor(predicate: (name: string) => boolean) {
-              if (!data!.spendByUtm?.campaign) return null
-              return Object.entries(data!.spendByUtm.campaign)
-                .filter(([k]) => predicate(k.toLowerCase()))
-                .reduce((s, [, v]) => s + v, 0)
+              const campaigns = data!.metaCampaigns
+              if (!campaigns?.length) return null
+              return campaigns
+                .filter(c => predicate(c.name.toLowerCase()))
+                .reduce((s, c) => s + c.spend, 0)
             }
 
             // Leads por tag keyword (coluna "Leads (tag)" da tabela de fases)
