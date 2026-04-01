@@ -107,28 +107,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       allAdRows = d.data ?? []
     }
 
-    // dailyMeta removido para evitar rate limit Meta — campo retornado vazio
     const dailyMeta: never[] = []
 
-    let spendByUtm: { source: Record<string, number>; medium: Record<string, number>; campaign: Record<string, number>; content: Record<string, number>; term: Record<string, number> } | undefined
+    // spendByUtm.campaign vem direto de metaCampaigns (já cobre AND + OR)
+    // spendByUtm.medium e .content vem do ad insights (só BA25, sem Instagram)
+    const utmSpend: Record<string, Record<string, number>> = { source: {}, medium: {}, campaign: {}, content: {}, term: {} }
 
-    if (allAdRows.length > 0) {
-      const utmSpend: Record<string, Record<string, number>> = { source: {}, medium: {}, campaign: {}, content: {}, term: {} }
-      for (const row of allAdRows) {
-        if (row.campaign_name && !matchedCampaignNames.has(row.campaign_name)) continue
-        const spend = Number(row.spend ?? 0)
-        if (!spend) continue
-        if (row.campaign_name) utmSpend.campaign[row.campaign_name] = (utmSpend.campaign[row.campaign_name] ?? 0) + spend
-        if (row.adset_name) utmSpend.medium[row.adset_name] = (utmSpend.medium[row.adset_name] ?? 0) + spend
-        if (row.ad_name) utmSpend.content[row.ad_name] = (utmSpend.content[row.ad_name] ?? 0) + spend
-      }
-      for (const dim of ['source', 'medium', 'campaign', 'content', 'term'] as const) {
-        for (const key of Object.keys(utmSpend[dim])) {
-          utmSpend[dim][key] = Math.round(utmSpend[dim][key] * 100) / 100
-        }
-      }
-      spendByUtm = utmSpend
+    for (const c of metaCampaigns) {
+      utmSpend.campaign[c.name] = Math.round(c.spend * 100) / 100
     }
+
+    for (const row of allAdRows) {
+      if (row.campaign_name && !matchedCampaignNames.has(row.campaign_name)) continue
+      const spend = Number(row.spend ?? 0)
+      if (!spend) continue
+      if (row.adset_name) utmSpend.medium[row.adset_name] = (utmSpend.medium[row.adset_name] ?? 0) + spend
+      if (row.ad_name) utmSpend.content[row.ad_name] = (utmSpend.content[row.ad_name] ?? 0) + spend
+    }
+
+    for (const dim of ['medium', 'content'] as const) {
+      for (const key of Object.keys(utmSpend[dim])) {
+        utmSpend[dim][key] = Math.round(utmSpend[dim][key] * 100) / 100
+      }
+    }
+
+    const spendByUtm = utmSpend
 
     res.json({ metaSpend, cpl, metaCampaigns, dailyMeta, spendByUtm })
   } catch (err) {
