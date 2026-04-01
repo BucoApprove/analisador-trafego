@@ -56,7 +56,7 @@ interface HotmartItem {
   product?: { id: number; name: string }
   purchase?: {
     price?: { value: number; currency_value?: string }
-    hotmart_fee?: { total: number }
+    hotmart_fee?: { base: number; total: number }
     approved_date?: number
     status?: string
     transaction?: string
@@ -142,9 +142,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const productId   = item.product?.id ?? 0
       const productName = item.product?.name ?? 'Desconhecido'
       const key = String(productId)
-      const gross = item.purchase?.price?.value ?? 0
+      // hotmart_fee.base = preço real do produto (sem juros de parcelamento CC)
+      // hotmart_fee.total = taxa da Hotmart (calculada sobre base, não sobre price.value)
+      // Receita líquida = base - total (bate com "Receita Líquida" do painel Hotmart)
+      const base  = item.purchase?.hotmart_fee?.base  ?? item.purchase?.price?.value ?? 0
       const fee   = item.purchase?.hotmart_fee?.total ?? 0
-      const value = gross - fee
+      const value = base - fee
 
       if (!byProduct.has(key)) {
         byProduct.set(key, { id: productId, name: productName, total: 0, count: 0 })
@@ -167,7 +170,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       products,
       grandTotal,
       totalTransactions: allItems.length,
-      _rawSample: allItems.filter(i => i.product?.name?.toLowerCase().includes('bucoapprove')).slice(0, 2),
     })
   } catch (err) {
     console.error('hotmart-sales error:', err)
