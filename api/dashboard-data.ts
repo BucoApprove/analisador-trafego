@@ -1,19 +1,20 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { bqQuery, tableLeads, tableVendas } from './_bq.js'
 
-function auth(req: VercelRequest, res: VercelResponse): boolean {
-  const token = process.env.DASHBOARD_TOKEN
+type Role = 'admin' | 'user'
+
+function auth(req: VercelRequest, res: VercelResponse): Role | null {
   const header = req.headers.authorization ?? ''
   const provided = header.startsWith('Bearer ') ? header.slice(7) : ''
-  if (!token || provided !== token) {
-    res.status(401).json({ error: 'Unauthorized' })
-    return false
-  }
-  return true
+  if (provided && provided === process.env.DASHBOARD_TOKEN_ADMIN) return 'admin'
+  if (provided && provided === process.env.DASHBOARD_TOKEN) return 'user'
+  res.status(401).json({ error: 'Unauthorized' })
+  return null
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  if (!auth(req, res)) return
+  const role = auth(req, res)
+  if (!role) return
 
   res.setHeader('Cache-Control', 's-maxage=300, stale-while-revalidate=60')
 
@@ -87,6 +88,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }))
 
     res.json({
+      role,
       inscritos: total,
       compradores: totalCompradores,
       conversao: total > 0 ? (totalCompradores / total) * 100 : 0,

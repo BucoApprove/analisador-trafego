@@ -5,7 +5,7 @@ function auth(req: VercelRequest, res: VercelResponse): boolean {
   const token = process.env.DASHBOARD_TOKEN
   const header = req.headers.authorization ?? ''
   const provided = header.startsWith('Bearer ') ? header.slice(7) : ''
-  if (!token || provided !== token) {
+  if (!provided || (provided !== token && provided !== process.env.DASHBOARD_TOKEN_ADMIN)) {
     res.status(401).json({ error: 'Unauthorized' })
     return false
   }

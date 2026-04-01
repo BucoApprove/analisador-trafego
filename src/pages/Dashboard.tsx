@@ -9,13 +9,18 @@ import DashboardLayout from './dashboard/DashboardLayout'
 
 export default function Dashboard() {
   const [token, setToken] = useState<string>(() => sessionStorage.getItem('dashboard-token') ?? '')
+  const [role, setRole] = useState<'admin' | 'user'>(() => (sessionStorage.getItem('dashboard-role') as 'admin' | 'user') ?? 'user')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
   // Se já tem token, renderiza o layout direto
   if (token) {
-    return <DashboardLayout token={token} onLogout={() => { sessionStorage.removeItem('dashboard-token'); setToken('') }} />
+    return <DashboardLayout token={token} role={role} onLogout={() => {
+      sessionStorage.removeItem('dashboard-token')
+      sessionStorage.removeItem('dashboard-role')
+      setToken('')
+    }} />
   }
 
   async function handleSubmit(e: FormEvent) {
@@ -35,12 +40,12 @@ export default function Dashboard() {
         return
       }
 
-      if (!res.ok && res.status !== 200) {
-        // Aceita qualquer resposta não-401 como autenticação válida
-        // (a API pode retornar erro de dados mas senha correta)
-      }
+      const body = await res.json().catch(() => ({}))
+      const resolvedRole: 'admin' | 'user' = body.role === 'admin' ? 'admin' : 'user'
 
       sessionStorage.setItem('dashboard-token', password)
+      sessionStorage.setItem('dashboard-role', resolvedRole)
+      setRole(resolvedRole)
       setToken(password)
     } catch {
       setError('Não foi possível conectar ao servidor.')

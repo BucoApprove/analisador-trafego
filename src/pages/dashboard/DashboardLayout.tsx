@@ -15,10 +15,11 @@ import TabPesquisa from './TabPesquisa'
 
 interface DashboardLayoutProps {
   token: string
+  role: 'admin' | 'user'
   onLogout: () => void
 }
 
-const TABS = [
+const TABS_USER = [
   { id: 'ba25', label: 'BA25 🚀' },
   { id: 'visao-geral', label: 'Visão Geral' },
   { id: 'campanhas', label: 'Campanhas' },
@@ -30,7 +31,14 @@ const TABS = [
   { id: 'pesquisa', label: 'Pesquisa' },
 ]
 
-export default function DashboardLayout({ token, onLogout }: DashboardLayoutProps) {
+const TABS_ADMIN = [
+  ...TABS_USER,
+  // Abas exclusivas do gestor
+  { id: 'metas-mensais', label: 'Metas Mensais' },
+]
+
+export default function DashboardLayout({ token, role, onLogout }: DashboardLayoutProps) {
+  const TABS = role === 'admin' ? TABS_ADMIN : TABS_USER
   const [activeTab, setActiveTab] = useState('ba25')
 
   return (
@@ -41,6 +49,9 @@ export default function DashboardLayout({ token, onLogout }: DashboardLayoutProp
           <div className="flex items-center gap-2">
             <BarChart2 className="h-5 w-5 text-primary" />
             <span className="font-semibold">Analisador de Tráfego</span>
+            {role === 'admin' && (
+              <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-primary/10 text-primary">Gestor</span>
+            )}
           </div>
           <Button variant="ghost" size="sm" onClick={onLogout}>
             <LogOut className="mr-2 h-4 w-4" />
@@ -88,6 +99,14 @@ export default function DashboardLayout({ token, onLogout }: DashboardLayoutProp
           <TabsContent value="pesquisa">
             <TabPesquisa token={token} enabled={activeTab === 'pesquisa'} />
           </TabsContent>
+          {role === 'admin' && (
+            <TabsContent value="metas-mensais">
+              <div className="flex flex-col items-center justify-center py-20 text-muted-foreground gap-2">
+                <p className="text-sm font-medium">Metas Mensais</p>
+                <p className="text-xs">Em construção — aba exclusiva do gestor</p>
+              </div>
+            </TabsContent>
+          )}
         </Tabs>
       </main>
     </div>
