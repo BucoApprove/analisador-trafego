@@ -59,6 +59,7 @@ interface HotmartItem {
     approved_date?: number
     status?: string
   }
+  commissions?: Array<{ value: number; source: string }>
   transaction?: string
 }
 
@@ -138,7 +139,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const productId   = item.product?.id ?? 0
       const productName = item.product?.name ?? 'Desconhecido'
       const key = String(productId)
-      const value = item.purchase?.price?.value ?? 0
+      // Usa comissão líquida do produtor (= receita líquida após taxas Hotmart)
+      // Fallback para preço bruto se commissions não estiver disponível
+      const producerCommission = item.commissions?.find(c => c.source === 'PRODUCER')
+      const value = producerCommission?.value ?? item.purchase?.price?.value ?? 0
 
       if (!byProduct.has(key)) {
         byProduct.set(key, { id: productId, name: productName, total: 0, count: 0 })
