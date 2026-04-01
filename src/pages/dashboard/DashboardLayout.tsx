@@ -12,6 +12,7 @@ import TabInstagram from './TabInstagram'
 import TabEmailCampaigns from './TabEmailCampaigns'
 import TabPaidTraffic from './TabPaidTraffic'
 import TabPesquisa from './TabPesquisa'
+import TabMetasMensais from './TabMetasMensais'
 
 interface DashboardLayoutProps {
   token: string
@@ -101,10 +102,7 @@ export default function DashboardLayout({ token, role, onLogout }: DashboardLayo
           </TabsContent>
           {role === 'admin' && (
             <TabsContent value="metas-mensais">
-              <div className="flex flex-col items-center justify-center py-20 text-muted-foreground gap-2">
-                <p className="text-sm font-medium">Metas Mensais</p>
-                <p className="text-xs">Em construção — aba exclusiva do gestor</p>
-              </div>
+              <TabMetasMensais token={token} enabled={activeTab === 'metas-mensais'} />
             </TabsContent>
           )}
         </Tabs>
