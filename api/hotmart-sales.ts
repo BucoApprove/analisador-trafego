@@ -161,6 +161,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       products,
       grandTotal,
       totalTransactions: allItems.length,
+      _debug: {
+        approvedCount: approvedItems.length,
+        completeCount: completeItems.length,
+        afterDedup: allItems.length,
+      },
     })
   } catch (err) {
     console.error('hotmart-sales error:', err)
