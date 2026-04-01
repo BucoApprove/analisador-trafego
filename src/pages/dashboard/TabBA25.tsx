@@ -151,7 +151,6 @@ export default function TabBA25({ token, enabled }: Props) {
       const campaignMap = new Map<string, Set<string>>()
       const mediumMap = new Map<string, Set<string>>()
       const contentMap = new Map<string, Set<string>>()
-      const termMap = new Map<string, Set<string>>()
 
       const inPeriod = (d: string) => d >= sinceDate && d <= untilDate
 
@@ -187,7 +186,6 @@ export default function TabBA25({ token, enabled }: Props) {
           addUtm(campaignMap, row.utm_campaign)
           addUtm(mediumMap, row.utm_medium)
           addUtm(contentMap, row.utm_content)
-          addUtm(termMap, row.utm_term)
         }
       }
 
@@ -224,7 +222,7 @@ export default function TabBA25({ token, enabled }: Props) {
         byCampaign: mapToArr(campaignMap, '(sem campanha)'),
         byMedium: mapToArr(mediumMap, '(não informado)'),
         byContent: mapToArr(contentMap, '(não informado)'),
-        byTerm: mapToArr(termMap, '(não informado)'),
+        byTerm: [],
         dateRange: { since, until },
       }
       // ──────────────────────────────────────────────────────────────────────

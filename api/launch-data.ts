@@ -74,8 +74,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
          ANY_VALUE(utm_source)   AS utm_source,
          ANY_VALUE(utm_campaign) AS utm_campaign,
          ANY_VALUE(utm_medium)   AS utm_medium,
-         ANY_VALUE(utm_content)  AS utm_content,
-         ANY_VALUE(utm_term)     AS utm_term
+         ANY_VALUE(utm_content)  AS utm_content
        FROM ${tLeads}
        WHERE ${tagFilter}
        GROUP BY lead_email, tag_name`,

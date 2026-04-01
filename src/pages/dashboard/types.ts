@@ -20,7 +20,6 @@ export interface RawLeadRow {
   utm_campaign: string | null
   utm_medium: string | null
   utm_content: string | null
-  utm_term: string | null
 }
 
 export interface RawLaunchResponse {
