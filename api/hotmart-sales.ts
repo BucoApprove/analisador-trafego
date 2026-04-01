@@ -1,11 +1,12 @@
 /**
- * Busca vendas aprovadas da Hotmart por mês.
+ * Busca vendas aprovadas da Hotmart por mês via OAuth2 client_credentials.
  *
  * Query params:
  *   month — formato YYYY-MM (ex: 2026-04). Default: mês atual.
  *
  * Env vars:
- *   HOTMART_TOKEN — Hottok de produção
+ *   HOTMART_CLIENT_ID     — client_id do app Hotmart
+ *   HOTMART_CLIENT_SECRET — client_secret do app Hotmart
  *   DASHBOARD_TOKEN / DASHBOARD_TOKEN_ADMIN
  */
 import type { VercelRequest, VercelResponse } from '@vercel/node'
@@ -21,6 +22,34 @@ function auth(req: VercelRequest, res: VercelResponse): boolean {
     return false
   }
   return true
+}
+
+async function getAccessToken(): Promise<string> {
+  const clientId     = process.env.HOTMART_CLIENT_ID ?? ''
+  const clientSecret = process.env.HOTMART_CLIENT_SECRET ?? ''
+  if (!clientId || !clientSecret) throw new Error('HOTMART_CLIENT_ID / HOTMART_CLIENT_SECRET não configurados')
+
+  const basic = Buffer.from(`${clientId}:${clientSecret}`).toString('base64')
+
+  const resp = await fetch(
+    'https://api-sec-vlc.hotmart.com/security/oauth/token?grant_type=client_credentials',
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Basic ${basic}`,
+        'Content-Type': 'application/json',
+      },
+    },
+  )
+
+  if (!resp.ok) {
+    const txt = await resp.text()
+    throw new Error(`Hotmart OAuth error ${resp.status}: ${txt.substring(0, 200)}`)
+  }
+
+  const data = await resp.json() as { access_token?: string }
+  if (!data.access_token) throw new Error('Hotmart OAuth: access_token ausente na resposta')
+  return data.access_token
 }
 
 interface HotmartItem {
@@ -43,9 +72,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   res.setHeader('Cache-Control', 's-maxage=120, stale-while-revalidate=60')
 
-  const hottok = process.env.HOTMART_TOKEN ?? ''
-  if (!hottok) return res.status(500).json({ error: 'HOTMART_TOKEN não configurado' })
-
   // Determina o mês
   const monthParam = typeof req.query.month === 'string' ? req.query.month : ''
   const [year, month] = monthParam
@@ -53,12 +79,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     : [new Date().getFullYear(), new Date().getMonth() + 1]
 
   const startDate = new Date(year, month - 1, 1, 0, 0, 0, 0)
-  const endDate   = new Date(year, month, 0, 23, 59, 59, 999) // último dia do mês
+  const endDate   = new Date(year, month, 0, 23, 59, 59, 999)
 
   const startMs = startDate.getTime()
   const endMs   = endDate.getTime()
 
   try {
+    const accessToken = await getAccessToken()
+
     // Busca paginada — Hotmart retorna até 500 por página
     let allItems: HotmartItem[] = []
     let nextPageToken: string | undefined
@@ -73,7 +101,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       const response = await fetch(url.toString(), {
         headers: {
-          Authorization: `Bearer ${hottok}`,
+          Authorization: `Bearer ${accessToken}`,
           'Content-Type': 'application/json',
         },
       })
