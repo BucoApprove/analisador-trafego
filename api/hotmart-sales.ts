@@ -58,9 +58,11 @@ interface HotmartItem {
     price?: { value: number; currency_value?: string }
     approved_date?: number
     status?: string
+    [key: string]: unknown
   }
-  commissions?: Array<{ value: number; source: string }>
+  commissions?: Array<{ value: number; source: string; [key: string]: unknown }>
   transaction?: string
+  [key: string]: unknown
 }
 
 interface HotmartResponse {
@@ -139,10 +141,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const productId   = item.product?.id ?? 0
       const productName = item.product?.name ?? 'Desconhecido'
       const key = String(productId)
-      // Usa comissão líquida do produtor (= receita líquida após taxas Hotmart)
-      // Fallback para preço bruto se commissions não estiver disponível
-      const producerCommission = item.commissions?.find(c => c.source === 'PRODUCER')
-      const value = producerCommission?.value ?? item.purchase?.price?.value ?? 0
+      const value = item.purchase?.price?.value ?? 0
 
       if (!byProduct.has(key)) {
         byProduct.set(key, { id: productId, name: productName, total: 0, count: 0 })
@@ -165,6 +164,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       products,
       grandTotal,
       totalTransactions: allItems.length,
+      _rawSample: allItems.slice(0, 3),
     })
   } catch (err) {
     console.error('hotmart-sales error:', err)
