@@ -10,6 +10,26 @@ export interface DashboardData {
   inscritosPorCampanha: { name: string; value: number }[]
 }
 
+// ─── Dados brutos da API ─────────────────────────────────────────────────────
+
+export interface RawLeadRow {
+  lead_email: string
+  tag_name: string | null
+  date: string
+  utm_source: string | null
+  utm_campaign: string | null
+  utm_medium: string | null
+  utm_content: string | null
+  utm_term: string | null
+}
+
+export interface RawLaunchResponse {
+  prefix: string
+  rows: RawLeadRow[]
+  since: string
+  until: string
+}
+
 // ─── Análise de Lançamento ───────────────────────────────────────────────────
 
 export interface LaunchTagCount {

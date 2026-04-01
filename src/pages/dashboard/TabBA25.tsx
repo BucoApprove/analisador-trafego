@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from 'react'
-import type { LaunchData, GoalsData } from './types'
+import type { LaunchData, GoalsData, RawLaunchResponse } from './types'
 import {
   SectionHeader, TabLoading, TabError,
   ChartTooltip, CHART_COLORS,
@@ -121,7 +121,6 @@ export default function TabBA25({ token, enabled }: Props) {
       const bqUrl = `/api/launch-data?prefix=${encodeURIComponent(FIXED_PREFIX)}&since=${since}&until=${until}&broadSearch=true`
       const metaUrl = `/api/meta-spend?since=${since}&until=${until}&spendFilter=${encodeURIComponent(FIXED_SPEND_FILTER)}&orFilter=${encodeURIComponent(FIXED_OR_FILTER)}`
 
-      // Dispara BQ e Meta em paralelo
       const [bqRes, metaRes] = await Promise.all([
         fetch(bqUrl, { headers }),
         fetch(metaUrl, { headers }),
@@ -132,17 +131,108 @@ export default function TabBA25({ token, enabled }: Props) {
         throw new Error(body.error ?? `Erro ${bqRes.status}`)
       }
 
-      const bqData: LaunchData = await bqRes.json()
+      const raw: RawLaunchResponse = await bqRes.json()
+
+      // ── Processa dados brutos no frontend ──────────────────────────────────
+      const sinceDate = since
+      const untilDate = until
+
+      // Agrupa por tag: histórico e período
+      const tagAll = new Map<string, Set<string>>()
+      const tagPeriod = new Map<string, Set<string>>()
+      const emailsAll = new Set<string>()
+      const emailsPeriod = new Set<string>()
+      const dayEmails = new Map<string, Set<string>>()
+      const sourceMap = new Map<string, Set<string>>()
+      const campaignMap = new Map<string, Set<string>>()
+      const mediumMap = new Map<string, Set<string>>()
+      const contentMap = new Map<string, Set<string>>()
+      const termMap = new Map<string, Set<string>>()
+
+      const inPeriod = (d: string) => d >= sinceDate && d <= untilDate
+
+      for (const row of raw.rows) {
+        const email = row.lead_email
+        const tag = row.tag_name ?? ''
+        const date = row.date?.slice(0, 10) ?? ''
+        if (!email) continue
+
+        emailsAll.add(email)
+        if (tag) {
+          if (!tagAll.has(tag)) tagAll.set(tag, new Set())
+          tagAll.get(tag)!.add(email)
+        }
+
+        if (date && inPeriod(date)) {
+          emailsPeriod.add(email)
+          if (tag) {
+            if (!tagPeriod.has(tag)) tagPeriod.set(tag, new Set())
+            tagPeriod.get(tag)!.add(email)
+          }
+          // primeiro dia do lead no período
+          const prev = dayEmails.get(date)
+          if (!prev) dayEmails.set(date, new Set())
+          dayEmails.get(date)!.add(email)
+
+          const addUtm = (map: Map<string, Set<string>>, val: string | null) => {
+            const k = val ?? ''
+            if (!map.has(k)) map.set(k, new Set())
+            map.get(k)!.add(email)
+          }
+          addUtm(sourceMap, row.utm_source)
+          addUtm(campaignMap, row.utm_campaign)
+          addUtm(mediumMap, row.utm_medium)
+          addUtm(contentMap, row.utm_content)
+          addUtm(termMap, row.utm_term)
+        }
+      }
+
+      const mapToArr = (m: Map<string, Set<string>>, label: string, limit = 15) =>
+        [...m.entries()]
+          .map(([name, s]) => ({ name: name || label, value: s.size }))
+          .sort((a, b) => b.value - a.value)
+          .slice(0, limit)
+
+      const byTag = [...tagAll.entries()].map(([tag, s]) => ({
+        tag,
+        countAll: s.size,
+        countPeriod: tagPeriod.get(tag)?.size ?? 0,
+      })).sort((a, b) => b.countAll - a.countAll)
+
+      const totalUniqueAll = emailsAll.size
+      const totalUnique = emailsPeriod.size
+      const sumByTag = byTag.reduce((s, t) => s + t.countAll, 0)
+      const overlap = sumByTag - totalUniqueAll
+
+      const leadsByDay = [...dayEmails.entries()]
+        .map(([date, s]) => ({ date, count: s.size }))
+        .sort((a, b) => a.date.localeCompare(b.date))
+
+      const processed: LaunchData = {
+        prefix: raw.prefix,
+        byTag,
+        totalUniqueAll,
+        totalUnique,
+        sumByTag,
+        overlap,
+        leadsByDay,
+        bySource: mapToArr(sourceMap, '(direto)'),
+        byCampaign: mapToArr(campaignMap, '(sem campanha)'),
+        byMedium: mapToArr(mediumMap, '(não informado)'),
+        byContent: mapToArr(contentMap, '(não informado)'),
+        byTerm: mapToArr(termMap, '(não informado)'),
+        dateRange: { since, until },
+      }
+      // ──────────────────────────────────────────────────────────────────────
 
       if (metaRes.ok) {
         const metaData = await metaRes.json()
-        // CPL calculado no frontend com totalUnique do BQ
-        const cpl = bqData.totalUnique > 0 && metaData.metaSpend > 0
-          ? Math.round((metaData.metaSpend / bqData.totalUnique) * 100) / 100
+        const cpl = totalUnique > 0 && metaData.metaSpend > 0
+          ? Math.round((metaData.metaSpend / totalUnique) * 100) / 100
           : null
-        setData({ ...bqData, ...metaData, cpl })
+        setData({ ...processed, ...metaData, cpl })
       } else {
-        setData(bqData)
+        setData(processed)
       }
 
       setStatus('idle')
