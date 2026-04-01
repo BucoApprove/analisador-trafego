@@ -70,10 +70,21 @@ function UtmTable({
   getCpl?: (name: string, leads: number) => number | null
   cplNote?: string
 }) {
+  const [filter, setFilter] = useState('')
+  const filtered = filter ? rows.filter(r => r.name.toLowerCase().includes(filter.toLowerCase())) : rows
   const maxVal = Math.max(...rows.map(r => r.value), 1)
   return (
     <div>
       <SectionHeader title={title} description={hint} />
+      <div className="mb-2">
+        <input
+          type="text"
+          value={filter}
+          onChange={e => setFilter(e.target.value)}
+          placeholder="Filtrar..."
+          className="w-full rounded-md border bg-background px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-ring"
+        />
+      </div>
       <div className="overflow-x-auto rounded-md border">
         <table className="w-full text-sm">
           <thead className="bg-muted">
@@ -86,7 +97,7 @@ function UtmTable({
             </tr>
           </thead>
           <tbody className="divide-y">
-            {rows.map(r => {
+            {filtered.map(r => {
               const pct = total > 0 ? (r.value / total) * 100 : 0
               const cpl = getCpl ? getCpl(r.name, r.value) : null
               return (
