@@ -56,11 +56,12 @@ interface HotmartItem {
   product?: { id: number; name: string }
   purchase?: {
     price?: { value: number; currency_value?: string }
+    hotmart_fee?: { total: number }
     approved_date?: number
     status?: string
+    transaction?: string
     [key: string]: unknown
   }
-  commissions?: Array<{ value: number; source: string; [key: string]: unknown }>
   transaction?: string
   [key: string]: unknown
 }
@@ -128,7 +129,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const seenTransactions = new Set<string>()
     const allItems: HotmartItem[] = []
     for (const item of [...approvedItems, ...completeItems]) {
-      const tx = item.transaction ?? ''
+      const tx = (item.purchase?.transaction ?? item.transaction ?? '') as string
       if (tx && seenTransactions.has(tx)) continue
       if (tx) seenTransactions.add(tx)
       allItems.push(item)
@@ -141,7 +142,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const productId   = item.product?.id ?? 0
       const productName = item.product?.name ?? 'Desconhecido'
       const key = String(productId)
-      const value = item.purchase?.price?.value ?? 0
+      const gross = item.purchase?.price?.value ?? 0
+      const fee   = item.purchase?.hotmart_fee?.total ?? 0
+      const value = gross - fee
 
       if (!byProduct.has(key)) {
         byProduct.set(key, { id: productId, name: productName, total: 0, count: 0 })
