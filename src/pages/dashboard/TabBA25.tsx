@@ -121,17 +121,21 @@ export default function TabBA25({ token, enabled }: Props) {
       const bqUrl = `/api/launch-data?prefix=${encodeURIComponent(FIXED_PREFIX)}&since=${since}&until=${until}&broadSearch=true`
       const metaUrl = `/api/meta-spend?since=${since}&until=${until}&spendFilter=${encodeURIComponent(FIXED_SPEND_FILTER)}&orFilter=${encodeURIComponent(FIXED_OR_FILTER)}`
 
+      const t0 = Date.now()
       const [bqRes, metaRes] = await Promise.all([
         fetch(bqUrl, { headers }),
         fetch(metaUrl, { headers }),
       ])
+      console.log(`[BA25] BQ: ${bqRes.status} | Meta: ${metaRes.status} | ${Date.now() - t0}ms`)
 
       if (!bqRes.ok) {
         const body = await bqRes.json().catch(() => ({}))
-        throw new Error(body.error ?? `Erro ${bqRes.status}`)
+        throw new Error(`[launch-data ${bqRes.status}] ${body.error ?? body.detail ?? 'sem detalhe'}`)
       }
 
+      const t1 = Date.now()
       const raw: RawLaunchResponse = await bqRes.json()
+      console.log(`[BA25] BQ parse: ${Date.now() - t1}ms | rows: ${raw.rows?.length ?? 0}`)
 
       // ── Processa dados brutos no frontend ──────────────────────────────────
       const sinceDate = since
@@ -232,6 +236,8 @@ export default function TabBA25({ token, enabled }: Props) {
           : null
         setData({ ...processed, ...metaData, cpl })
       } else {
+        const metaBody = await metaRes.json().catch(() => ({}))
+        console.warn(`[BA25] Meta falhou ${metaRes.status}:`, metaBody)
         setData(processed)
       }
 
