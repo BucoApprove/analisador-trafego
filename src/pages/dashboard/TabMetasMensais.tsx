@@ -56,12 +56,23 @@ interface HotmartResp {
 // Prefix "=" for exact match (case-insensitive), plain string for substring match
 const PRODUCT_MAP: Record<string, string[]> = {
   'Buco Approve':   ['=bucoapprove'],
-  'Renovação BA':   ['renovação ba', 'renovacao ba', '=renovação buco approve', 'renovação buco'],
+  'Renovação BA':   ['renovação ba', 'renovacao ba', 'renovação buco', 'renovação de tempo'],
   'Mentoria':       ['mentoria'],
   'Planejamento':   ['planejamento'],
-  'Pós Pato':       ['pós pato', 'pos pato'],
-  'Pós Anato':      ['pós anato', 'pos anato'],
-  'Low tickets':    ['low ticket'],
+  'Pós Pato':       ['pós pato', 'pos pato', 'patologia oral', 'pós-graduação em patologia'],
+  'Pós Anato':      ['pós anato', 'pos anato', 'anatomia de cabeça'],
+  'Low tickets':    [
+    'low ticket',
+    'bucoapp',
+    'pack',
+    'livro digital',
+    'libro digital',
+    'treino intensivo',
+    'etapa final do sistema',
+    'resumo:',
+    'questões comentadas',
+    '500 questões',
+  ],
   'Outros':         [],
 }
 
