@@ -174,6 +174,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       products,
       grandTotal,
       totalTransactions: allItems.length,
+      _rawSample: allItems.find(i => i.product?.name?.toLowerCase().includes('bucoapprove')),
     })
   } catch (err) {
     console.error('hotmart-sales error:', err)
