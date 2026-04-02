@@ -1,19 +1,9 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { bqQuery, tableLeads, tableVendas } from './_bq.js'
-
-function auth(req: VercelRequest, res: VercelResponse): boolean {
-  const token = process.env.DASHBOARD_TOKEN
-  const header = req.headers.authorization ?? ''
-  const provided = header.startsWith('Bearer ') ? header.slice(7) : ''
-  if (!provided || (provided !== token && provided !== process.env.DASHBOARD_TOKEN_ADMIN)) {
-    res.status(401).json({ error: 'Unauthorized' })
-    return false
-  }
-  return true
-}
+import { authUser } from './_supabase-auth.js'
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  if (!auth(req, res)) return
+  const _user = await authUser(req, res); if (!_user) return
 
   res.setHeader('Cache-Control', 's-maxage=300, stale-while-revalidate=60')
 

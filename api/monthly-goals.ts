@@ -14,19 +14,7 @@
  *   month — YYYY-MM
  */
 import type { VercelRequest, VercelResponse } from '@vercel/node'
-
-function auth(req: VercelRequest, res: VercelResponse): boolean {
-  const header = req.headers.authorization ?? ''
-  const provided = header.startsWith('Bearer ') ? header.slice(7) : ''
-  const ok =
-    (provided && provided === process.env.DASHBOARD_TOKEN_ADMIN) ||
-    (provided && provided === process.env.DASHBOARD_TOKEN)
-  if (!ok) {
-    res.status(401).json({ error: 'Unauthorized' })
-    return false
-  }
-  return true
-}
+import { authUser } from './_supabase-auth.js'
 
 function parseBRL(val: string): number {
   if (!val) return 0
@@ -64,7 +52,7 @@ export const PRODUTOS_FIXOS = [
 ]
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  if (!auth(req, res)) return
+  const _user = await authUser(req, res); if (!_user) return
 
   res.setHeader('Cache-Control', 's-maxage=300, stale-while-revalidate=60')
 

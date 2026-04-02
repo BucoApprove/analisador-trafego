@@ -5,6 +5,14 @@ const key = import.meta.env.VITE_SUPABASE_ANON_KEY as string
 
 export const supabase = createClient(url, key)
 
+export type UserRole = 'admin' | 'analyst'
+
+export interface Profile {
+  id: string
+  name: string
+  role: UserRole
+}
+
 export interface Activity {
   id: string
   product_name: string

@@ -1,18 +1,8 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
+import { authUser } from './_supabase-auth.js'
 
 const SHEET_ID = '1X6ZHXlvJF_BJl2ammeI1ud4GVtXYBQolqemR8Hi374I'
 const CSV_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/export?format=csv`
-
-function auth(req: VercelRequest, res: VercelResponse): boolean {
-  const token = process.env.DASHBOARD_TOKEN
-  const header = req.headers.authorization ?? ''
-  const provided = header.startsWith('Bearer ') ? header.slice(7) : ''
-  if (!provided || (provided !== token && provided !== process.env.DASHBOARD_TOKEN_ADMIN)) {
-    res.status(401).json({ error: 'Unauthorized' })
-    return false
-  }
-  return true
-}
 
 function parseCSVRow(row: string): string[] {
   const result: string[] = []
@@ -37,7 +27,7 @@ function parseBRL(val: string): number {
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  if (!auth(req, res)) return
+  const _user = await authUser(req, res); if (!_user) return
 
   res.setHeader('Cache-Control', 's-maxage=300, stale-while-revalidate=60')
 

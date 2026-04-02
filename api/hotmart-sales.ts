@@ -10,19 +10,7 @@
  *   DASHBOARD_TOKEN / DASHBOARD_TOKEN_ADMIN
  */
 import type { VercelRequest, VercelResponse } from '@vercel/node'
-
-function auth(req: VercelRequest, res: VercelResponse): boolean {
-  const header = req.headers.authorization ?? ''
-  const provided = header.startsWith('Bearer ') ? header.slice(7) : ''
-  const ok =
-    (provided && provided === process.env.DASHBOARD_TOKEN_ADMIN) ||
-    (provided && provided === process.env.DASHBOARD_TOKEN)
-  if (!ok) {
-    res.status(401).json({ error: 'Unauthorized' })
-    return false
-  }
-  return true
-}
+import { authUser } from './_supabase-auth.js'
 
 async function getAccessToken(): Promise<string> {
   const clientId     = process.env.HOTMART_CLIENT_ID ?? ''
@@ -72,7 +60,7 @@ interface HotmartResponse {
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  if (!auth(req, res)) return
+  const _user = await authUser(req, res); if (!_user) return
 
   res.setHeader('Cache-Control', 's-maxage=120, stale-while-revalidate=60')
 

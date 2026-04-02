@@ -17,6 +17,7 @@ import TabMetasMensais from './TabMetasMensais'
 interface DashboardLayoutProps {
   token: string
   role: 'admin' | 'user'
+  userName: string
   onLogout: () => void
 }
 
@@ -38,7 +39,7 @@ const TABS_ADMIN = [
   { id: 'metas-mensais', label: 'Metas Mensais' },
 ]
 
-export default function DashboardLayout({ token, role, onLogout }: DashboardLayoutProps) {
+export default function DashboardLayout({ token, role, userName, onLogout }: DashboardLayoutProps) {
   const TABS = role === 'admin' ? TABS_ADMIN : TABS_USER
   const [activeTab, setActiveTab] = useState('ba25')
 
@@ -54,10 +55,13 @@ export default function DashboardLayout({ token, role, onLogout }: DashboardLayo
               <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-primary/10 text-primary">Gestor</span>
             )}
           </div>
-          <Button variant="ghost" size="sm" onClick={onLogout}>
-            <LogOut className="mr-2 h-4 w-4" />
-            Sair
-          </Button>
+          <div className="flex items-center gap-3">
+            <span className="text-sm text-muted-foreground hidden sm:block">{userName}</span>
+            <Button variant="ghost" size="sm" onClick={onLogout}>
+              <LogOut className="mr-2 h-4 w-4" />
+              Sair
+            </Button>
+          </div>
         </div>
         <Separator />
       </header>

@@ -1,3 +1,13 @@
+-- Perfis de usuário (vinculado ao Supabase Auth)
+create table if not exists profiles (
+  id    uuid primary key references auth.users(id) on delete cascade,
+  name  text not null,
+  role  text not null default 'analyst' check (role in ('admin', 'analyst'))
+);
+alter table profiles disable row level security;
+
+-- ─────────────────────────────────────────────────────────────────────────────
+
 -- Atividades por produto
 create table if not exists activities (
   id           uuid primary key default gen_random_uuid(),
