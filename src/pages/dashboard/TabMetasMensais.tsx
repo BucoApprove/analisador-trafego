@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from 'react'
-import { RefreshCw, ChevronDown, ChevronUp, ClipboardList, X, ExternalLink, MessageSquare, Plus, Link2, FileText, ChevronRight, Loader2, Pencil, Trash2 } from 'lucide-react'
+import { RefreshCw, ChevronDown, ChevronUp, ClipboardList, X, ExternalLink, MessageSquare, Plus, Link2, FileText, ChevronRight, Loader2, Trash2 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import type { Activity, ActivityLink, ActivityComment } from '@/lib/supabase'
 
@@ -294,16 +294,16 @@ function ActivitiesModal({ productName, onClose }: { productName: string; onClos
 
     if (!acts) { setLoading(false); return }
 
-    const ids = acts.map(a => a.id)
+    const ids = acts.map((a: Activity) => a.id)
     const [{ data: links }, { data: comments }] = await Promise.all([
       supabase.from('activity_links').select('*').in('activity_id', ids),
       supabase.from('activity_comments').select('*').in('activity_id', ids).order('created_at', { ascending: true }),
     ])
 
-    setActivities(acts.map(a => ({
+    setActivities(acts.map((a: Activity) => ({
       ...a,
-      links: links?.filter(l => l.activity_id === a.id) ?? [],
-      comments: comments?.filter(c => c.activity_id === a.id) ?? [],
+      links: links?.filter((l: ActivityLink) => l.activity_id === a.id) ?? [],
+      comments: comments?.filter((c: ActivityComment) => c.activity_id === a.id) ?? [],
     })))
     setLoading(false)
   }, [productName])
