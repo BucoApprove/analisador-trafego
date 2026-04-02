@@ -52,23 +52,30 @@ interface HotmartResp {
   totalTransactions: number
 }
 
-// Manual mapping: planilha name → list of Hotmart product name substrings (case-insensitive)
+// Manual mapping: planilha name → keywords
+// Prefix "=" for exact match (case-insensitive), plain string for substring match
 const PRODUCT_MAP: Record<string, string[]> = {
-  'Buco Approve':   ['bucoapprove', 'buco approve'],
-  'Renovação BA':   ['renovação', 'renovacao', 'renova'],
+  'Buco Approve':   ['=bucoapprove'],
+  'Renovação BA':   ['renovação ba', 'renovacao ba', '=renovação buco approve', 'renovação buco'],
   'Mentoria':       ['mentoria'],
   'Planejamento':   ['planejamento'],
-  'Pós Pato':       ['pós pato', 'pos pato', 'pato'],
-  'Pós Anato':      ['pós anato', 'pos anato', 'anato'],
+  'Pós Pato':       ['pós pato', 'pos pato'],
+  'Pós Anato':      ['pós anato', 'pos anato'],
   'Low tickets':    ['low ticket'],
   'Outros':         [],
 }
 
 function matchHotmart(hotmartName: string): string | null {
-  const lower = hotmartName.toLowerCase()
+  const lower = hotmartName.toLowerCase().trim()
   for (const [planilhaName, keywords] of Object.entries(PRODUCT_MAP)) {
     if (planilhaName === 'Outros') continue
-    if (keywords.some(k => lower.includes(k))) return planilhaName
+    for (const k of keywords) {
+      if (k.startsWith('=')) {
+        if (lower === k.slice(1)) return planilhaName
+      } else {
+        if (lower.includes(k)) return planilhaName
+      }
+    }
   }
   return null
 }
