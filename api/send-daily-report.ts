@@ -57,7 +57,7 @@ async function findSubscriberByPhone(token: string, phone: string): Promise<stri
 }
 
 async function sendWhatsAppMessage(token: string, subscriberId: string, text: string): Promise<void> {
-  const res = await fetch('https://api.manychat.com/fb/subscriber/sendContent', {
+  const res = await fetch('https://api.manychat.com/fb/sending/sendContent', {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${token}`,
