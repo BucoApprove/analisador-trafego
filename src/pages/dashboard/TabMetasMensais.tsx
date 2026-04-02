@@ -1,5 +1,7 @@
 import { useState, useCallback, useEffect } from 'react'
-import { RefreshCw, ChevronDown, ChevronUp, ClipboardList, X, ExternalLink, MessageSquare, Plus, Link2, FileText, ChevronRight } from 'lucide-react'
+import { RefreshCw, ChevronDown, ChevronUp, ClipboardList, X, ExternalLink, MessageSquare, Plus, Link2, FileText, ChevronRight, Loader2, Pencil, Trash2 } from 'lucide-react'
+import { supabase } from '@/lib/supabase'
+import type { Activity, ActivityLink, ActivityComment } from '@/lib/supabase'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -9,99 +11,9 @@ interface MonthlyGoalsResp { month: string; goals: GoalItem[]; totalMeta: number
 interface HotmartProduct { id: number; name: string; total: number; count: number }
 interface HotmartResp { month: string; products: HotmartProduct[]; grandTotal: number; totalTransactions: number }
 
-// ─── Static mock data (será substituído por DB) ───────────────────────────────
+type ActivityWithRels = Activity & { links: ActivityLink[]; comments: ActivityComment[] }
 
-interface ActivityLink { label: string; url: string; type: 'drive' | 'sheet' | 'link' }
-interface ActivityComment { author: string; date: string; text: string }
-interface Activity {
-  id: string
-  title: string
-  description: string
-  status: 'pendente' | 'em andamento' | 'concluída'
-  links: ActivityLink[]
-  comments: ActivityComment[]
-}
-
-const MOCK_ACTIVITIES: Record<string, Activity[]> = {
-  'Buco Approve': [
-    {
-      id: 'ba-1',
-      title: 'Estratégia de precificação BA25',
-      description: 'Definir as ofertas e preços para o lançamento BA25. Incluir versões parceladas e à vista, além de order bumps e upsells planejados para o período.',
-      status: 'concluída',
-      links: [
-        { label: 'Planilha de precificação', url: '#', type: 'sheet' },
-        { label: 'Apresentação de ofertas', url: '#', type: 'drive' },
-      ],
-      comments: [
-        { author: 'Gustavo', date: '28/03/2026', text: 'Ofertas definidas: R$930 (pix), R$1.585 (6x), R$2.243 (12x). Order bump: Etapa Final por R$47.' },
-        { author: 'Bianco', date: '29/03/2026', text: 'Aprovado. Subir na Hotmart até 30/03.' },
-      ],
-    },
-    {
-      id: 'ba-2',
-      title: 'Follow-up pós-webinar',
-      description: 'Sequência de e-mails e mensagens de follow-up para leads que assistiram ao webinar mas não converteram. Incluir quebras de objeção e depoimentos.',
-      status: 'em andamento',
-      links: [
-        { label: 'Sequência de e-mails', url: '#', type: 'drive' },
-      ],
-      comments: [
-        { author: 'Bianco', date: '01/04/2026', text: 'Primeira sequência disparada. Taxa de abertura 42%. Aguardando resultado das próximas 48h.' },
-      ],
-    },
-    {
-      id: 'ba-3',
-      title: 'Página de vendas — revisão final',
-      description: 'Revisar copy, depoimentos e CTAs da página de vendas antes do lançamento. Checar versão mobile e velocidade de carregamento.',
-      status: 'concluída',
-      links: [
-        { label: 'Página de vendas', url: '#', type: 'link' },
-        { label: 'Checklist de revisão', url: '#', type: 'sheet' },
-      ],
-      comments: [
-        { author: 'Gustavo', date: '27/03/2026', text: 'Revisão concluída. 3 depoimentos adicionados, CTA do hero atualizado.' },
-      ],
-    },
-    {
-      id: 'ba-4',
-      title: 'Recuperação de carrinho abandonado',
-      description: 'Configurar automação de recuperação para quem iniciou o checkout mas não finalizou. Meta: recuperar 10% dos carrinhos abandonados.',
-      status: 'pendente',
-      links: [],
-      comments: [],
-    },
-  ],
-  'Renovação BA': [
-    {
-      id: 'rba-1',
-      title: 'Lista de alunos elegíveis para renovação',
-      description: 'Levantar alunos com acesso expirando nos próximos 30 dias e criar fluxo de comunicação personalizado.',
-      status: 'em andamento',
-      links: [
-        { label: 'Planilha de alunos', url: '#', type: 'sheet' },
-      ],
-      comments: [
-        { author: 'Bianco', date: '30/03/2026', text: '47 alunos elegíveis identificados. Iniciando contato via WhatsApp.' },
-      ],
-    },
-  ],
-  'Mentoria': [
-    {
-      id: 'men-1',
-      title: 'Turma Mentoria Futuro CTBMF — Abril',
-      description: 'Abertura de vagas para a turma de abril da Mentoria Futuro CTBMF. Definir número de vagas, preço e cronograma de aulas.',
-      status: 'em andamento',
-      links: [
-        { label: 'Cronograma de aulas', url: '#', type: 'sheet' },
-        { label: 'Material da turma', url: '#', type: 'drive' },
-      ],
-      comments: [
-        { author: 'Gustavo', date: '01/04/2026', text: 'Turma aberta com 20 vagas. 17 já preenchidas.' },
-      ],
-    },
-  ],
-}
+// ─── Constants ───────────────────────────────────────────────────────────────
 
 const STATUS_STYLE: Record<Activity['status'], string> = {
   'pendente':     'bg-gray-100 text-gray-600',
@@ -110,27 +22,98 @@ const STATUS_STYLE: Record<Activity['status'], string> = {
 }
 
 const LINK_ICON: Record<ActivityLink['type'], React.ReactNode> = {
-  drive: <FileText className="h-3.5 w-3.5" />,
+  drive: <FileText className="h-3.5 w-3.5 text-yellow-600" />,
   sheet: <FileText className="h-3.5 w-3.5 text-green-600" />,
   link:  <Link2 className="h-3.5 w-3.5" />,
 }
 
 // ─── Activity Detail Modal ────────────────────────────────────────────────────
 
-function ActivityDetailModal({ activity, onClose }: { activity: Activity; onClose: () => void }) {
+function ActivityDetailModal({ activity, onClose, onUpdate }: {
+  activity: ActivityWithRels
+  onClose: () => void
+  onUpdate: () => void
+}) {
+  const [newComment, setNewComment] = useState('')
+  const [newAuthor, setNewAuthor] = useState('')
+  const [savingComment, setSavingComment] = useState(false)
+  const [newLinkLabel, setNewLinkLabel] = useState('')
+  const [newLinkUrl, setNewLinkUrl] = useState('')
+  const [newLinkType, setNewLinkType] = useState<ActivityLink['type']>('link')
+  const [showLinkForm, setShowLinkForm] = useState(false)
+  const [savingLink, setSavingLink] = useState(false)
+  const [editStatus, setEditStatus] = useState<Activity['status']>(activity.status)
+  const [savingStatus, setSavingStatus] = useState(false)
+
+  async function submitComment() {
+    if (!newComment.trim() || !newAuthor.trim()) return
+    setSavingComment(true)
+    await supabase.from('activity_comments').insert({
+      activity_id: activity.id,
+      author: newAuthor.trim(),
+      text: newComment.trim(),
+    })
+    setNewComment('')
+    setSavingComment(false)
+    onUpdate()
+  }
+
+  async function submitLink() {
+    if (!newLinkLabel.trim() || !newLinkUrl.trim()) return
+    setSavingLink(true)
+    await supabase.from('activity_links').insert({
+      activity_id: activity.id,
+      label: newLinkLabel.trim(),
+      url: newLinkUrl.trim(),
+      type: newLinkType,
+    })
+    setNewLinkLabel('')
+    setNewLinkUrl('')
+    setShowLinkForm(false)
+    setSavingLink(false)
+    onUpdate()
+  }
+
+  async function deleteLink(id: string) {
+    await supabase.from('activity_links').delete().eq('id', id)
+    onUpdate()
+  }
+
+  async function deleteComment(id: string) {
+    await supabase.from('activity_comments').delete().eq('id', id)
+    onUpdate()
+  }
+
+  async function updateStatus(s: Activity['status']) {
+    setEditStatus(s)
+    setSavingStatus(true)
+    await supabase.from('activities').update({ status: s }).eq('id', activity.id)
+    setSavingStatus(false)
+    onUpdate()
+  }
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={onClose}>
       <div className="absolute inset-0 bg-black/40" />
       <div
-        className="relative z-10 bg-background rounded-xl shadow-2xl w-full max-w-lg max-h-[85vh] flex flex-col border"
+        className="relative z-10 bg-background rounded-xl shadow-2xl w-full max-w-lg max-h-[88vh] flex flex-col border"
         onClick={e => e.stopPropagation()}
       >
         {/* Header */}
         <div className="flex items-start justify-between gap-3 px-5 py-4 border-b">
           <div className="flex-1">
-            <span className={`inline-block text-xs px-2 py-0.5 rounded-full font-medium mb-1.5 ${STATUS_STYLE[activity.status]}`}>
-              {activity.status}
-            </span>
+            <div className="flex items-center gap-2 mb-1.5">
+              <select
+                value={editStatus}
+                onChange={e => updateStatus(e.target.value as Activity['status'])}
+                className={`text-xs px-2 py-0.5 rounded-full font-medium border-0 cursor-pointer ${STATUS_STYLE[editStatus]}`}
+              >
+                <option value="pendente">pendente</option>
+                <option value="em andamento">em andamento</option>
+                <option value="concluída">concluída</option>
+              </select>
+              {savingStatus && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />}
+            </div>
             <h3 className="font-semibold text-base leading-snug">{activity.title}</h3>
           </div>
           <button onClick={onClose} className="text-muted-foreground hover:text-foreground mt-0.5">
@@ -142,35 +125,87 @@ function ActivityDetailModal({ activity, onClose }: { activity: Activity; onClos
           {/* Instrução */}
           <div>
             <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">Instrução</p>
-            <p className="text-sm leading-relaxed">{activity.description}</p>
+            <p className="text-sm leading-relaxed whitespace-pre-wrap">{activity.description}</p>
           </div>
 
           {/* Links */}
-          {activity.links.length > 0 && (
-            <div>
-              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">Links</p>
-              <div className="space-y-1.5">
-                {activity.links.map((l, i) => (
+          <div>
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">Links</p>
+            {activity.links.length === 0 && !showLinkForm && (
+              <p className="text-xs text-muted-foreground italic mb-1.5">Nenhum link adicionado.</p>
+            )}
+            <div className="space-y-1.5">
+              {activity.links.map(l => (
+                <div key={l.id} className="flex items-center gap-2 group">
                   <a
-                    key={i}
                     href={l.url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="flex items-center gap-2 text-sm px-3 py-2 rounded-md border hover:bg-muted/50 transition-colors"
+                    className="flex-1 flex items-center gap-2 text-sm px-3 py-2 rounded-md border hover:bg-muted/50 transition-colors"
                   >
                     {LINK_ICON[l.type]}
                     <span className="flex-1">{l.label}</span>
                     <ExternalLink className="h-3 w-3 text-muted-foreground" />
                   </a>
-                ))}
+                  <button
+                    onClick={() => deleteLink(l.id)}
+                    className="opacity-0 group-hover:opacity-100 p-1 text-muted-foreground hover:text-destructive transition-all"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              ))}
+            </div>
+
+            {showLinkForm ? (
+              <div className="mt-2 space-y-2 p-3 rounded-lg border bg-muted/20">
+                <input
+                  className="w-full text-sm border rounded px-2.5 py-1.5 bg-background"
+                  placeholder="Título do link"
+                  value={newLinkLabel}
+                  onChange={e => setNewLinkLabel(e.target.value)}
+                />
+                <input
+                  className="w-full text-sm border rounded px-2.5 py-1.5 bg-background"
+                  placeholder="URL"
+                  value={newLinkUrl}
+                  onChange={e => setNewLinkUrl(e.target.value)}
+                />
+                <select
+                  className="w-full text-sm border rounded px-2.5 py-1.5 bg-background"
+                  value={newLinkType}
+                  onChange={e => setNewLinkType(e.target.value as ActivityLink['type'])}
+                >
+                  <option value="link">Link</option>
+                  <option value="sheet">Planilha</option>
+                  <option value="drive">Drive</option>
+                </select>
+                <div className="flex gap-2">
+                  <button
+                    onClick={submitLink}
+                    disabled={savingLink}
+                    className="flex-1 text-xs px-3 py-1.5 rounded bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+                  >
+                    {savingLink ? <Loader2 className="h-3.5 w-3.5 animate-spin mx-auto" /> : 'Salvar'}
+                  </button>
+                  <button
+                    onClick={() => setShowLinkForm(false)}
+                    className="text-xs px-3 py-1.5 rounded border hover:bg-muted"
+                  >
+                    Cancelar
+                  </button>
+                </div>
               </div>
-              {/* Placeholder para adicionar link */}
-              <button className="mt-1.5 flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground px-3 py-1.5 rounded-md hover:bg-muted/50 transition-colors w-full">
+            ) : (
+              <button
+                onClick={() => setShowLinkForm(true)}
+                className="mt-1.5 flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground px-3 py-1.5 rounded-md hover:bg-muted/50 transition-colors"
+              >
                 <Plus className="h-3.5 w-3.5" />
                 Adicionar link
               </button>
-            </div>
-          )}
+            )}
+          </div>
 
           {/* Atualizações */}
           <div>
@@ -178,33 +213,58 @@ function ActivityDetailModal({ activity, onClose }: { activity: Activity; onClos
               Atualizações ({activity.comments.length})
             </p>
             {activity.comments.length === 0 && (
-              <p className="text-xs text-muted-foreground italic">Nenhuma atualização ainda.</p>
+              <p className="text-xs text-muted-foreground italic mb-3">Nenhuma atualização ainda.</p>
             )}
             <div className="space-y-3">
-              {activity.comments.map((c, i) => (
-                <div key={i} className="flex gap-2.5">
+              {activity.comments.map(c => (
+                <div key={c.id} className="flex gap-2.5 group">
                   <div className="h-7 w-7 rounded-full bg-primary/10 text-primary flex items-center justify-center text-xs font-semibold flex-shrink-0">
-                    {c.author[0]}
+                    {c.author[0].toUpperCase()}
                   </div>
                   <div className="flex-1 bg-muted/40 rounded-lg px-3 py-2">
-                    <div className="flex items-center gap-2 mb-0.5">
-                      <span className="text-xs font-semibold">{c.author}</span>
-                      <span className="text-xs text-muted-foreground">{c.date}</span>
+                    <div className="flex items-center justify-between mb-0.5">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-semibold">{c.author}</span>
+                        <span className="text-xs text-muted-foreground">
+                          {new Date(c.created_at).toLocaleDateString('pt-BR')}
+                        </span>
+                      </div>
+                      <button
+                        onClick={() => deleteComment(c.id)}
+                        className="opacity-0 group-hover:opacity-100 p-0.5 text-muted-foreground hover:text-destructive transition-all"
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </button>
                     </div>
-                    <p className="text-sm leading-snug">{c.text}</p>
+                    <p className="text-sm leading-snug whitespace-pre-wrap">{c.text}</p>
                   </div>
                 </div>
               ))}
             </div>
 
-            {/* Input para nova atualização (estático — aguarda DB) */}
-            <div className="mt-3 flex gap-2 items-start">
-              <div className="h-7 w-7 rounded-full bg-primary/10 text-primary flex items-center justify-center text-xs font-semibold flex-shrink-0">
-                V
-              </div>
-              <div className="flex-1 border rounded-lg bg-muted/20 px-3 py-2 text-sm text-muted-foreground italic cursor-not-allowed">
-                Adicionar atualização... (em breve)
-              </div>
+            {/* Nova atualização */}
+            <div className="mt-3 space-y-2">
+              <input
+                className="w-full text-sm border rounded px-2.5 py-1.5 bg-background"
+                placeholder="Seu nome"
+                value={newAuthor}
+                onChange={e => setNewAuthor(e.target.value)}
+              />
+              <textarea
+                className="w-full text-sm border rounded px-2.5 py-1.5 bg-background resize-none"
+                rows={3}
+                placeholder="Escreva uma atualização..."
+                value={newComment}
+                onChange={e => setNewComment(e.target.value)}
+              />
+              <button
+                onClick={submitComment}
+                disabled={savingComment || !newComment.trim() || !newAuthor.trim()}
+                className="text-xs px-3 py-1.5 rounded bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 flex items-center gap-1.5"
+              >
+                {savingComment ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+                Enviar atualização
+              </button>
             </div>
           </div>
         </div>
@@ -216,11 +276,77 @@ function ActivityDetailModal({ activity, onClose }: { activity: Activity; onClos
 // ─── Activities Panel Modal ───────────────────────────────────────────────────
 
 function ActivitiesModal({ productName, onClose }: { productName: string; onClose: () => void }) {
-  const [selected, setSelected] = useState<Activity | null>(null)
-  const activities = MOCK_ACTIVITIES[productName] ?? []
+  const [activities, setActivities] = useState<ActivityWithRels[]>([])
+  const [loading, setLoading] = useState(true)
+  const [selected, setSelected] = useState<ActivityWithRels | null>(null)
+  const [showNewForm, setShowNewForm] = useState(false)
+  const [newTitle, setNewTitle] = useState('')
+  const [newDesc, setNewDesc] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  const loadActivities = useCallback(async () => {
+    setLoading(true)
+    const { data: acts } = await supabase
+      .from('activities')
+      .select('*')
+      .eq('product_name', productName)
+      .order('created_at', { ascending: true })
+
+    if (!acts) { setLoading(false); return }
+
+    const ids = acts.map(a => a.id)
+    const [{ data: links }, { data: comments }] = await Promise.all([
+      supabase.from('activity_links').select('*').in('activity_id', ids),
+      supabase.from('activity_comments').select('*').in('activity_id', ids).order('created_at', { ascending: true }),
+    ])
+
+    setActivities(acts.map(a => ({
+      ...a,
+      links: links?.filter(l => l.activity_id === a.id) ?? [],
+      comments: comments?.filter(c => c.activity_id === a.id) ?? [],
+    })))
+    setLoading(false)
+  }, [productName])
+
+  useEffect(() => { loadActivities() }, [loadActivities])
+
+  // Sync selected com dados atualizados após onUpdate
+  useEffect(() => {
+    if (selected) {
+      const updated = activities.find(a => a.id === selected.id)
+      if (updated) setSelected(updated)
+    }
+  }, [activities])
+
+  async function createActivity() {
+    if (!newTitle.trim()) return
+    setSaving(true)
+    await supabase.from('activities').insert({
+      product_name: productName,
+      title: newTitle.trim(),
+      description: newDesc.trim(),
+      status: 'pendente',
+    })
+    setNewTitle('')
+    setNewDesc('')
+    setShowNewForm(false)
+    setSaving(false)
+    loadActivities()
+  }
+
+  async function deleteActivity(id: string) {
+    await supabase.from('activities').delete().eq('id', id)
+    loadActivities()
+  }
 
   if (selected) {
-    return <ActivityDetailModal activity={selected} onClose={() => setSelected(null)} />
+    return (
+      <ActivityDetailModal
+        activity={selected}
+        onClose={() => setSelected(null)}
+        onUpdate={loadActivities}
+      />
+    )
   }
 
   return (
@@ -238,9 +364,8 @@ function ActivitiesModal({ productName, onClose }: { productName: string; onClos
           </div>
           <div className="flex items-center gap-2">
             <button
-              className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded border bg-background hover:bg-muted transition-colors opacity-50 cursor-not-allowed"
-              disabled
-              title="Disponível após integração com banco de dados"
+              onClick={() => setShowNewForm(o => !o)}
+              className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded border bg-background hover:bg-muted transition-colors"
             >
               <Plus className="h-3.5 w-3.5" />
               Nova atividade
@@ -252,58 +377,106 @@ function ActivitiesModal({ productName, onClose }: { productName: string; onClos
         </div>
 
         <div className="overflow-y-auto flex-1 p-4 space-y-2">
-          {activities.length === 0 && (
+          {/* Formulário nova atividade */}
+          {showNewForm && (
+            <div className="rounded-lg border bg-muted/20 p-4 space-y-2 mb-3">
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Nova atividade</p>
+              <input
+                className="w-full text-sm border rounded px-2.5 py-1.5 bg-background"
+                placeholder="Título"
+                value={newTitle}
+                onChange={e => setNewTitle(e.target.value)}
+                autoFocus
+              />
+              <textarea
+                className="w-full text-sm border rounded px-2.5 py-1.5 bg-background resize-none"
+                rows={3}
+                placeholder="Instrução / descrição (opcional)"
+                value={newDesc}
+                onChange={e => setNewDesc(e.target.value)}
+              />
+              <div className="flex gap-2">
+                <button
+                  onClick={createActivity}
+                  disabled={saving || !newTitle.trim()}
+                  className="flex-1 text-xs px-3 py-1.5 rounded bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 flex items-center justify-center gap-1.5"
+                >
+                  {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+                  Criar
+                </button>
+                <button
+                  onClick={() => setShowNewForm(false)}
+                  className="text-xs px-3 py-1.5 rounded border hover:bg-muted"
+                >
+                  Cancelar
+                </button>
+              </div>
+            </div>
+          )}
+
+          {loading && (
+            <div className="flex justify-center py-10 text-muted-foreground">
+              <Loader2 className="h-5 w-5 animate-spin" />
+            </div>
+          )}
+
+          {!loading && activities.length === 0 && (
             <div className="flex flex-col items-center justify-center py-12 text-muted-foreground gap-2">
               <ClipboardList className="h-8 w-8 opacity-30" />
               <p className="text-sm">Nenhuma atividade cadastrada</p>
-              <p className="text-xs opacity-60">Disponível após integração com banco de dados</p>
+              <p className="text-xs opacity-60">Clique em "Nova atividade" para começar</p>
             </div>
           )}
+
           {activities.map(a => (
-            <button
-              key={a.id}
-              onClick={() => setSelected(a)}
-              className="w-full text-left rounded-lg border bg-card hover:bg-muted/30 transition-colors px-4 py-3 group"
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATUS_STYLE[a.status]}`}>
-                      {a.status}
-                    </span>
-                    {a.comments.length > 0 && (
-                      <span className="flex items-center gap-0.5 text-xs text-muted-foreground">
-                        <MessageSquare className="h-3 w-3" />
-                        {a.comments.length}
+            <div key={a.id} className="group relative">
+              <button
+                onClick={() => setSelected(a)}
+                className="w-full text-left rounded-lg border bg-card hover:bg-muted/30 transition-colors px-4 py-3"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATUS_STYLE[a.status]}`}>
+                        {a.status}
                       </span>
-                    )}
-                    {a.links.length > 0 && (
-                      <span className="flex items-center gap-0.5 text-xs text-muted-foreground">
-                        <Link2 className="h-3 w-3" />
-                        {a.links.length}
-                      </span>
+                      {a.comments.length > 0 && (
+                        <span className="flex items-center gap-0.5 text-xs text-muted-foreground">
+                          <MessageSquare className="h-3 w-3" />
+                          {a.comments.length}
+                        </span>
+                      )}
+                      {a.links.length > 0 && (
+                        <span className="flex items-center gap-0.5 text-xs text-muted-foreground">
+                          <Link2 className="h-3 w-3" />
+                          {a.links.length}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-sm font-medium leading-snug">{a.title}</p>
+                    {a.description && (
+                      <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{a.description}</p>
                     )}
                   </div>
-                  <p className="text-sm font-medium leading-snug">{a.title}</p>
-                  <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{a.description}</p>
+                  <ChevronRight className="h-4 w-4 text-muted-foreground flex-shrink-0 mt-0.5" />
                 </div>
-                <ChevronRight className="h-4 w-4 text-muted-foreground flex-shrink-0 mt-0.5 group-hover:translate-x-0.5 transition-transform" />
-              </div>
-            </button>
+              </button>
+              <button
+                onClick={() => deleteActivity(a.id)}
+                className="absolute top-2 right-8 opacity-0 group-hover:opacity-100 p-1 text-muted-foreground hover:text-destructive transition-all"
+                title="Excluir atividade"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            </div>
           ))}
         </div>
-
-        {activities.length > 0 && (
-          <div className="px-5 py-3 border-t text-xs text-muted-foreground text-center">
-            Dados estáticos — integração com banco de dados em breve
-          </div>
-        )}
       </div>
     </div>
   )
 }
 
-// ─── Expandable row (Hotmart sources) ─────────────────────────────────────────
+// ─── Expandable row ───────────────────────────────────────────────────────────
 
 function ExpandableRow({ children, stripe, sources, onActivities }: {
   children: React.ReactNode
@@ -350,10 +523,8 @@ function ExpandableRow({ children, stripe, sources, onActivities }: {
   )
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// ─── Helpers ─────────────────────────────────────────────────────────────────
 
-// Manual mapping: planilha name → keywords
-// Prefix "=" for exact match (case-insensitive), plain string for substring match
 const PRODUCT_MAP: Record<string, string[]> = {
   'Buco Approve':   ['=bucoapprove'],
   'Renovação BA':   ['renovação ba', 'renovacao ba', 'renovação buco', 'renovação de tempo'],
@@ -361,10 +532,7 @@ const PRODUCT_MAP: Record<string, string[]> = {
   'Planejamento':   ['planejamento'],
   'Pós Pato':       ['pós pato', 'pos pato', 'patologia oral', 'pós-graduação em patologia'],
   'Pós Anato':      ['pós anato', 'pos anato', 'anatomia de cabeça'],
-  'Low tickets':    [
-    'low ticket', 'bucoapp', 'pack', 'livro digital', 'libro digital',
-    'treino intensivo', 'etapa final do sistema', 'resumo:', 'questões comentadas', '500 questões',
-  ],
+  'Low tickets':    ['low ticket', 'bucoapp', 'pack', 'livro digital', 'libro digital', 'treino intensivo', 'etapa final do sistema', 'resumo:', 'questões comentadas', '500 questões'],
   'Outros': [],
 }
 
@@ -476,29 +644,17 @@ export default function TabMetasMensais({ token, enabled }: Props) {
           <p className="text-xs text-muted-foreground">Faturamento Hotmart vs. metas da planilha</p>
         </div>
         <div className="flex items-center gap-2">
-          <select
-            value={month}
-            onChange={e => setMonth(e.target.value)}
-            className="text-sm border rounded px-2 py-1.5 bg-background"
-          >
-            {monthOptions.map(m => (
-              <option key={m} value={m}>{m}</option>
-            ))}
+          <select value={month} onChange={e => setMonth(e.target.value)} className="text-sm border rounded px-2 py-1.5 bg-background">
+            {monthOptions.map(m => <option key={m} value={m}>{m}</option>)}
           </select>
-          <button
-            onClick={() => load(month)}
-            disabled={loading}
-            className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded border bg-background hover:bg-muted transition-colors disabled:opacity-50"
-          >
+          <button onClick={() => load(month)} disabled={loading} className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded border bg-background hover:bg-muted transition-colors disabled:opacity-50">
             <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
             Atualizar
           </button>
         </div>
       </div>
 
-      {error && (
-        <div className="rounded-md bg-destructive/10 border border-destructive/20 px-4 py-3 text-sm text-destructive">{error}</div>
-      )}
+      {error && <div className="rounded-md bg-destructive/10 border border-destructive/20 px-4 py-3 text-sm text-destructive">{error}</div>}
 
       {!goalsData?.configured && goalsData && (
         <div className="rounded-md bg-yellow-50 border border-yellow-200 px-4 py-3 text-sm text-yellow-800">
@@ -547,23 +703,13 @@ export default function TabMetasMensais({ token, enabled }: Props) {
                 const pct = g.meta > 0 ? (fat / g.meta) * 100 : null
                 const metaDia = g.meta > 0 ? Math.max(restante, 0) / diasRestantes : 0
                 const status = pct === null ? '—' : pct >= 100 ? '✅ Atingido' : pct >= 70 ? '🟡 Em andamento' : '🔴 Abaixo'
-                const sources = sourcesMap[g.name] ?? []
                 return (
-                  <ExpandableRow
-                    key={g.name}
-                    stripe={i % 2 !== 0}
-                    sources={sources}
-                    onActivities={() => setActivitiesProduct(g.name)}
-                  >
+                  <ExpandableRow key={g.name} stripe={i % 2 !== 0} sources={sourcesMap[g.name] ?? []} onActivities={() => setActivitiesProduct(g.name)}>
                     <td className="px-4 py-2.5 font-medium">{g.name}</td>
                     <td className="px-4 py-2.5 text-right text-muted-foreground">{g.meta > 0 ? fmtBRL(g.meta) : '—'}</td>
                     <td className="px-4 py-2.5 text-right font-semibold">{fat > 0 ? fmtBRL(fat) : '—'}</td>
-                    <td className={`px-4 py-2.5 text-right ${restante > 0 ? 'text-orange-600' : 'text-green-600'}`}>
-                      {g.meta > 0 ? fmtBRL(restante) : '—'}
-                    </td>
-                    <td className="px-4 py-2.5 text-right text-muted-foreground">
-                      {g.meta > 0 && metaDia > 0 ? fmtBRL(metaDia) : '—'}
-                    </td>
+                    <td className={`px-4 py-2.5 text-right ${restante > 0 ? 'text-orange-600' : 'text-green-600'}`}>{g.meta > 0 ? fmtBRL(restante) : '—'}</td>
+                    <td className="px-4 py-2.5 text-right text-muted-foreground">{g.meta > 0 && metaDia > 0 ? fmtBRL(metaDia) : '—'}</td>
                     <td className="px-4 py-2.5 text-right">
                       {pct !== null ? (
                         <span className={pct >= 100 ? 'text-green-600 font-semibold' : pct >= 70 ? 'text-yellow-600' : 'text-red-600'}>
@@ -584,11 +730,7 @@ export default function TabMetasMensais({ token, enabled }: Props) {
                 <td className={`px-4 py-2.5 text-right ${totalRestante > 0 ? 'text-orange-600' : 'text-green-600'}`}>{fmtBRL(totalRestante)}</td>
                 <td className="px-4 py-2.5 text-right">{fmtBRL(Math.max(totalRestante, 0) / diasRestantes)}</td>
                 <td className="px-4 py-2.5 text-right">
-                  {totalMeta > 0 ? (
-                    <span className={(totalFaturado / totalMeta) * 100 >= 100 ? 'text-green-600' : ''}>
-                      {((totalFaturado / totalMeta) * 100).toFixed(1)}%
-                    </span>
-                  ) : '—'}
+                  {totalMeta > 0 ? <span className={(totalFaturado / totalMeta) * 100 >= 100 ? 'text-green-600' : ''}>{((totalFaturado / totalMeta) * 100).toFixed(1)}%</span> : '—'}
                 </td>
                 <td /><td />
               </tr>
@@ -604,10 +746,7 @@ export default function TabMetasMensais({ token, enabled }: Props) {
       {/* Unmapped products */}
       {unmappedProducts.length > 0 && (
         <div className="rounded-lg border bg-card overflow-hidden">
-          <button
-            onClick={() => setShowUnmapped(o => !o)}
-            className="w-full flex items-center justify-between px-4 py-3 text-sm font-medium hover:bg-muted/40 transition-colors"
-          >
+          <button onClick={() => setShowUnmapped(o => !o)} className="w-full flex items-center justify-between px-4 py-3 text-sm font-medium hover:bg-muted/40 transition-colors">
             <span>Produtos Hotmart não mapeados ({unmappedProducts.length})</span>
             {showUnmapped ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
           </button>
