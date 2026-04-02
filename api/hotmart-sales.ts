@@ -135,10 +135,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       allItems.push(item)
     }
 
-    // Agrupa por produto
+    // Agrupa por produto — apenas transações em BRL
     const byProduct = new Map<string, { id: number; name: string; total: number; count: number }>()
 
     for (const item of allItems) {
+      // Ignora transações não-BRL (ex: produtos em USD tratados como BRL inflariam os valores)
+      const currency = (item.purchase?.price as { currency_code?: string })?.currency_code ?? 'BRL'
+      if (currency !== 'BRL') continue
+
       const productId   = item.product?.id ?? 0
       const productName = item.product?.name ?? 'Desconhecido'
       const key = String(productId)
