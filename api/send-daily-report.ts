@@ -107,7 +107,13 @@ function todayBrt(): string {
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!authCron(req, res)) return
 
-  const today = typeof req.query.date === 'string' ? req.query.date : (process.env.REPORT_DATE ?? todayBrt())
+  const rawDate = typeof req.query.date === 'string' ? req.query.date : (process.env.REPORT_DATE ?? todayBrt())
+  // Validate and sanitize date to prevent SQL injection before interpolating into queries
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(rawDate)) {
+    res.status(400).json({ error: 'Formato de data inválido. Use YYYY-MM-DD.' })
+    return
+  }
+  const today = rawDate
 
   const manychatToken = process.env.MANYCHAT_TOKEN ?? ''
   const manychatPhone = process.env.MANYCHAT_PHONE ?? ''
@@ -138,8 +144,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
            SUM(IF(Status IN ('COMPLETO','APROVADO'), CAST(Valor_Pago_pelo_Comprador_Sem_Taxas_e_Impostos AS INT64), 0))
              AS receita_liquida
          FROM ${tVendas}
-         WHERE Data_de_Aprova____o = @today`,
-        [{ name: 'today', value: today }],
+         WHERE Data_de_Aprova____o = '${today}'`,
       ),
 
       // Breakdown por produto
@@ -149,12 +154,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
            COUNT(*) AS vendas,
            SUM(CAST(Valor_do_Produto AS INT64)) AS receita_bruta
          FROM ${tVendas}
-         WHERE Data_de_Aprova____o = @today
+         WHERE Data_de_Aprova____o = '${today}'
            AND Status IN ('COMPLETO','APROVADO')
          GROUP BY produto
          ORDER BY vendas DESC
          LIMIT 8`,
-        [{ name: 'today', value: today }],
       ),
 
       // Novos leads de captura BA25 no dia (se configurado)
@@ -163,11 +167,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             `SELECT COUNT(DISTINCT lead_email) AS cnt
              FROM ${tLeads}
              WHERE tag_name LIKE @prefix
-               AND DATE(lead_register) = @today`,
-            [
-              { name: 'prefix', value: `%${capturaPrefix}%` },
-              { name: 'today', value: today },
-            ],
+               AND DATE(lead_register) = DATE('${today}')`,
+            [{ name: 'prefix', value: `%${capturaPrefix}%` }],
           )
         : Promise.resolve(null),
 
@@ -177,7 +178,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             `SELECT COUNT(DISTINCT lead_email) AS cnt
              FROM ${tLeads}
              WHERE tag_name = @tag
-               AND DATE(lead_register) = @today`,
+               AND DATE(lead_register) = DATE('${today}')`,
             [{ name: 'tag', value: tagInscrito }],
           )
         : Promise.resolve(null),
