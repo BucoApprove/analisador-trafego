@@ -167,12 +167,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const grandTotal = Math.round(products.reduce((s, p) => s + p.total, 0) * 100) / 100
 
-    // Raw sample: procura transação com serviços extras (base - fee != "você recebeu")
-    const sample = allItems.find(i =>
-      (i.purchase?.hotmart_fee?.base ?? 0) > 0 &&
-      JSON.stringify(i).includes('extra')
-    ) ?? allItems[0]
-
     res.json({
       month: `${year}-${String(month).padStart(2, '0')}`,
       startDate: startDate.toISOString().split('T')[0],
@@ -180,7 +174,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       products,
       grandTotal,
       totalTransactions: allItems.length,
-      _rawSample: sample,
     })
   } catch (err) {
     console.error('hotmart-sales error:', err)
