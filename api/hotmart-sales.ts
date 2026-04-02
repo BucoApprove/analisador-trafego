@@ -148,10 +148,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const key = String(productId)
       // hotmart_fee.base = preço real do produto (sem juros de parcelamento CC)
       // hotmart_fee.total = taxa da Hotmart (calculada sobre base, não sobre price.value)
-      // Receita líquida = base - total (bate com "Receita Líquida" do painel Hotmart)
+      // Receita líquida = base - hotmart_fee - serviços_extras
+      // "Serviços Extras" (R$2.19) não é exposto pela API — deduzimos manualmente
+      // exceto em: Pack 6 livros, Mentoria e Renovação (confirmado pelo usuário)
       const base  = item.purchase?.hotmart_fee?.base  ?? item.purchase?.price?.value ?? 0
       const fee   = item.purchase?.hotmart_fee?.total ?? 0
-      const value = base - fee
+      const nameLower = productName.toLowerCase()
+      const hasExtraFee = !nameLower.includes('pack') && !nameLower.includes('mentoria') && !nameLower.includes('renova')
+      const value = base - fee - (hasExtraFee ? 2.19 : 0)
 
       if (!byProduct.has(key)) {
         byProduct.set(key, { id: productId, name: productName, total: 0, count: 0 })
