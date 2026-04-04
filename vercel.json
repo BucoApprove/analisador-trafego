@@ -1,6 +1,7 @@
 {
   "version": 2,
   "functions": {
+    "api/manychat-report.ts": { "maxDuration": 30 },
     "api/launch-data.ts": { "maxDuration": 30 },
     "api/meta-spend.ts": { "maxDuration": 30 },
     "api/dashboard-data.ts": { "maxDuration": 60 },
