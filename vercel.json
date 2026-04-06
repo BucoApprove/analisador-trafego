@@ -3,6 +3,8 @@
   "functions": {
     "api/manychat-report.ts": { "maxDuration": 10 },
     "api/refresh-report-cache.ts": { "maxDuration": 60 },
+    "api/refresh-monthly-cache.ts": { "maxDuration": 60 },
+    "api/manychat-monthly.ts": { "maxDuration": 10 },
     "api/launch-data.ts": { "maxDuration": 30 },
     "api/meta-spend.ts": { "maxDuration": 30 },
     "api/dashboard-data.ts": { "maxDuration": 60 },
@@ -17,6 +19,10 @@
     {
       "path": "/api/refresh-report-cache",
       "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/api/refresh-monthly-cache",
+      "schedule": "*/30 * * * *"
     }
   ],
   "rewrites": [

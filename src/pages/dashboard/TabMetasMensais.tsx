@@ -575,6 +575,8 @@ export default function TabMetasMensais({ token, enabled }: Props) {
   const [error, setError] = useState('')
   const [showUnmapped, setShowUnmapped] = useState(false)
   const [activitiesProduct, setActivitiesProduct] = useState<string | null>(null)
+  const [cacheStatus, setCacheStatus] = useState<'idle' | 'loading' | 'ok' | 'error'>('idle')
+  const [cacheMsg, setCacheMsg] = useState<string | null>(null)
 
   const headers = { Authorization: `Bearer ${token}` }
 
@@ -599,6 +601,24 @@ export default function TabMetasMensais({ token, enabled }: Props) {
   }, [token])
 
   useEffect(() => { if (enabled) load(month) }, [enabled, month, load])
+
+  const refreshMonthlyCache = useCallback(async () => {
+    setCacheStatus('loading')
+    setCacheMsg(null)
+    try {
+      const res = await fetch('/api/refresh-monthly-cache', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      const json = await res.json()
+      if (!res.ok) throw new Error(json.error ?? `Erro ${res.status}`)
+      setCacheStatus('ok')
+      setCacheMsg(`Cache atualizado às ${new Date(json.updatedAt).toLocaleTimeString('pt-BR')}`)
+    } catch (e) {
+      setCacheStatus('error')
+      setCacheMsg((e as Error).message)
+    }
+  }, [token])
 
   const faturadoMap: Record<string, number> = {}
   const sourcesMap: Record<string, HotmartProduct[]> = {}
@@ -652,6 +672,25 @@ export default function TabMetasMensais({ token, enabled }: Props) {
             Atualizar
           </button>
         </div>
+      </div>
+
+      {/* Botão cache ManyChat */}
+      <div className="rounded-lg border bg-card p-4 flex items-center justify-between gap-4">
+        <div>
+          <p className="text-sm font-medium">Relatório ManyChat – Metas Mensais</p>
+          <p className="text-xs text-muted-foreground">Atualiza o cache usado pelo bot do WhatsApp para enviar o relatório de metas.</p>
+          {cacheMsg && (
+            <p className={`mt-1 text-xs ${cacheStatus === 'ok' ? 'text-green-600' : 'text-red-500'}`}>{cacheMsg}</p>
+          )}
+        </div>
+        <button
+          onClick={refreshMonthlyCache}
+          disabled={cacheStatus === 'loading'}
+          className="flex items-center gap-2 rounded-md border px-4 py-2 text-sm font-medium transition-colors hover:bg-muted disabled:opacity-50 shrink-0"
+        >
+          <RefreshCw className={`h-4 w-4 ${cacheStatus === 'loading' ? 'animate-spin' : ''}`} />
+          {cacheStatus === 'loading' ? 'Atualizando…' : 'Atualizar agora'}
+        </button>
       </div>
 
       {error && <div className="rounded-md bg-destructive/10 border border-destructive/20 px-4 py-3 text-sm text-destructive">{error}</div>}
