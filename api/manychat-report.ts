@@ -211,30 +211,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .filter(Boolean)
       .join('\n')
 
-    const mensagem = [
-      `📊 *Relatório do Lançamento – ${lancamento}*`,
-      `📅 ${dataInicio} até ${dataHoje}`,
-      '',
-      `*Leads por fase:*`,
-      linhasLeads,
-      '',
-      `*Total único de leads:* ${fmt(totalUnicos)}`,
-      '',
-      metaTotal > 0
-        ? [
-            `*Metas do lançamento:*`,
-            linhasMetas,
-            `• *Total meta:* ${fmt(metaTotal)} leads`,
-            '',
-            `*Progresso geral:* ${pctTotal}% ${progressEmoji(pctTotal)}`,
-            `_(${fmt(totalUnicos)} de ${fmt(metaTotal)} leads)_`,
-          ].join('\n')
-        : `_Metas não configuradas na planilha._`,
-    ].join('\n')
+    // Separado em partes para respeitar limite de 255 chars dos campos ManyChat
+    const parte1 = `📊 *Relatório – ${lancamento}*\n📅 ${dataInicio} até ${dataHoje}\n\n*Leads por fase:*\n${linhasLeads}`
+
+    const parte2 = `*Total único:* ${fmt(totalUnicos)} leads`
+
+    const parte3 = metaTotal > 0
+      ? `*Meta:* ${fmt(metaTotal)} leads\n${linhasMetas}\n\n*Progresso:* ${pctTotal}% ${progressEmoji(pctTotal)}\n_(${fmt(totalUnicos)} de ${fmt(metaTotal)})_`
+      : `_Metas não configuradas._`
+
+    const mensagem = `${parte1}\n\n${parte2}\n\n${parte3}`
 
     // ── 5. Resposta JSON ─────────────────────────────────────────────────
     res.json({
       mensagem,
+      parte1,
+      parte2,
+      parte3,
       dados: {
         lancamento,
         periodo: { desde: since, ate: until },
