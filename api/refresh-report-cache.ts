@@ -8,6 +8,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { createClient } from '@supabase/supabase-js'
 import { bqQuery, tableLeads } from './_bq.js'
+import { authUser } from './_supabase-auth.js'
 
 function todayStr() {
   return new Date().toISOString().split('T')[0]
@@ -81,6 +82,13 @@ async function fetchGoals() {
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  // Aceita chamada do cron Vercel (sem token) ou do dashboard (Bearer token Supabase)
+  const hasBearerToken = (req.headers.authorization ?? '').startsWith('Bearer ')
+  if (hasBearerToken) {
+    const user = await authUser(req, res)
+    if (!user) return
+  }
+
   const supabase = createClient(
     process.env.SUPABASE_URL ?? '',
     process.env.SUPABASE_SERVICE_KEY ?? '',
