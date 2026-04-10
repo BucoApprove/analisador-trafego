@@ -204,11 +204,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     posts = await Promise.all(
       (mediaBody.data ?? []).map(async post => {
+        const isVideo = post.media_type === 'VIDEO' || post.media_type === 'REELS'
+        const baseMetrics = 'reach,saved,shares,follows,profile_visits'
+        const reelMetrics = `${baseMetrics},video_views,ig_reels_avg_watch_time,ig_reels_video_view_total_time,clips_replays_count`
+
         try {
-          const isVideo = post.media_type === 'VIDEO' || post.media_type === 'REELS'
-          const metrics = isVideo ? 'reach,saved,shares,video_views' : 'reach,saved,shares'
-          const iUrl    = new URL(`${META_BASE}/${post.id}/insights`)
-          iUrl.searchParams.set('metric', metrics)
+          const iUrl = new URL(`${META_BASE}/${post.id}/insights`)
+          iUrl.searchParams.set('metric', isVideo ? reelMetrics : baseMetrics)
           iUrl.searchParams.set('access_token', accessToken)
 
           const iRes  = await fetch(iUrl.toString())
@@ -219,20 +221,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
           if (iBody.error) throw new Error(iBody.error.message)
 
-          const get      = (n: string) => iBody.data?.find(d => d.name === n)?.values?.[0]?.value ?? 0
-          const reach    = get('reach')
-          const saved    = get('saved')
-          const shares   = get('shares')
-          const videoViews = get('video_views')
-          const totalEng = post.like_count + post.comments_count + saved + shares
-          const engRate  = reach > 0 ? (totalEng / reach) * 100 : 0
+          const get       = (n: string) => iBody.data?.find(d => d.name === n)?.values?.[0]?.value ?? 0
+          const reach     = get('reach')
+          const saved     = get('saved')
+          const shares    = get('shares')
+          const follows   = get('follows')
+          const profileVisits = get('profile_visits')
+          const videoViews    = get('video_views')
+          // avg watch time returned in milliseconds → convert to seconds
+          const avgWatchTimeSec = Math.round(get('ig_reels_avg_watch_time') / 1000)
+          const replays         = get('clips_replays_count')
+          const totalEng  = post.like_count + post.comments_count + saved + shares
+          const engRate   = reach > 0 ? (totalEng / reach) * 100 : 0
 
           return {
             id: post.id, mediaType: post.media_type, mediaUrl: post.media_url,
             thumbnailUrl: post.thumbnail_url, permalink: post.permalink,
             caption: post.caption, timestamp: post.timestamp,
             likeCount: post.like_count, commentsCount: post.comments_count,
-            reach, saved, shares, videoViews, engRate,
+            reach, saved, shares, follows, profileVisits,
+            videoViews, avgWatchTimeSec, replays, engRate,
           }
         } catch {
           return {
@@ -240,7 +248,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             thumbnailUrl: post.thumbnail_url, permalink: post.permalink,
             caption: post.caption, timestamp: post.timestamp,
             likeCount: post.like_count, commentsCount: post.comments_count,
-            reach: 0, saved: 0, shares: 0, videoViews: 0, engRate: 0,
+            reach: 0, saved: 0, shares: 0, follows: 0, profileVisits: 0,
+            videoViews: 0, avgWatchTimeSec: 0, replays: 0, engRate: 0,
           }
         }
       })

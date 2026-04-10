@@ -3,6 +3,7 @@ import {
   Calendar, Clock, Image, Send, X, RefreshCw, Camera,
   AlertCircle, CheckCircle, Loader2, ExternalLink, Film,
   Heart, MessageCircle, Bookmark, Share2, Eye, TrendingUp, Users,
+  UserPlus, Link2, Timer, Repeat2,
 } from 'lucide-react'
 import {
   ResponsiveContainer, LineChart, Line, BarChart, Bar,
@@ -66,7 +67,11 @@ interface AnalyticsPost {
   reach: number
   saved: number
   shares: number
+  follows: number
+  profileVisits: number
   videoViews: number
+  avgWatchTimeSec: number
+  replays: number
   engRate: number
 }
 
@@ -723,7 +728,7 @@ function AnaliseSection({ token }: { token: string }) {
                 {post.caption && (
                   <p className="line-clamp-2 text-xs text-muted-foreground">{post.caption}</p>
                 )}
-                {/* Métricas */}
+                {/* Métricas principais */}
                 <div className="grid grid-cols-3 gap-y-1.5 text-xs">
                   <div className="flex items-center gap-1">
                     <Heart className="h-3 w-3 text-rose-500" />
@@ -749,6 +754,51 @@ function AnaliseSection({ token }: { token: string }) {
                     {formatPercent(post.engRate)} eng.
                   </div>
                 </div>
+
+                {/* Novos seguidores + cliques externos */}
+                <div className="grid grid-cols-2 gap-y-1 text-xs border-t pt-2 mt-1">
+                  <div className="flex items-center gap-1">
+                    <UserPlus className="h-3 w-3 text-emerald-500" />
+                    <span className="text-muted-foreground">Seguidores:</span>
+                    <span className="font-medium">+{fmt(post.follows)}</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <Link2 className="h-3 w-3 text-sky-500" />
+                    <span className="text-muted-foreground">Cliques ext.:</span>
+                    <span className="font-medium">{fmt(post.profileVisits)}</span>
+                  </div>
+                </div>
+
+                {/* Métricas de Reels */}
+                {(post.mediaType === 'VIDEO' || post.mediaType === 'REELS') && (
+                  <div className="grid grid-cols-2 gap-y-1 text-xs border-t pt-2 mt-1 bg-violet-50/60 rounded-md px-2 pb-2">
+                    <div className="col-span-2 text-[10px] font-semibold text-violet-600 uppercase tracking-wide pt-1 mb-0.5">
+                      Reels
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <Eye className="h-3 w-3 text-violet-500" />
+                      <span className="text-muted-foreground">Views:</span>
+                      <span className="font-medium">{fmt(post.videoViews)}</span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <Repeat2 className="h-3 w-3 text-violet-500" />
+                      <span className="text-muted-foreground">Replays:</span>
+                      <span className="font-medium">{fmt(post.replays)}</span>
+                    </div>
+                    {post.avgWatchTimeSec > 0 && (
+                      <div className="flex items-center gap-1 col-span-2">
+                        <Timer className="h-3 w-3 text-violet-500" />
+                        <span className="text-muted-foreground">Tempo médio:</span>
+                        <span className="font-medium">{post.avgWatchTimeSec}s</span>
+                        {post.videoViews > 0 && post.replays > 0 && (
+                          <span className="ml-auto text-violet-600 font-medium">
+                            {formatPercent((post.replays / post.videoViews) * 100)} replay
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
                 {/* Rodapé */}
                 <div className="flex items-center justify-between text-xs text-muted-foreground">
                   <span>{new Date(post.timestamp).toLocaleDateString('pt-BR')}</span>
