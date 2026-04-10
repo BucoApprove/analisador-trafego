@@ -46,31 +46,49 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   let insightsError: string | null = null
 
   try {
+    // reach e follower_count usam period=day
+    // accounts_engaged e profile_links_taps exigem metric_type=total_value — buscamos separado
     const params = new URLSearchParams({
-      metric: 'reach,follower_count,profile_links_taps,accounts_engaged',
+      metric: 'reach,follower_count',
       period: 'day',
       since: sinceTs.toString(),
       until: untilTs.toString(),
       access_token: accessToken,
     })
 
-    const insightsRes  = await fetch(`${META_BASE}/${INSTAGRAM_ACCOUNT_ID}/insights?${params}`)
+    const paramsTotals = new URLSearchParams({
+      metric: 'accounts_engaged,profile_links_taps',
+      period: 'day',
+      metric_type: 'total_value',
+      since: sinceTs.toString(),
+      until: untilTs.toString(),
+      access_token: accessToken,
+    })
+
+    const [insightsRes, totalRes] = await Promise.all([
+      fetch(`${META_BASE}/${INSTAGRAM_ACCOUNT_ID}/insights?${params}`),
+      fetch(`${META_BASE}/${INSTAGRAM_ACCOUNT_ID}/insights?${paramsTotals}`),
+    ])
+
     const insightsBody = await insightsRes.json() as {
+      data?: InsightMetric[]
+      error?: { message: string; code: number }
+    }
+    const totalBody = await totalRes.json() as {
       data?: InsightMetric[]
       error?: { message: string; code: number }
     }
 
     if (insightsBody.error) {
-      // Permissão ausente ou conta não suporta — não bloqueia o restante
       insightsError = insightsBody.error.message
     } else {
-      const getValues = (name: string): InsightValue[] =>
-        insightsBody.data?.find(d => d.name === name)?.values ?? []
+      const getValues = (name: string, body: typeof insightsBody): InsightValue[] =>
+        body.data?.find(d => d.name === name)?.values ?? []
 
-      const reachValues        = getValues('reach')
-      const followerValues     = getValues('follower_count')
-      const profileTapsValues  = getValues('profile_links_taps')
-      const engagedValues      = getValues('accounts_engaged')
+      const reachValues        = getValues('reach', insightsBody)
+      const followerValues     = getValues('follower_count', insightsBody)
+      const profileTapsValues  = totalBody.error ? [] : getValues('profile_links_taps', totalBody)
+      const engagedValues      = totalBody.error ? [] : getValues('accounts_engaged', totalBody)
 
       const dateMap = new Map<string, typeof dailyStats[number]>()
 
