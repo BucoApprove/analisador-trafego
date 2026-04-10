@@ -548,10 +548,7 @@ function AnaliseSection({ token }: { token: string }) {
           <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
           <div>
             <p className="font-medium">Gráficos de conta indisponíveis</p>
-            <p className="text-xs mt-0.5">
-              O access token não tem a permissão <code className="font-mono bg-yellow-100 px-1 rounded">instagram_manage_insights</code>.
-              Os posts abaixo continuam disponíveis. Para habilitar os gráficos, gere um novo token com essa permissão no Meta Business Suite.
-            </p>
+            <p className="text-xs mt-0.5 font-mono bg-yellow-100 px-1 rounded">{insightsError}</p>
           </div>
         </div>
       )}
