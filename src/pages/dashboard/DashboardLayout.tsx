@@ -13,6 +13,7 @@ import TabEmailCampaigns from './TabEmailCampaigns'
 import TabPaidTraffic from './TabPaidTraffic'
 import TabPesquisa from './TabPesquisa'
 import TabMetasMensais from './TabMetasMensais'
+import TabInstagramGestor from './TabInstagramGestor'
 
 interface DashboardLayoutProps {
   token: string
@@ -37,6 +38,7 @@ const TABS_ADMIN = [
   ...TABS_USER,
   // Abas exclusivas do gestor
   { id: 'metas-mensais', label: 'Metas Mensais' },
+  { id: 'instagram-gestor', label: 'Instagram Gestor' },
 ]
 
 export default function DashboardLayout({ token, role, userName, onLogout }: DashboardLayoutProps) {
@@ -107,6 +109,11 @@ export default function DashboardLayout({ token, role, userName, onLogout }: Das
           {role === 'admin' && (
             <TabsContent value="metas-mensais">
               <TabMetasMensais token={token} enabled={activeTab === 'metas-mensais'} />
+            </TabsContent>
+          )}
+          {role === 'admin' && (
+            <TabsContent value="instagram-gestor">
+              <TabInstagramGestor token={token} enabled={activeTab === 'instagram-gestor'} />
             </TabsContent>
           )}
         </Tabs>

@@ -1,6 +1,8 @@
 {
   "version": 2,
   "functions": {
+    "api/instagram-content.ts": { "maxDuration": 30 },
+    "api/instagram-publish-scheduled.ts": { "maxDuration": 60 },
     "api/manychat-report.ts": { "maxDuration": 10 },
     "api/refresh-report-cache.ts": { "maxDuration": 60 },
     "api/refresh-monthly-cache.ts": { "maxDuration": 60 },
@@ -23,6 +25,10 @@
     {
       "path": "/api/refresh-monthly-cache",
       "schedule": "*/30 * * * *"
+    },
+    {
+      "path": "/api/instagram-publish-scheduled",
+      "schedule": "*/5 * * * *"
     }
   ],
   "rewrites": [
