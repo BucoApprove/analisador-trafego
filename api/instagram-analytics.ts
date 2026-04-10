@@ -40,16 +40,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     // Métricas com period=day simples
     const params = new URLSearchParams({
-      metric: 'reach,follower_count,views',
+      metric: 'reach,follower_count',
       period: 'day',
       since: sinceTs.toString(),
       until: untilTs.toString(),
       access_token: accessToken,
     })
 
-    // Métricas que exigem metric_type=total_value
+    // Métricas que exigem metric_type=total_value (views incluído)
     const paramsTotals = new URLSearchParams({
-      metric: 'accounts_engaged,profile_links_taps',
+      metric: 'accounts_engaged,profile_links_taps,views',
       period: 'day',
       metric_type: 'total_value',
       since: sinceTs.toString(),
@@ -79,9 +79,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       const reachValues      = getVal('reach', insightsBody)
       const followerValues   = getVal('follower_count', insightsBody)
-      const viewsValues      = getVal('views', insightsBody)
       const engagedValues    = totalBody.error ? [] : getVal('accounts_engaged', totalBody)
       const profileTapValues = totalBody.error ? [] : getVal('profile_links_taps', totalBody)
+      const viewsValues      = totalBody.error ? [] : getVal('views', totalBody)
 
       const dateMap = new Map<string, typeof dailyStats[number]>()
 
