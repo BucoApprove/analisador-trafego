@@ -569,7 +569,7 @@ function AnaliseSection({ token }: { token: string }) {
                 <XAxis dataKey="label" tick={{ fontSize: 11 }} tickLine={false} />
                 <YAxis tick={{ fontSize: 11 }} tickLine={false} axisLine={false} width={60}
                   tickFormatter={v => v.toLocaleString('pt-BR')} />
-                <Tooltip formatter={(v: number) => [fmt(v), 'Seguidores']} />
+                <Tooltip formatter={(v: unknown) => [fmt(v as number), 'Seguidores']} />
                 <Line type="monotone" dataKey="followers" stroke={CHART_COLORS[1]} dot={false} strokeWidth={2} />
               </LineChart>
             </ResponsiveContainer>
@@ -592,7 +592,7 @@ function AnaliseSection({ token }: { token: string }) {
                 <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
                 <XAxis dataKey="label" tick={{ fontSize: 11 }} tickLine={false} />
                 <YAxis tick={{ fontSize: 11 }} tickLine={false} axisLine={false} width={40} />
-                <Tooltip formatter={(v: number) => [fmt(v), 'Novos seguidores']} />
+                <Tooltip formatter={(v: unknown) => [fmt(v as number), 'Novos seguidores']} />
                 <Bar dataKey="followerGain" fill={CHART_COLORS[1]} radius={[2, 2, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
@@ -616,7 +616,7 @@ function AnaliseSection({ token }: { token: string }) {
                 <XAxis dataKey="label" tick={{ fontSize: 11 }} tickLine={false} />
                 <YAxis tick={{ fontSize: 11 }} tickLine={false} axisLine={false} width={60}
                   tickFormatter={v => v >= 1000 ? `${(v / 1000).toFixed(0)}k` : String(v)} />
-                <Tooltip formatter={(v: number) => [fmt(v), 'Alcance']} />
+                <Tooltip formatter={(v: unknown) => [fmt(v as number), 'Alcance']} />
                 <Bar dataKey="reach" fill={CHART_COLORS[2]} radius={[2, 2, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
