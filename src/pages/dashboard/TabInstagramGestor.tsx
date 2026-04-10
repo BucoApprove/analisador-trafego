@@ -72,6 +72,7 @@ interface AnalyticsData {
   dailyStats: DailyStat[]
   summary: AnalyticsSummary
   posts: AnalyticsPost[]
+  insightsError: string | null
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -508,7 +509,7 @@ function AnaliseSection({ token }: { token: string }) {
   if (error) return <TabError message={error} onRetry={load} />
   if (!data) return null
 
-  const { summary, dailyStats, posts } = data
+  const { summary, dailyStats, posts, insightsError } = data
 
   // Formata datas para eixo X
   const chartData = dailyStats.map(d => ({
@@ -540,6 +541,20 @@ function AnaliseSection({ token }: { token: string }) {
           </Button>
         </div>
       </div>
+
+      {/* Aviso de permissão ausente */}
+      {insightsError && (
+        <div className="flex items-start gap-2 rounded-md border border-yellow-300 bg-yellow-50 px-4 py-3 text-sm text-yellow-800">
+          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+          <div>
+            <p className="font-medium">Gráficos de conta indisponíveis</p>
+            <p className="text-xs mt-0.5">
+              O access token não tem a permissão <code className="font-mono bg-yellow-100 px-1 rounded">instagram_manage_insights</code>.
+              Os posts abaixo continuam disponíveis. Para habilitar os gráficos, gere um novo token com essa permissão no Meta Business Suite.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* KPIs resumo */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">

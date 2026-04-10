@@ -1,6 +1,13 @@
 /**
  * Analytics de conta do Instagram (admin only)
- * Retorna: crescimento de seguidores, alcance e impressões diários
+ * Retorna: crescimento de seguidores, alcance e impressões diários + posts
+ *
+ * PERMISSÕES NECESSÁRIAS no access token:
+ *   - instagram_manage_insights  → para gráficos de conta (seguidores, alcance)
+ *   - instagram_basic            → para listar posts (já presente)
+ *
+ * Se o token não tiver instagram_manage_insights, os gráficos ficam vazios
+ * mas os posts ainda são retornados normalmente.
  */
 
 import type { VercelRequest, VercelResponse } from '@vercel/node'
@@ -9,7 +16,7 @@ import { authUser, requireAdmin } from './_supabase-auth.js'
 const META_BASE = 'https://graph.facebook.com/v22.0'
 const INSTAGRAM_ACCOUNT_ID = '17841447803654486'
 
-type InsightValue = { value: number; end_time: string }
+type InsightValue  = { value: number; end_time: string }
 type InsightMetric = { name: string; period: string; values: InsightValue[] }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -18,15 +25,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!requireAdmin(user, res)) return
 
   const accessToken = process.env.META_ACCESS_TOKEN ?? ''
-  const days = Math.min(parseInt(req.query.days as string ?? '30', 10) || 30, 90)
+  const days = Math.min(parseInt((req.query.days as string) ?? '30', 10) || 30, 90)
 
-  const until = new Date()
-  const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000)
+  const until   = new Date()
+  const since   = new Date(Date.now() - days * 24 * 60 * 60 * 1000)
   const sinceTs = Math.floor(since.getTime() / 1000)
   const untilTs = Math.floor(until.getTime() / 1000)
 
+  // ─── Insights diários (best-effort — pode falhar sem permissão) ─────────
+  let dailyStats: {
+    date: string; reach: number; impressions: number
+    profileViews: number; followers: number; followerGain: number
+  }[] = []
+
+  let summary = {
+    totalReach: 0, totalImpressions: 0, totalProfileViews: 0,
+    followerGainTotal: 0, avgDailyReach: 0,
+  }
+
+  let insightsError: string | null = null
+
   try {
-    // ─── Insights diários da conta ───────────────────────────────────────
     const params = new URLSearchParams({
       metric: 'reach,impressions,profile_views,follower_count',
       period: 'day',
@@ -35,144 +54,122 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       access_token: accessToken,
     })
 
-    const insightsRes = await fetch(`${META_BASE}/${INSTAGRAM_ACCOUNT_ID}/insights?${params}`)
+    const insightsRes  = await fetch(`${META_BASE}/${INSTAGRAM_ACCOUNT_ID}/insights?${params}`)
     const insightsBody = await insightsRes.json() as {
       data?: InsightMetric[]
       error?: { message: string; code: number }
     }
 
     if (insightsBody.error) {
-      throw new Error(insightsBody.error.message)
+      // Permissão ausente ou conta não suporta — não bloqueia o restante
+      insightsError = insightsBody.error.message
+    } else {
+      const getValues = (name: string): InsightValue[] =>
+        insightsBody.data?.find(d => d.name === name)?.values ?? []
+
+      const reachValues       = getValues('reach')
+      const impressionValues  = getValues('impressions')
+      const profileViewValues = getValues('profile_views')
+      const followerValues    = getValues('follower_count')
+
+      const dateMap = new Map<string, typeof dailyStats[number]>()
+
+      const merge = (values: InsightValue[], key: 'reach' | 'impressions' | 'profileViews' | 'followers') => {
+        values.forEach(v => {
+          const date = v.end_time.slice(0, 10)
+          const row = dateMap.get(date) ?? { date, reach: 0, impressions: 0, profileViews: 0, followers: 0, followerGain: 0 }
+          row[key] = v.value
+          dateMap.set(date, row)
+        })
+      }
+
+      merge(reachValues,       'reach')
+      merge(impressionValues,  'impressions')
+      merge(profileViewValues, 'profileViews')
+      merge(followerValues,    'followers')
+
+      dailyStats = Array.from(dateMap.values()).sort((a, b) => a.date.localeCompare(b.date))
+      for (let i = 1; i < dailyStats.length; i++) {
+        dailyStats[i].followerGain = dailyStats[i].followers - dailyStats[i - 1].followers
+      }
+
+      const totalReach        = reachValues.reduce((s, v) => s + v.value, 0)
+      const totalImpressions  = impressionValues.reduce((s, v) => s + v.value, 0)
+      const totalProfileViews = profileViewValues.reduce((s, v) => s + v.value, 0)
+      const followerGainTotal = dailyStats.length > 1
+        ? dailyStats.at(-1)!.followers - dailyStats[0].followers
+        : 0
+
+      summary = {
+        totalReach,
+        totalImpressions,
+        totalProfileViews,
+        followerGainTotal,
+        avgDailyReach: Math.round(totalReach / Math.max(dailyStats.length, 1)),
+      }
     }
+  } catch (err) {
+    insightsError = (err as Error).message
+  }
 
-    const getValues = (name: string): InsightValue[] =>
-      insightsBody.data?.find(d => d.name === name)?.values ?? []
+  // ─── Últimos 20 posts com insights (best-effort) ─────────────────────────
+  let posts: object[] = []
 
-    const reachValues       = getValues('reach')
-    const impressionValues  = getValues('impressions')
-    const profileViewValues = getValues('profile_views')
-    const followerValues    = getValues('follower_count')
-
-    // ─── Últimos 20 posts com insights ──────────────────────────────────
+  try {
     const mediaUrl = new URL(`${META_BASE}/${INSTAGRAM_ACCOUNT_ID}/media`)
     mediaUrl.searchParams.set('fields', 'id,media_type,media_url,thumbnail_url,permalink,caption,timestamp,like_count,comments_count')
     mediaUrl.searchParams.set('limit', '20')
     mediaUrl.searchParams.set('access_token', accessToken)
 
-    const mediaRes = await fetch(mediaUrl.toString())
+    const mediaRes  = await fetch(mediaUrl.toString())
     const mediaBody = await mediaRes.json() as {
       data?: {
         id: string; media_type: string; media_url?: string; thumbnail_url?: string
         permalink: string; caption?: string; timestamp: string
         like_count: number; comments_count: number
       }[]
+      error?: { message: string }
     }
 
-    const posts = mediaBody.data ?? []
+    if (mediaBody.error) throw new Error(mediaBody.error.message)
 
-    const postsWithInsights = await Promise.all(
-      posts.map(async post => {
+    posts = await Promise.all(
+      (mediaBody.data ?? []).map(async post => {
         try {
-          const isVideo = post.media_type === 'VIDEO' || post.media_type === 'REELS'
-          const metrics = isVideo ? 'reach,saved,shares,video_views' : 'reach,saved,shares'
-          const iUrl = new URL(`${META_BASE}/${post.id}/insights`)
+          const isVideo   = post.media_type === 'VIDEO' || post.media_type === 'REELS'
+          const metrics   = isVideo ? 'reach,saved,shares,video_views' : 'reach,saved,shares'
+          const iUrl      = new URL(`${META_BASE}/${post.id}/insights`)
           iUrl.searchParams.set('metric', metrics)
           iUrl.searchParams.set('access_token', accessToken)
 
-          const iRes = await fetch(iUrl.toString())
-          if (!iRes.ok) throw new Error('insights error')
-          const iBody = await iRes.json() as { data: { name: string; values: { value: number }[] }[] }
+          const iRes  = await fetch(iUrl.toString())
+          const iBody = await iRes.json() as { data?: { name: string; values: { value: number }[] }[]; error?: { message: string } }
 
-          const get = (n: string) => iBody.data?.find(d => d.name === n)?.values?.[0]?.value ?? 0
-          const reach  = get('reach')
-          const saved  = get('saved')
-          const shares = get('shares')
+          if (iBody.error) throw new Error(iBody.error.message)
+
+          const get       = (n: string) => iBody.data?.find(d => d.name === n)?.values?.[0]?.value ?? 0
+          const reach     = get('reach')
+          const saved     = get('saved')
+          const shares    = get('shares')
           const videoViews = get('video_views')
-          const totalEng = post.like_count + post.comments_count + saved + shares
-          const engRate = reach > 0 ? (totalEng / reach) * 100 : 0
+          const totalEng  = post.like_count + post.comments_count + saved + shares
+          const engRate   = reach > 0 ? (totalEng / reach) * 100 : 0
 
-          return {
-            id: post.id,
-            mediaType: post.media_type,
-            mediaUrl: post.media_url,
-            thumbnailUrl: post.thumbnail_url,
-            permalink: post.permalink,
-            caption: post.caption,
-            timestamp: post.timestamp,
-            likeCount: post.like_count,
-            commentsCount: post.comments_count,
-            reach, saved, shares, videoViews, engRate,
-          }
+          return { id: post.id, mediaType: post.media_type, mediaUrl: post.media_url, thumbnailUrl: post.thumbnail_url, permalink: post.permalink, caption: post.caption, timestamp: post.timestamp, likeCount: post.like_count, commentsCount: post.comments_count, reach, saved, shares, videoViews, engRate }
         } catch {
-          return {
-            id: post.id,
-            mediaType: post.media_type,
-            mediaUrl: post.media_url,
-            thumbnailUrl: post.thumbnail_url,
-            permalink: post.permalink,
-            caption: post.caption,
-            timestamp: post.timestamp,
-            likeCount: post.like_count,
-            commentsCount: post.comments_count,
-            reach: 0, saved: 0, shares: 0, videoViews: 0, engRate: 0,
-          }
+          return { id: post.id, mediaType: post.media_type, mediaUrl: post.media_url, thumbnailUrl: post.thumbnail_url, permalink: post.permalink, caption: post.caption, timestamp: post.timestamp, likeCount: post.like_count, commentsCount: post.comments_count, reach: 0, saved: 0, shares: 0, videoViews: 0, engRate: 0 }
         }
       })
     )
-
-    // ─── Monta série diária ──────────────────────────────────────────────
-    const dateMap = new Map<string, {
-      date: string
-      reach: number
-      impressions: number
-      profileViews: number
-      followers: number
-    }>()
-
-    const merge = (values: InsightValue[], key: 'reach' | 'impressions' | 'profileViews' | 'followers') => {
-      values.forEach(v => {
-        const date = v.end_time.slice(0, 10)
-        const row = dateMap.get(date) ?? { date, reach: 0, impressions: 0, profileViews: 0, followers: 0 }
-        row[key] = v.value
-        dateMap.set(date, row)
-      })
-    }
-
-    merge(reachValues,       'reach')
-    merge(impressionValues,  'impressions')
-    merge(profileViewValues, 'profileViews')
-    merge(followerValues,    'followers')
-
-    const dailyStats = Array.from(dateMap.values())
-      .sort((a, b) => a.date.localeCompare(b.date))
-
-    // Calcula ganho de seguidores por dia
-    const dailyStatsWithGain = dailyStats.map((row, i) => ({
-      ...row,
-      followerGain: i === 0 ? 0 : row.followers - dailyStats[i - 1].followers,
-    }))
-
-    const totalReach        = reachValues.reduce((s, v) => s + v.value, 0)
-    const totalImpressions  = impressionValues.reduce((s, v) => s + v.value, 0)
-    const totalProfileViews = profileViewValues.reduce((s, v) => s + v.value, 0)
-    const followerGainTotal = dailyStats.length > 1
-      ? dailyStats.at(-1)!.followers - dailyStats[0].followers
-      : 0
-
-    res.setHeader('Cache-Control', 's-maxage=600, stale-while-revalidate=120')
-    res.json({
-      dailyStats: dailyStatsWithGain,
-      summary: {
-        totalReach,
-        totalImpressions,
-        totalProfileViews,
-        followerGainTotal,
-        avgDailyReach: Math.round(totalReach / Math.max(dailyStats.length, 1)),
-      },
-      posts: postsWithInsights,
-    })
   } catch (err) {
-    console.error('instagram-analytics error:', err)
-    res.status(500).json({ error: (err as Error).message ?? 'Erro interno' })
+    console.error('instagram-analytics posts error:', (err as Error).message)
   }
+
+  res.setHeader('Cache-Control', 's-maxage=600, stale-while-revalidate=120')
+  res.json({
+    dailyStats,
+    summary,
+    posts,
+    insightsError, // null se OK, mensagem de erro se sem permissão
+  })
 }
