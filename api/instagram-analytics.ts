@@ -142,7 +142,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         storiesBody.data.map(async story => {
           try {
             const iRes = await fetch(
-              `${META_BASE}/${story.id}/insights?metric=impressions,reach,replies,taps_forward,taps_back,exits&access_token=${accessToken}`
+              `${META_BASE}/${story.id}/insights?metric=views,reach,replies,taps_forward,taps_back,exits&metric_type=total_value&access_token=${accessToken}`
             )
             const iBody = await iRes.json() as {
               data?: { name: string; values: { value: number }[] }[]
@@ -158,7 +158,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               mediaType: story.media_type,
               mediaUrl: story.media_url,
               timestamp: story.timestamp,
-              impressions: get('impressions'),
+              impressions: get('views'),
               reach: get('reach'),
               replies: get('replies'),
               tapsForward: get('taps_forward'),
