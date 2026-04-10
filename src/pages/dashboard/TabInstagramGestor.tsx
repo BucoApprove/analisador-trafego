@@ -503,11 +503,17 @@ function AgendamentoSection({ token }: { token: string }) {
 
 // ─── Seção de Análise ─────────────────────────────────────────────────────────
 
+type SortKey = 'timestamp' | 'likeCount' | 'commentsCount' | 'saved' | 'shares' |
+  'reach' | 'videoViews' | 'follows' | 'profileVisits' | 'engRate' | 'avgWatchTimeSec'
+
 function AnaliseSection({ token }: { token: string }) {
-  const [data, setData] = useState<AnalyticsData | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [days, setDays] = useState(30)
+  const [data, setData]         = useState<AnalyticsData | null>(null)
+  const [loading, setLoading]   = useState(false)
+  const [error, setError]       = useState<string | null>(null)
+  const [days, setDays]         = useState(30)
+  const [sortKey, setSortKey]   = useState<SortKey>('engRate')
+  const [sortDir, setSortDir]   = useState<'asc' | 'desc'>('desc')
+  const [postView, setPostView] = useState<'grid' | 'table'>('grid')
 
   const load = useCallback(async () => {
     setLoading(true); setError(null)
@@ -527,23 +533,7 @@ function AnaliseSection({ token }: { token: string }) {
 
   useEffect(() => { load() }, [load])
 
-  if (loading) return <TabLoading />
-  if (error) return <TabError message={error} onRetry={load} />
-  if (!data) return null
-
-  const { summary, dailyStats, posts, stories, insightsError } = data
-
-  // Formata datas para eixo X
-  const chartData = dailyStats.map(d => ({
-    ...d,
-    label: new Date(d.date + 'T12:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }),
-  }))
-
-  type SortKey = 'timestamp' | 'likeCount' | 'commentsCount' | 'saved' | 'shares' |
-    'reach' | 'videoViews' | 'follows' | 'profileVisits' | 'engRate' | 'avgWatchTimeSec'
-  const [sortKey, setSortKey]       = useState<SortKey>('engRate')
-  const [sortDir, setSortDir]       = useState<'asc' | 'desc'>('desc')
-  const [postView, setPostView]     = useState<'grid' | 'table'>('grid')
+  const posts = data?.posts ?? []
 
   const sortedPosts = useMemo(() => {
     return [...posts].sort((a, b) => {
@@ -566,6 +556,18 @@ function AnaliseSection({ token }: { token: string }) {
   }
 
   const isVideo = (p: AnalyticsPost) => p.mediaType === 'VIDEO' || p.mediaType === 'REELS'
+
+  if (loading) return <TabLoading />
+  if (error) return <TabError message={error} onRetry={load} />
+  if (!data) return null
+
+  const { summary, dailyStats, stories, insightsError } = data
+
+  // Formata datas para eixo X
+  const chartData = dailyStats.map(d => ({
+    ...d,
+    label: new Date(d.date + 'T12:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }),
+  }))
 
   return (
     <div className="space-y-6">
