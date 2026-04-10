@@ -561,7 +561,7 @@ function AnaliseSection({ token }: { token: string }) {
           color={summary.followerGainTotal >= 0 ? '#7c9885' : '#c17c74'}
         />
         <KpiCard label={`Alcance Total (${days}d)`} value={fmt(summary.totalReach)} color="#5b8fb9" />
-        <KpiCard label={`Impressões (${days}d)`} value={fmt(summary.totalImpressions)} color="#d4a853" />
+        <KpiCard label={`Contas Engajadas (${days}d)`} value={fmt(summary.totalImpressions)} color="#d4a853" />
         <KpiCard label="Alcance Médio/Dia" value={fmt(summary.avgDailyReach)} color="#9b7cc1" />
       </div>
 

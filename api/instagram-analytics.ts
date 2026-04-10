@@ -47,7 +47,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   try {
     const params = new URLSearchParams({
-      metric: 'reach,impressions,profile_views,follower_count',
+      metric: 'reach,follower_count,profile_links_taps,accounts_engaged',
       period: 'day',
       since: sinceTs.toString(),
       until: untilTs.toString(),
@@ -67,10 +67,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const getValues = (name: string): InsightValue[] =>
         insightsBody.data?.find(d => d.name === name)?.values ?? []
 
-      const reachValues       = getValues('reach')
-      const impressionValues  = getValues('impressions')
-      const profileViewValues = getValues('profile_views')
-      const followerValues    = getValues('follower_count')
+      const reachValues        = getValues('reach')
+      const followerValues     = getValues('follower_count')
+      const profileTapsValues  = getValues('profile_links_taps')
+      const engagedValues      = getValues('accounts_engaged')
 
       const dateMap = new Map<string, typeof dailyStats[number]>()
 
@@ -84,8 +84,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
 
       merge(reachValues,       'reach')
-      merge(impressionValues,  'impressions')
-      merge(profileViewValues, 'profileViews')
+      merge(engagedValues,     'impressions')  // reaproveitamos o campo impressions para accounts_engaged
+      merge(profileTapsValues, 'profileViews') // reaproveitamos profileViews para profile_links_taps
       merge(followerValues,    'followers')
 
       dailyStats = Array.from(dateMap.values()).sort((a, b) => a.date.localeCompare(b.date))
@@ -94,8 +94,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
 
       const totalReach        = reachValues.reduce((s, v) => s + v.value, 0)
-      const totalImpressions  = impressionValues.reduce((s, v) => s + v.value, 0)
-      const totalProfileViews = profileViewValues.reduce((s, v) => s + v.value, 0)
+      const totalImpressions  = engagedValues.reduce((s, v) => s + v.value, 0)
+      const totalProfileViews = profileTapsValues.reduce((s, v) => s + v.value, 0)
       const followerGainTotal = dailyStats.length > 1
         ? dailyStats.at(-1)!.followers - dailyStats[0].followers
         : 0
