@@ -1,6 +1,12 @@
 /**
- * Cron job: publica posts do Instagram agendados
+ * Cron job: publica posts agendados e processa Reels em fila
  * Executa a cada 5 minutos via Vercel Cron
+ *
+ * Fluxo para imagens:
+ *   scheduled → [cron cria container + publica] → published
+ *
+ * Fluxo para Reels (processamento de vídeo pode demorar):
+ *   scheduled → [cron cria container] → processing → [próximo cron verifica status] → published
  */
 
 import type { VercelRequest, VercelResponse } from '@vercel/node'
@@ -15,12 +21,66 @@ export default async function handler(_req: VercelRequest, res: VercelResponse) 
     process.env.SUPABASE_SERVICE_KEY ?? '',
     { auth: { persistSession: false } }
   )
-  const accessToken = process.env.META_ACCESS_TOKEN ?? ''
+  const token = process.env.META_ACCESS_TOKEN ?? ''
 
-  // Busca posts agendados com scheduled_time <= agora (+ 1 min de buffer)
+  const results: { id: string; action: string; success: boolean; error?: string }[] = []
+
+  // ─── Fase 1: Publicar containers já processados (Reels em processing) ──
+  const { data: processing } = await supabase
+    .from('instagram_posts')
+    .select('*')
+    .eq('status', 'processing')
+    .not('container_id', 'is', null)
+    .limit(5)
+
+  for (const post of processing ?? []) {
+    try {
+      const statusRes = await fetch(
+        `${META_BASE}/${post.container_id}?fields=status_code&access_token=${token}`
+      )
+      const statusData = await statusRes.json() as { status_code?: string }
+
+      if (statusData.status_code !== 'FINISHED') {
+        results.push({ id: post.id, action: 'check_status', success: false, error: `status: ${statusData.status_code}` })
+        continue
+      }
+
+      const publishRes = await fetch(`${META_BASE}/${INSTAGRAM_ACCOUNT_ID}/media_publish`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ creation_id: post.container_id, access_token: token }).toString(),
+      })
+      const published = await publishRes.json() as { id?: string; error?: { message: string } }
+
+      if (!published.id) throw new Error(published.error?.message ?? 'Erro ao publicar')
+
+      let permalink: string | null = null
+      try {
+        const plRes = await fetch(`${META_BASE}/${published.id}?fields=permalink&access_token=${token}`)
+        const plData = await plRes.json() as { permalink?: string }
+        permalink = plData.permalink ?? null
+      } catch { /* ignora */ }
+
+      await supabase.from('instagram_posts').update({
+        status: 'published',
+        instagram_post_id: published.id,
+        published_at: new Date().toISOString(),
+        permalink,
+        error_message: null,
+      }).eq('id', post.id)
+
+      results.push({ id: post.id, action: 'publish_processing', success: true })
+    } catch (err) {
+      const message = (err as Error).message
+      await supabase.from('instagram_posts').update({ status: 'failed', error_message: message }).eq('id', post.id)
+      results.push({ id: post.id, action: 'publish_processing', success: false, error: message })
+    }
+  }
+
+  // ─── Fase 2: Publicar posts agendados com horário vencido ──────────────
   const dueTime = new Date(Date.now() + 60 * 1000).toISOString()
 
-  const { data: posts, error } = await supabase
+  const { data: scheduled, error } = await supabase
     .from('instagram_posts')
     .select('*')
     .eq('status', 'scheduled')
@@ -29,110 +89,90 @@ export default async function handler(_req: VercelRequest, res: VercelResponse) 
 
   if (error) {
     console.error('Erro ao buscar posts agendados:', error.message)
-    return res.status(500).json({ error: error.message })
+    return res.status(500).json({ error: error.message, results })
   }
 
-  if (!posts || posts.length === 0) {
-    return res.json({ processed: 0, message: 'Nenhum post para publicar' })
-  }
-
-  const results: { id: string; success: boolean; error?: string }[] = []
-
-  for (const post of posts) {
+  for (const post of scheduled ?? []) {
     try {
-      // Marca como 'publishing' para evitar processamento duplo
-      await supabase
-        .from('instagram_posts')
-        .update({ status: 'publishing' })
-        .eq('id', post.id)
-        .eq('status', 'scheduled') // guard extra
+      // Cria container
+      const isReels = post.media_type === 'REELS'
+      const containerBody: Record<string, string> = {
+        caption: post.caption ?? '',
+        published: 'false',
+        access_token: token,
+      }
 
-      // 1. Cria o container de mídia
+      if (isReels) {
+        containerBody.media_type = 'REELS'
+        containerBody.video_url = post.media_url
+        containerBody.share_to_feed = 'true'
+      } else {
+        containerBody.image_url = post.media_url
+      }
+
       const containerRes = await fetch(`${META_BASE}/${INSTAGRAM_ACCOUNT_ID}/media`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({
-          image_url: post.media_url,
-          caption: post.caption ?? '',
-          published: 'false',
-          access_token: accessToken,
-        }).toString(),
+        body: new URLSearchParams(containerBody).toString(),
       })
       const container = await containerRes.json() as { id?: string; error?: { message: string } }
 
-      if (!container.id) {
-        throw new Error(container.error?.message ?? 'Erro ao criar container')
-      }
+      if (!container.id) throw new Error(container.error?.message ?? 'Erro ao criar container')
 
-      // 2. Aguarda 2s para o container ficar pronto
-      await new Promise(r => setTimeout(r, 2000))
+      // Salva container_id e muda para processing (evita duplo processamento)
+      await supabase.from('instagram_posts').update({
+        status: 'processing',
+        container_id: container.id,
+      }).eq('id', post.id).eq('status', 'scheduled')
 
-      // 3. Verifica status do container
-      const statusRes = await fetch(
-        `${META_BASE}/${container.id}?fields=status_code&access_token=${accessToken}`
-      )
-      const statusData = await statusRes.json() as { status_code?: string }
-      if (statusData.status_code && statusData.status_code !== 'FINISHED') {
-        // Container ainda não processado — reagenda (mantém como scheduled)
-        await supabase
-          .from('instagram_posts')
-          .update({ status: 'scheduled', error_message: `Container status: ${statusData.status_code}` })
-          .eq('id', post.id)
-        results.push({ id: post.id, success: false, error: `Container não pronto: ${statusData.status_code}` })
-        continue
-      }
+      // Para imagens, aguarda 3s e tenta publicar direto
+      if (!isReels) {
+        await new Promise(r => setTimeout(r, 3000))
 
-      // 4. Publica
-      const publishRes = await fetch(`${META_BASE}/${INSTAGRAM_ACCOUNT_ID}/media_publish`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({
-          creation_id: container.id,
-          access_token: accessToken,
-        }).toString(),
-      })
-      const published = await publishRes.json() as { id?: string; error?: { message: string } }
-
-      if (!published.id) {
-        throw new Error(published.error?.message ?? 'Erro ao publicar')
-      }
-
-      // 5. Busca permalink
-      let permalink: string | null = null
-      try {
-        const plRes = await fetch(
-          `${META_BASE}/${published.id}?fields=permalink&access_token=${accessToken}`
+        const statusRes = await fetch(
+          `${META_BASE}/${container.id}?fields=status_code&access_token=${token}`
         )
-        const plData = await plRes.json() as { permalink?: string }
-        permalink = plData.permalink ?? null
-      } catch { /* ignora */ }
+        const statusData = await statusRes.json() as { status_code?: string }
 
-      await supabase
-        .from('instagram_posts')
-        .update({
-          status: 'published',
-          container_id: container.id,
-          instagram_post_id: published.id,
-          published_at: new Date().toISOString(),
-          permalink,
-          error_message: null,
-        })
-        .eq('id', post.id)
+        if (statusData.status_code === 'FINISHED') {
+          const publishRes = await fetch(`${META_BASE}/${INSTAGRAM_ACCOUNT_ID}/media_publish`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({ creation_id: container.id, access_token: token }).toString(),
+          })
+          const published = await publishRes.json() as { id?: string; error?: { message: string } }
 
-      results.push({ id: post.id, success: true })
+          if (published.id) {
+            let permalink: string | null = null
+            try {
+              const plRes = await fetch(`${META_BASE}/${published.id}?fields=permalink&access_token=${token}`)
+              const plData = await plRes.json() as { permalink?: string }
+              permalink = plData.permalink ?? null
+            } catch { /* ignora */ }
+
+            await supabase.from('instagram_posts').update({
+              status: 'published',
+              instagram_post_id: published.id,
+              published_at: new Date().toISOString(),
+              permalink,
+              error_message: null,
+            }).eq('id', post.id)
+
+            results.push({ id: post.id, action: 'publish_scheduled', success: true })
+            continue
+          }
+        }
+      }
+
+      // Reels ou imagem não pronta: fica em 'processing' para próximo cron
+      results.push({ id: post.id, action: 'container_created', success: true })
     } catch (err) {
       const message = (err as Error).message
-      console.error(`Erro ao publicar post ${post.id}:`, message)
-      await supabase
-        .from('instagram_posts')
-        .update({ status: 'failed', error_message: message })
-        .eq('id', post.id)
-      results.push({ id: post.id, success: false, error: message })
+      console.error(`Erro ao processar post ${post.id}:`, message)
+      await supabase.from('instagram_posts').update({ status: 'failed', error_message: message }).eq('id', post.id)
+      results.push({ id: post.id, action: 'publish_scheduled', success: false, error: message })
     }
   }
 
-  return res.json({
-    processed: results.length,
-    results,
-  })
+  return res.json({ processed: results.length, results })
 }

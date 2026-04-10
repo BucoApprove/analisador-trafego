@@ -1,42 +1,92 @@
 import { useState, useEffect, useCallback } from 'react'
 import {
-  Calendar, Clock, Image, Send, X, RefreshCw,
-  Camera, AlertCircle, CheckCircle, Loader2, ExternalLink,
+  Calendar, Clock, Image, Send, X, RefreshCw, Camera,
+  AlertCircle, CheckCircle, Loader2, ExternalLink, Film,
+  Heart, MessageCircle, Bookmark, Share2, Eye, TrendingUp, Users,
 } from 'lucide-react'
+import {
+  ResponsiveContainer, LineChart, Line, BarChart, Bar,
+  XAxis, YAxis, Tooltip, CartesianGrid,
+} from 'recharts'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { SectionHeader, TabError } from './components'
+import { Badge } from '@/components/ui/badge'
+import { SectionHeader, TabError, TabLoading, KpiCard, CHART_COLORS, formatPercent } from './components'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface Props { token: string; enabled: boolean }
 
-interface InstagramPost {
+type MediaType = 'IMAGE' | 'REELS'
+type PostStatus = 'scheduled' | 'processing' | 'publishing' | 'published' | 'failed' | 'cancelled'
+
+interface ScheduledPost {
   id: string
   media_url: string
   caption: string
-  media_type: string
+  media_type: MediaType
   scheduled_time: string | null
   published_at: string | null
-  status: 'scheduled' | 'publishing' | 'published' | 'failed' | 'cancelled'
+  status: PostStatus
   error_message: string | null
   instagram_post_id: string | null
   permalink: string | null
   created_at: string
 }
 
+interface DailyStat {
+  date: string
+  reach: number
+  impressions: number
+  profileViews: number
+  followers: number
+  followerGain: number
+}
+
+interface AnalyticsSummary {
+  totalReach: number
+  totalImpressions: number
+  totalProfileViews: number
+  followerGainTotal: number
+  avgDailyReach: number
+}
+
+interface AnalyticsPost {
+  id: string
+  mediaType: string
+  mediaUrl?: string
+  thumbnailUrl?: string
+  permalink: string
+  caption?: string
+  timestamp: string
+  likeCount: number
+  commentsCount: number
+  reach: number
+  saved: number
+  shares: number
+  videoViews: number
+  engRate: number
+}
+
+interface AnalyticsData {
+  dailyStats: DailyStat[]
+  summary: AnalyticsSummary
+  posts: AnalyticsPost[]
+}
+
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const STATUS_LABEL: Record<InstagramPost['status'], string> = {
+const STATUS_LABEL: Record<PostStatus, string> = {
   scheduled:  'Agendado',
+  processing: 'Processando...',
   publishing: 'Publicando...',
   published:  'Publicado',
   failed:     'Falhou',
   cancelled:  'Cancelado',
 }
-
-const STATUS_COLOR: Record<InstagramPost['status'], string> = {
+const STATUS_COLOR: Record<PostStatus, string> = {
   scheduled:  'bg-blue-100 text-blue-700',
+  processing: 'bg-yellow-100 text-yellow-700',
   publishing: 'bg-yellow-100 text-yellow-700',
   published:  'bg-green-100 text-green-700',
   failed:     'bg-red-100 text-red-700',
@@ -45,85 +95,94 @@ const STATUS_COLOR: Record<InstagramPost['status'], string> = {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function formatDateTime(iso: string) {
+function fmt(n: number) { return n.toLocaleString('pt-BR') }
+function fmtDate(iso: string) {
   return new Date(iso).toLocaleDateString('pt-BR', {
     day: '2-digit', month: '2-digit', year: 'numeric',
     hour: '2-digit', minute: '2-digit',
   })
 }
-
-// Data mínima para agendamento (15 min no futuro)
-function minScheduleDate() {
+function minSchedule() {
   return new Date(Date.now() + 15 * 60 * 1000).toISOString().slice(0, 16)
 }
 
-// ─── Post Card ────────────────────────────────────────────────────────────────
+// ─── Seção Toggle ─────────────────────────────────────────────────────────────
 
-function PostCard({ post, onCancel }: { post: InstagramPost; onCancel: (id: string) => void }) {
+function SectionTab({
+  active, onClick, children,
+}: { active: boolean; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+        active
+          ? 'border-pink-600 text-pink-600'
+          : 'border-transparent text-muted-foreground hover:text-foreground'
+      }`}
+    >
+      {children}
+    </button>
+  )
+}
+
+// ─── Post Card (agendados) ────────────────────────────────────────────────────
+
+function ScheduledPostCard({ post, onCancel }: { post: ScheduledPost; onCancel: (id: string) => void }) {
   const canCancel = post.status === 'scheduled' || post.status === 'failed'
-
   return (
     <Card>
       <CardContent className="pt-4">
         <div className="flex gap-3">
-          {/* Thumbnail */}
-          <div className="shrink-0 h-16 w-16 rounded-md bg-muted overflow-hidden border">
-            <img
-              src={post.media_url}
-              alt=""
-              className="h-full w-full object-cover"
-              onError={e => {
-                const el = e.target as HTMLImageElement
-                el.style.display = 'none'
-                el.parentElement!.innerHTML =
-                  '<div class="h-full w-full flex items-center justify-center text-muted-foreground"><svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg></div>'
-              }}
-            />
+          <div className="shrink-0 h-16 w-16 rounded-md bg-muted overflow-hidden border flex items-center justify-center">
+            {post.media_type === 'REELS'
+              ? <Film className="h-6 w-6 text-muted-foreground" />
+              : <img
+                  src={post.media_url}
+                  alt=""
+                  className="h-full w-full object-cover"
+                  onError={e => { (e.target as HTMLImageElement).style.display = 'none' }}
+                />
+            }
           </div>
-
-          {/* Info */}
           <div className="flex-1 min-w-0">
             <div className="flex items-start justify-between gap-2">
               <div className="flex-1 min-w-0 space-y-1.5">
-                {/* Caption */}
-                <p className="text-sm text-muted-foreground line-clamp-2">
-                  {post.caption || <span className="italic">Sem legenda</span>}
-                </p>
-
-                {/* Status + Data */}
-                <div className="flex items-center gap-2 flex-wrap">
+                <div className="flex items-center gap-1.5">
+                  {post.media_type === 'REELS' && (
+                    <Badge variant="secondary" className="text-xs py-0 px-1.5">Reels</Badge>
+                  )}
                   <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATUS_COLOR[post.status]}`}>
                     {STATUS_LABEL[post.status]}
                   </span>
-
+                </div>
+                <p className="text-sm text-muted-foreground line-clamp-2">
+                  {post.caption || <span className="italic">Sem legenda</span>}
+                </p>
+                <div className="flex items-center gap-2 flex-wrap text-xs text-muted-foreground">
                   {post.scheduled_time && post.status === 'scheduled' && (
-                    <span className="text-xs text-muted-foreground flex items-center gap-1">
+                    <span className="flex items-center gap-1">
                       <Calendar className="h-3 w-3" />
-                      {formatDateTime(post.scheduled_time)}
+                      {fmtDate(post.scheduled_time)}
                     </span>
                   )}
-
-                  {post.published_at && post.status === 'published' && (
-                    <span className="text-xs text-muted-foreground flex items-center gap-1">
+                  {post.published_at && (
+                    <span className="flex items-center gap-1">
                       <CheckCircle className="h-3 w-3 text-green-600" />
-                      {formatDateTime(post.published_at)}
+                      {fmtDate(post.published_at)}
                     </span>
                   )}
-
                   {post.permalink && (
                     <a
                       href={post.permalink}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="text-xs text-pink-600 hover:underline flex items-center gap-0.5"
+                      className="text-pink-600 hover:underline flex items-center gap-0.5"
                     >
-                      Ver no Instagram
-                      <ExternalLink className="h-3 w-3" />
+                      Ver <ExternalLink className="h-3 w-3" />
                     </a>
                   )}
                 </div>
-
-                {/* Erro */}
                 {post.error_message && (
                   <p className="text-xs text-red-600 flex items-center gap-1">
                     <AlertCircle className="h-3 w-3 shrink-0" />
@@ -131,14 +190,11 @@ function PostCard({ post, onCancel }: { post: InstagramPost; onCancel: (id: stri
                   </p>
                 )}
               </div>
-
-              {/* Botão cancelar */}
               {canCancel && (
                 <Button
-                  variant="ghost"
-                  size="sm"
-                  className="text-red-500 hover:text-red-700 hover:bg-red-50 shrink-0 h-8 w-8 p-0"
-                  title="Cancelar post"
+                  variant="ghost" size="sm"
+                  className="h-8 w-8 p-0 text-red-400 hover:text-red-600 hover:bg-red-50 shrink-0"
+                  title="Cancelar"
                   onClick={() => onCancel(post.id)}
                 >
                   <X className="h-4 w-4" />
@@ -152,14 +208,14 @@ function PostCard({ post, onCancel }: { post: InstagramPost; onCancel: (id: stri
   )
 }
 
-// ─── Main Tab ─────────────────────────────────────────────────────────────────
+// ─── Seção de Agendamento ─────────────────────────────────────────────────────
 
-export default function TabInstagramGestor({ token, enabled }: Props) {
-  const [posts, setPosts] = useState<InstagramPost[]>([])
-  const [loadingPosts, setLoadingPosts] = useState(false)
+function AgendamentoSection({ token }: { token: string }) {
+  const [posts, setPosts] = useState<ScheduledPost[]>([])
+  const [loading, setLoading] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
 
-  // Form
+  const [mediaType, setMediaType] = useState<MediaType>('IMAGE')
   const [mediaUrl, setMediaUrl] = useState('')
   const [caption, setCaption] = useState('')
   const [scheduledTime, setScheduledTime] = useState('')
@@ -169,59 +225,45 @@ export default function TabInstagramGestor({ token, enabled }: Props) {
   const [submitSuccess, setSubmitSuccess] = useState<string | null>(null)
 
   const loadPosts = useCallback(async () => {
-    setLoadingPosts(true)
-    setLoadError(null)
+    setLoading(true); setLoadError(null)
     try {
       const res = await fetch('/api/instagram-content', {
         headers: { Authorization: `Bearer ${token}` },
       })
-      if (!res.ok) {
-        const body = await res.json() as { error?: string }
-        throw new Error(body.error ?? `Erro ${res.status}`)
-      }
-      const data = await res.json() as { posts: InstagramPost[] }
-      setPosts(data.posts)
+      const data = await res.json() as { posts?: ScheduledPost[]; error?: string }
+      if (!res.ok) throw new Error(data.error ?? `Erro ${res.status}`)
+      setPosts(data.posts ?? [])
     } catch (e) {
       setLoadError((e as Error).message)
     } finally {
-      setLoadingPosts(false)
+      setLoading(false)
     }
   }, [token])
 
-  useEffect(() => {
-    if (enabled) loadPosts()
-  }, [enabled, loadPosts])
+  useEffect(() => { loadPosts() }, [loadPosts])
 
   async function handleSubmit() {
-    setSubmitError(null)
-    setSubmitSuccess(null)
-
+    setSubmitError(null); setSubmitSuccess(null)
     if (!mediaUrl.trim()) return setSubmitError('URL da mídia é obrigatória')
-    if (!publishNow && !scheduledTime) return setSubmitError('Selecione a data e hora de publicação')
+    if (!publishNow && !scheduledTime) return setSubmitError('Selecione a data de publicação')
     if (caption.length > 2200) return setSubmitError('Legenda muito longa (máx. 2.200 caracteres)')
 
     setSubmitting(true)
     try {
       const res = await fetch('/api/instagram-content', {
         method: 'POST',
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          mediaUrl,
-          caption,
-          scheduledTime: publishNow ? undefined : scheduledTime,
-          publishNow,
-        }),
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mediaUrl, caption, mediaType, scheduledTime: publishNow ? undefined : scheduledTime, publishNow }),
       })
-      const data = await res.json() as { success?: boolean; error?: string }
+      const data = await res.json() as { success?: boolean; error?: string; processing?: boolean; message?: string }
       if (!res.ok) throw new Error(data.error ?? `Erro ${res.status}`)
 
-      setSubmitSuccess(publishNow ? 'Post publicado com sucesso!' : 'Post agendado com sucesso!')
-      setMediaUrl('')
-      setCaption('')
-      setScheduledTime('')
+      if (data.processing) {
+        setSubmitSuccess(data.message ?? 'Vídeo em processamento, será publicado automaticamente.')
+      } else {
+        setSubmitSuccess(publishNow ? 'Publicado com sucesso!' : 'Post agendado com sucesso!')
+      }
+      setMediaUrl(''); setCaption(''); setScheduledTime('')
       await loadPosts()
     } catch (e) {
       setSubmitError((e as Error).message)
@@ -231,46 +273,27 @@ export default function TabInstagramGestor({ token, enabled }: Props) {
   }
 
   async function handleCancel(id: string) {
-    if (!confirm('Cancelar este post agendado?')) return
+    if (!confirm('Cancelar este post?')) return
     try {
       const res = await fetch(`/api/instagram-content?id=${id}`, {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${token}` },
       })
       if (!res.ok) {
-        const data = await res.json() as { error?: string }
-        throw new Error(data.error ?? `Erro ${res.status}`)
+        const d = await res.json() as { error?: string }
+        throw new Error(d.error ?? `Erro ${res.status}`)
       }
       await loadPosts()
-    } catch (e) {
-      alert((e as Error).message)
-    }
+    } catch (e) { alert((e as Error).message) }
   }
 
-  if (!enabled) return null
-
-  const scheduledPosts  = posts.filter(p => p.status === 'scheduled' || p.status === 'publishing')
+  const scheduledPosts  = posts.filter(p => ['scheduled','processing','publishing'].includes(p.status))
   const publishedPosts  = posts.filter(p => p.status === 'published')
   const failedPosts     = posts.filter(p => p.status === 'failed')
 
   return (
     <div className="space-y-6">
-      {/* ─── Header ─────────────────────────────────────────────────────── */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Camera className="h-5 w-5 text-pink-600" />
-          <h1 className="text-xl font-bold">Instagram — Conteúdo</h1>
-          <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-pink-100 text-pink-700">
-            Admin
-          </span>
-        </div>
-        <Button variant="outline" size="sm" onClick={loadPosts} disabled={loadingPosts}>
-          <RefreshCw className={`h-4 w-4 mr-2 ${loadingPosts ? 'animate-spin' : ''}`} />
-          Atualizar
-        </Button>
-      </div>
-
-      {/* ─── Formulário de novo post ─────────────────────────────────────── */}
+      {/* Formulário */}
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-base flex items-center gap-2">
@@ -280,27 +303,53 @@ export default function TabInstagramGestor({ token, enabled }: Props) {
         </CardHeader>
         <CardContent className="space-y-4">
 
-          {/* URL da mídia */}
+          {/* Tipo de mídia */}
           <div>
-            <label className="text-sm font-medium mb-1 block">URL da Imagem *</label>
+            <label className="text-sm font-medium mb-2 block">Tipo de Conteúdo</label>
+            <div className="flex gap-2">
+              {(['IMAGE', 'REELS'] as MediaType[]).map(type => (
+                <button
+                  key={type}
+                  type="button"
+                  onClick={() => { setMediaType(type); setMediaUrl(''); setSubmitSuccess(null) }}
+                  className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium border transition-colors ${
+                    mediaType === type
+                      ? 'bg-pink-600 text-white border-pink-600'
+                      : 'border-input bg-background hover:bg-accent'
+                  }`}
+                >
+                  {type === 'IMAGE' ? <Image className="h-3.5 w-3.5" /> : <Film className="h-3.5 w-3.5" />}
+                  {type === 'IMAGE' ? 'Imagem' : 'Reels'}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* URL */}
+          <div>
+            <label className="text-sm font-medium mb-1 block">
+              {mediaType === 'IMAGE' ? 'URL da Imagem *' : 'URL do Vídeo *'}
+            </label>
             <div className="flex gap-2">
               <input
                 type="url"
                 value={mediaUrl}
                 onChange={e => { setMediaUrl(e.target.value); setSubmitSuccess(null) }}
-                placeholder="https://exemplo.com/imagem.jpg"
+                placeholder="https://..."
                 className="flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               />
-              {mediaUrl && (
+              {mediaUrl && mediaType === 'IMAGE' && (
                 <a href={mediaUrl} target="_blank" rel="noopener noreferrer">
-                  <Button variant="outline" size="sm" type="button" title="Pré-visualizar imagem">
+                  <Button variant="outline" size="sm" type="button" title="Visualizar">
                     <Image className="h-4 w-4" />
                   </Button>
                 </a>
               )}
             </div>
             <p className="text-xs text-muted-foreground mt-1">
-              A URL deve ser pública (HTTPS) — JPEG ou PNG, min. 320px
+              {mediaType === 'IMAGE'
+                ? 'URL pública HTTPS — JPEG ou PNG, mín. 320px'
+                : 'URL pública HTTPS — MP4, H.264, proporção 9:16, mín. 3s, máx. 15min'}
             </p>
           </div>
 
@@ -309,157 +358,376 @@ export default function TabInstagramGestor({ token, enabled }: Props) {
             <label className="text-sm font-medium mb-1 flex justify-between">
               <span>Legenda</span>
               <span className={caption.length > 2000 ? 'text-red-500 font-semibold' : 'text-muted-foreground'}>
-                {caption.length.toLocaleString('pt-BR')}/2.200
+                {fmt(caption.length)}/2.200
               </span>
             </label>
             <textarea
               value={caption}
               onChange={e => { setCaption(e.target.value); setSubmitSuccess(null) }}
-              placeholder="Escreva a legenda do post..."
+              placeholder="Escreva a legenda..."
               rows={4}
               maxLength={2200}
               className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring resize-none"
             />
           </div>
 
-          {/* Modo de publicação */}
+          {/* Modo */}
           <div>
-            <label className="text-sm font-medium mb-2 block">Modo de Publicação</label>
+            <label className="text-sm font-medium mb-2 block">Publicação</label>
             <div className="flex gap-2">
               <button
                 type="button"
                 onClick={() => { setPublishNow(false); setSubmitSuccess(null) }}
                 className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium border transition-colors ${
-                  !publishNow
-                    ? 'bg-primary text-primary-foreground border-primary'
-                    : 'border-input bg-background hover:bg-accent'
+                  !publishNow ? 'bg-primary text-primary-foreground border-primary' : 'border-input bg-background hover:bg-accent'
                 }`}
               >
-                <Calendar className="h-3.5 w-3.5" />
-                Agendar
+                <Calendar className="h-3.5 w-3.5" /> Agendar
               </button>
               <button
                 type="button"
                 onClick={() => { setPublishNow(true); setSubmitSuccess(null) }}
                 className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium border transition-colors ${
-                  publishNow
-                    ? 'bg-pink-600 text-white border-pink-600'
-                    : 'border-input bg-background hover:bg-accent'
+                  publishNow ? 'bg-pink-600 text-white border-pink-600' : 'border-input bg-background hover:bg-accent'
                 }`}
               >
-                <Send className="h-3.5 w-3.5" />
-                Publicar Agora
+                <Send className="h-3.5 w-3.5" /> Publicar Agora
               </button>
             </div>
           </div>
 
-          {/* Data/hora (só quando agendar) */}
           {!publishNow && (
             <div>
               <label className="text-sm font-medium mb-1 flex items-center gap-1.5">
-                <Clock className="h-3.5 w-3.5" />
-                Data e Hora de Publicação *
+                <Clock className="h-3.5 w-3.5" /> Data e Hora *
               </label>
               <input
                 type="datetime-local"
                 value={scheduledTime}
-                min={minScheduleDate()}
+                min={minSchedule()}
                 onChange={e => { setScheduledTime(e.target.value); setSubmitSuccess(null) }}
                 className="rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               />
-              <p className="text-xs text-muted-foreground mt-1">
-                Mínimo: 15 minutos a partir de agora
-              </p>
+              <p className="text-xs text-muted-foreground mt-1">Mínimo: 15 minutos a partir de agora</p>
             </div>
           )}
 
-          {/* Feedback */}
           {submitError && (
             <div className="flex items-center gap-2 text-sm text-red-600 bg-red-50 border border-red-200 rounded-md px-3 py-2">
-              <AlertCircle className="h-4 w-4 shrink-0" />
-              {submitError}
+              <AlertCircle className="h-4 w-4 shrink-0" /> {submitError}
             </div>
           )}
           {submitSuccess && (
             <div className="flex items-center gap-2 text-sm text-green-700 bg-green-50 border border-green-200 rounded-md px-3 py-2">
-              <CheckCircle className="h-4 w-4 shrink-0" />
-              {submitSuccess}
+              <CheckCircle className="h-4 w-4 shrink-0" /> {submitSuccess}
             </div>
           )}
 
-          {/* Submit */}
-          <Button
-            onClick={handleSubmit}
-            disabled={submitting}
-            className={publishNow ? 'bg-pink-600 hover:bg-pink-700' : ''}
-          >
+          <Button onClick={handleSubmit} disabled={submitting} className={publishNow ? 'bg-pink-600 hover:bg-pink-700' : ''}>
             {submitting
               ? <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-              : publishNow
-                ? <Send className="h-4 w-4 mr-2" />
-                : <Calendar className="h-4 w-4 mr-2" />
+              : publishNow ? <Send className="h-4 w-4 mr-2" /> : <Calendar className="h-4 w-4 mr-2" />
             }
             {publishNow ? 'Publicar Agora' : 'Agendar Post'}
           </Button>
         </CardContent>
       </Card>
 
-      {/* ─── Erro ao carregar lista ──────────────────────────────────────── */}
       {loadError && <TabError message={loadError} onRetry={loadPosts} />}
 
-      {/* ─── Posts agendados ─────────────────────────────────────────────── */}
+      {/* Agendados / em processamento */}
       {scheduledPosts.length > 0 && (
         <div>
-          <SectionHeader
-            title="Posts Agendados"
-            description={`${scheduledPosts.length} post(s) na fila de publicação`}
-          />
+          <div className="flex items-center justify-between mb-3">
+            <SectionHeader title="Na Fila" description={`${scheduledPosts.length} post(s) aguardando publicação`} />
+          </div>
           <div className="space-y-3">
-            {scheduledPosts.map(post => (
-              <PostCard key={post.id} post={post} onCancel={handleCancel} />
-            ))}
+            {scheduledPosts.map(p => <ScheduledPostCard key={p.id} post={p} onCancel={handleCancel} />)}
           </div>
         </div>
       )}
 
-      {/* ─── Posts com erro ──────────────────────────────────────────────── */}
+      {/* Falhados */}
       {failedPosts.length > 0 && (
         <div>
-          <SectionHeader
-            title="Falha na Publicação"
-            description="Verifique o erro e reagende se necessário"
-          />
+          <SectionHeader title="Falha na Publicação" description="Verifique o erro e tente novamente" />
           <div className="space-y-3">
-            {failedPosts.map(post => (
-              <PostCard key={post.id} post={post} onCancel={handleCancel} />
-            ))}
+            {failedPosts.map(p => <ScheduledPostCard key={p.id} post={p} onCancel={handleCancel} />)}
           </div>
         </div>
       )}
 
-      {/* ─── Posts publicados ────────────────────────────────────────────── */}
+      {/* Publicados recentes */}
       {publishedPosts.length > 0 && (
         <div>
-          <SectionHeader
-            title="Publicados"
-            description={`${publishedPosts.length} post(s) publicados`}
-          />
+          <SectionHeader title="Publicados Recentemente" description={`${publishedPosts.length} posts`} />
           <div className="space-y-3">
-            {publishedPosts.slice(0, 15).map(post => (
-              <PostCard key={post.id} post={post} onCancel={handleCancel} />
-            ))}
+            {publishedPosts.slice(0, 10).map(p => <ScheduledPostCard key={p.id} post={p} onCancel={handleCancel} />)}
           </div>
         </div>
       )}
 
-      {/* ─── Estado vazio ────────────────────────────────────────────────── */}
-      {!loadingPosts && !loadError && posts.length === 0 && (
-        <div className="flex flex-col items-center justify-center py-16 text-center text-muted-foreground">
+      {!loading && !loadError && posts.length === 0 && (
+        <div className="flex flex-col items-center py-16 text-muted-foreground text-center">
           <Camera className="h-10 w-10 mb-3 opacity-25" />
-          <p className="font-medium">Nenhum post registrado ainda</p>
-          <p className="text-sm mt-1">Use o formulário acima para agendar ou publicar um post.</p>
+          <p className="font-medium">Nenhum post registrado</p>
+          <p className="text-sm mt-1">Use o formulário acima para agendar ou publicar.</p>
         </div>
       )}
+    </div>
+  )
+}
+
+// ─── Seção de Análise ─────────────────────────────────────────────────────────
+
+function AnaliseSection({ token }: { token: string }) {
+  const [data, setData] = useState<AnalyticsData | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [days, setDays] = useState(30)
+
+  const load = useCallback(async () => {
+    setLoading(true); setError(null)
+    try {
+      const res = await fetch(`/api/instagram-analytics?days=${days}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      const body = await res.json() as AnalyticsData & { error?: string }
+      if (!res.ok) throw new Error(body.error ?? `Erro ${res.status}`)
+      setData(body)
+    } catch (e) {
+      setError((e as Error).message)
+    } finally {
+      setLoading(false)
+    }
+  }, [token, days])
+
+  useEffect(() => { load() }, [load])
+
+  if (loading) return <TabLoading />
+  if (error) return <TabError message={error} onRetry={load} />
+  if (!data) return null
+
+  const { summary, dailyStats, posts } = data
+
+  // Formata datas para eixo X
+  const chartData = dailyStats.map(d => ({
+    ...d,
+    label: new Date(d.date + 'T12:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }),
+  }))
+
+  const topPosts = [...posts].sort((a, b) => b.engRate - a.engRate)
+
+  return (
+    <div className="space-y-6">
+      {/* Header com selector de período */}
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-muted-foreground">Período de análise</p>
+        <div className="flex gap-1">
+          {[7, 30, 60, 90].map(d => (
+            <button
+              key={d}
+              onClick={() => setDays(d)}
+              className={`px-3 py-1 rounded text-xs font-medium transition-colors ${
+                days === d ? 'bg-primary text-primary-foreground' : 'border border-input hover:bg-accent'
+              }`}
+            >
+              {d}d
+            </button>
+          ))}
+          <Button variant="outline" size="sm" onClick={load} disabled={loading} className="ml-2">
+            <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
+          </Button>
+        </div>
+      </div>
+
+      {/* KPIs resumo */}
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <KpiCard
+          label={`Novos Seguidores (${days}d)`}
+          value={summary.followerGainTotal >= 0 ? `+${fmt(summary.followerGainTotal)}` : fmt(summary.followerGainTotal)}
+          color={summary.followerGainTotal >= 0 ? '#7c9885' : '#c17c74'}
+        />
+        <KpiCard label={`Alcance Total (${days}d)`} value={fmt(summary.totalReach)} color="#5b8fb9" />
+        <KpiCard label={`Impressões (${days}d)`} value={fmt(summary.totalImpressions)} color="#d4a853" />
+        <KpiCard label="Alcance Médio/Dia" value={fmt(summary.avgDailyReach)} color="#9b7cc1" />
+      </div>
+
+      {/* Gráfico: Seguidores */}
+      {chartData.length > 0 && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium flex items-center gap-2">
+              <Users className="h-4 w-4 text-green-600" />
+              Seguidores por Dia
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ResponsiveContainer width="100%" height={200}>
+              <LineChart data={chartData}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                <XAxis dataKey="label" tick={{ fontSize: 11 }} tickLine={false} />
+                <YAxis tick={{ fontSize: 11 }} tickLine={false} axisLine={false} width={60}
+                  tickFormatter={v => v.toLocaleString('pt-BR')} />
+                <Tooltip formatter={(v: number) => [fmt(v), 'Seguidores']} />
+                <Line type="monotone" dataKey="followers" stroke={CHART_COLORS[1]} dot={false} strokeWidth={2} />
+              </LineChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Gráfico: Ganho diário de seguidores */}
+      {chartData.length > 1 && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium flex items-center gap-2">
+              <TrendingUp className="h-4 w-4 text-blue-600" />
+              Ganho Diário de Seguidores
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ResponsiveContainer width="100%" height={180}>
+              <BarChart data={chartData.slice(1)}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                <XAxis dataKey="label" tick={{ fontSize: 11 }} tickLine={false} />
+                <YAxis tick={{ fontSize: 11 }} tickLine={false} axisLine={false} width={40} />
+                <Tooltip formatter={(v: number) => [fmt(v), 'Novos seguidores']} />
+                <Bar dataKey="followerGain" fill={CHART_COLORS[1]} radius={[2, 2, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Gráfico: Alcance diário */}
+      {chartData.length > 0 && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium flex items-center gap-2">
+              <Eye className="h-4 w-4 text-purple-600" />
+              Alcance Diário
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ResponsiveContainer width="100%" height={180}>
+              <BarChart data={chartData}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                <XAxis dataKey="label" tick={{ fontSize: 11 }} tickLine={false} />
+                <YAxis tick={{ fontSize: 11 }} tickLine={false} axisLine={false} width={60}
+                  tickFormatter={v => v >= 1000 ? `${(v / 1000).toFixed(0)}k` : String(v)} />
+                <Tooltip formatter={(v: number) => [fmt(v), 'Alcance']} />
+                <Bar dataKey="reach" fill={CHART_COLORS[2]} radius={[2, 2, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Posts: top por engajamento */}
+      {topPosts.length > 0 && (
+        <div>
+          <SectionHeader
+            title="Desempenho dos Posts"
+            description="Últimos 20 posts ordenados por taxa de engajamento"
+          />
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {topPosts.map(post => (
+              <div key={post.id} className="rounded-lg border p-3 space-y-3 hover:bg-muted/30 transition-colors">
+                {/* Miniatura */}
+                {(post.mediaUrl || post.thumbnailUrl) && (
+                  <div className="relative aspect-square overflow-hidden rounded-md bg-muted">
+                    <img
+                      src={post.thumbnailUrl ?? post.mediaUrl}
+                      alt=""
+                      className="h-full w-full object-cover"
+                    />
+                    <Badge variant="secondary" className="absolute right-2 top-2 text-xs">
+                      {post.mediaType === 'VIDEO' || post.mediaType === 'REELS' ? 'Reels'
+                        : post.mediaType === 'CAROUSEL_ALBUM' ? 'Carrossel' : 'Imagem'}
+                    </Badge>
+                  </div>
+                )}
+                {post.caption && (
+                  <p className="line-clamp-2 text-xs text-muted-foreground">{post.caption}</p>
+                )}
+                {/* Métricas */}
+                <div className="grid grid-cols-3 gap-y-1.5 text-xs">
+                  <div className="flex items-center gap-1">
+                    <Heart className="h-3 w-3 text-rose-500" />
+                    <span>{fmt(post.likeCount)}</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <MessageCircle className="h-3 w-3 text-blue-500" />
+                    <span>{fmt(post.commentsCount)}</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <Bookmark className="h-3 w-3 text-yellow-500" />
+                    <span>{fmt(post.saved)}</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <Share2 className="h-3 w-3 text-green-500" />
+                    <span>{fmt(post.shares)}</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <Eye className="h-3 w-3 text-purple-500" />
+                    <span>{fmt(post.reach)}</span>
+                  </div>
+                  <div className="font-medium text-pink-600">
+                    {formatPercent(post.engRate)} eng.
+                  </div>
+                </div>
+                {/* Rodapé */}
+                <div className="flex items-center justify-between text-xs text-muted-foreground">
+                  <span>{new Date(post.timestamp).toLocaleDateString('pt-BR')}</span>
+                  <a
+                    href={post.permalink}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="flex items-center gap-1 hover:text-foreground"
+                  >
+                    Ver <ExternalLink className="h-3 w-3" />
+                  </a>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── Tab Principal ────────────────────────────────────────────────────────────
+
+export default function TabInstagramGestor({ token, enabled }: Props) {
+  const [section, setSection] = useState<'agendamento' | 'analise'>('agendamento')
+
+  if (!enabled) return null
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Camera className="h-5 w-5 text-pink-600" />
+          <h1 className="text-xl font-bold">Instagram — Gestor</h1>
+          <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-pink-100 text-pink-700">Admin</span>
+        </div>
+      </div>
+
+      {/* Sub-abas */}
+      <div className="border-b flex gap-0">
+        <SectionTab active={section === 'agendamento'} onClick={() => setSection('agendamento')}>
+          Agendamento de Conteúdo
+        </SectionTab>
+        <SectionTab active={section === 'analise'} onClick={() => setSection('analise')}>
+          Análise de Conteúdo
+        </SectionTab>
+      </div>
+
+      {section === 'agendamento' && <AgendamentoSection token={token} />}
+      {section === 'analise'    && <AnaliseSection token={token} />}
     </div>
   )
 }

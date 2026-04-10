@@ -1,7 +1,8 @@
 /**
  * API de gerenciamento de conteúdo do Instagram (admin only)
+ * Suporta: IMAGE e REELS
  *
- * IMPORTANTE: Antes de usar, crie a tabela no Supabase com o SQL abaixo:
+ * IMPORTANTE: Crie a tabela no Supabase antes de usar:
  *
  * CREATE TABLE instagram_posts (
  *   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
@@ -14,7 +15,7 @@
  *   scheduled_time TIMESTAMPTZ,
  *   published_at TIMESTAMPTZ,
  *   status TEXT DEFAULT 'scheduled'
- *     CHECK (status IN ('scheduled','publishing','published','failed','cancelled')),
+ *     CHECK (status IN ('scheduled','processing','publishing','published','failed','cancelled')),
  *   error_message TEXT,
  *   permalink TEXT,
  *   created_at TIMESTAMPTZ DEFAULT NOW()
@@ -23,24 +24,12 @@
  * ALTER TABLE instagram_posts ENABLE ROW LEVEL SECURITY;
  *
  * CREATE POLICY "Apenas admins" ON instagram_posts
- *   USING (
- *     EXISTS (
- *       SELECT 1 FROM profiles
- *       WHERE profiles.id = auth.uid()
- *       AND profiles.role = 'admin'
- *     )
- *   )
- *   WITH CHECK (
- *     EXISTS (
- *       SELECT 1 FROM profiles
- *       WHERE profiles.id = auth.uid()
- *       AND profiles.role = 'admin'
- *     )
- *   );
- *
- * Também adicione ao .env.local:
- *   INSTAGRAM_APP_ID=1644568043522210
- *   INSTAGRAM_APP_SECRET=7717ea51adf51e0b3e1b55a9c8d08a39
+ *   USING (EXISTS (
+ *     SELECT 1 FROM profiles WHERE profiles.id = auth.uid() AND profiles.role = 'admin'
+ *   ))
+ *   WITH CHECK (EXISTS (
+ *     SELECT 1 FROM profiles WHERE profiles.id = auth.uid() AND profiles.role = 'admin'
+ *   ));
  */
 
 import type { VercelRequest, VercelResponse } from '@vercel/node'
@@ -58,18 +47,43 @@ function getSupabase() {
   )
 }
 
-async function createContainer(mediaUrl: string, caption: string, accessToken: string) {
+type MediaType = 'IMAGE' | 'REELS'
+
+async function createContainer(
+  mediaUrl: string,
+  caption: string,
+  mediaType: MediaType,
+  accessToken: string,
+  thumbOffset?: number,
+) {
+  const body: Record<string, string> = {
+    caption,
+    published: 'false',
+    access_token: accessToken,
+  }
+
+  if (mediaType === 'REELS') {
+    body.media_type = 'REELS'
+    body.video_url = mediaUrl
+    body.share_to_feed = 'true'
+    if (thumbOffset !== undefined) body.thumb_offset = String(thumbOffset)
+  } else {
+    body.image_url = mediaUrl
+  }
+
   const res = await fetch(`${META_BASE}/${INSTAGRAM_ACCOUNT_ID}/media`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      image_url: mediaUrl,
-      caption,
-      published: 'false',
-      access_token: accessToken,
-    }).toString(),
+    body: new URLSearchParams(body).toString(),
   })
   return res.json() as Promise<{ id?: string; error?: { message: string } }>
+}
+
+async function checkContainerStatus(containerId: string, accessToken: string) {
+  const res = await fetch(
+    `${META_BASE}/${containerId}?fields=status_code&access_token=${accessToken}`
+  )
+  return res.json() as Promise<{ status_code?: string; error?: { message: string } }>
 }
 
 async function publishContainer(containerId: string, accessToken: string) {
@@ -116,23 +130,62 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   // ─── POST: criar/agendar post ─────────────────────────────────────────────
   if (req.method === 'POST') {
-    const { mediaUrl, caption, scheduledTime, publishNow } = req.body as {
+    const { mediaUrl, caption, mediaType = 'IMAGE', scheduledTime, publishNow, thumbOffset } = req.body as {
       mediaUrl?: string
       caption?: string
+      mediaType?: MediaType
       scheduledTime?: string
       publishNow?: boolean
+      thumbOffset?: number
     }
 
     if (!mediaUrl?.trim()) {
       return res.status(400).json({ error: 'URL da mídia é obrigatória' })
     }
+    if (!['IMAGE', 'REELS'].includes(mediaType)) {
+      return res.status(400).json({ error: 'mediaType inválido' })
+    }
 
     if (publishNow) {
-      // Criar container e publicar imediatamente
-      const container = await createContainer(mediaUrl, caption ?? '', accessToken)
+      // Publicação imediata
+      const container = await createContainer(mediaUrl, caption ?? '', mediaType, accessToken, thumbOffset)
       if (!container.id) {
         return res.status(502).json({
           error: container.error?.message ?? 'Erro ao criar container no Instagram',
+        })
+      }
+
+      // Para Reels, aguarda o processamento de vídeo (max 30s inline)
+      let statusCode = 'IN_PROGRESS'
+      const maxWait = mediaType === 'REELS' ? 10 : 3
+      for (let i = 0; i < maxWait; i++) {
+        await new Promise(r => setTimeout(r, 3000))
+        const statusData = await checkContainerStatus(container.id, accessToken)
+        statusCode = statusData.status_code ?? 'IN_PROGRESS'
+        if (statusCode === 'FINISHED' || statusCode === 'ERROR') break
+      }
+
+      if (statusCode === 'ERROR' || (mediaType === 'REELS' && statusCode !== 'FINISHED')) {
+        // Salva como 'processing' para o cron publicar quando estiver pronto
+        const { data: post, error: dbError } = await supabase
+          .from('instagram_posts')
+          .insert({
+            created_by: user.id,
+            container_id: container.id,
+            media_url: mediaUrl,
+            caption: caption ?? '',
+            media_type: mediaType,
+            status: 'processing',
+          })
+          .select()
+          .single()
+
+        if (dbError) console.error('DB error:', dbError.message)
+        return res.json({
+          success: true,
+          processing: true,
+          message: 'Vídeo em processamento. Será publicado automaticamente assim que estiver pronto.',
+          post,
         })
       }
 
@@ -145,7 +198,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       const permalink = await getPermalink(published.id, accessToken)
 
-      const { data: post, error: dbError } = await supabase
+      const { data: post } = await supabase
         .from('instagram_posts')
         .insert({
           created_by: user.id,
@@ -153,7 +206,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           instagram_post_id: published.id,
           media_url: mediaUrl,
           caption: caption ?? '',
-          media_type: 'IMAGE',
+          media_type: mediaType,
           status: 'published',
           published_at: new Date().toISOString(),
           permalink,
@@ -161,18 +214,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .select()
         .single()
 
-      if (dbError) console.error('DB error:', dbError.message)
       return res.json({ success: true, post })
     }
 
-    // Agendar para mais tarde — salva no Supabase, cron publica na hora certa
+    // ─── Agendamento ─────────────────────────────────────────────────────
     if (!scheduledTime) {
       return res.status(400).json({ error: 'Data de agendamento é obrigatória' })
     }
 
     const scheduledDate = new Date(scheduledTime)
-    const minTime = new Date(Date.now() + 10 * 60 * 1000) // mínimo 10 min
-    if (scheduledDate <= minTime) {
+    if (scheduledDate <= new Date(Date.now() + 10 * 60 * 1000)) {
       return res.status(400).json({ error: 'O agendamento deve ser pelo menos 10 minutos no futuro' })
     }
 
@@ -182,7 +233,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         created_by: user.id,
         media_url: mediaUrl,
         caption: caption ?? '',
-        media_type: 'IMAGE',
+        media_type: mediaType,
         scheduled_time: scheduledTime,
         status: 'scheduled',
       })
@@ -193,7 +244,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.json({ success: true, post })
   }
 
-  // ─── DELETE: cancelar post agendado ──────────────────────────────────────
+  // ─── DELETE: cancelar post ────────────────────────────────────────────────
   if (req.method === 'DELETE') {
     const id = req.query.id as string
     if (!id) return res.status(400).json({ error: 'id obrigatório' })
