@@ -14,7 +14,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { authUser, requireAdmin } from './_supabase-auth.js'
 
 const META_BASE = 'https://graph.facebook.com/v22.0'
-const INSTAGRAM_ACCOUNT_ID = '17841447803654486'
+const INSTAGRAM_ACCOUNT_ID = '17841401980622840'
 
 type InsightValue  = { value: number; end_time: string }
 type InsightMetric = { name: string; period: string; values: InsightValue[] }

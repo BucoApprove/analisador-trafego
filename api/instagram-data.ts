@@ -2,7 +2,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { authUser } from './_supabase-auth.js'
 
 const META_BASE = 'https://graph.facebook.com/v19.0'
-const INSTAGRAM_ACCOUNT_ID = '17841447803654486'
+const INSTAGRAM_ACCOUNT_ID = '17841401980622840'
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const _user = await authUser(req, res); if (!_user) return

@@ -35,7 +35,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   } catch (e) { results.instagram_accounts = { error: (e as Error).message } }
 
   // 4. Testa o ID atual hardcoded
-  const currentId = '17841447803654486'
+  const currentId = '17841401980622840'
   try {
     const r = await fetch(`${META_BASE}/${currentId}?fields=id,username,name&access_token=${token}`)
     results.current_id_test = await r.json()
