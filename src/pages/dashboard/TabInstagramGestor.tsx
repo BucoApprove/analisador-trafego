@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import {
   Calendar, Clock, Image, Send, X, RefreshCw,
-  Instagram, AlertCircle, CheckCircle, Loader2, ExternalLink,
+  Camera, AlertCircle, CheckCircle, Loader2, ExternalLink,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -258,7 +258,7 @@ export default function TabInstagramGestor({ token, enabled }: Props) {
       {/* ─── Header ─────────────────────────────────────────────────────── */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <Instagram className="h-5 w-5 text-pink-600" />
+          <Camera className="h-5 w-5 text-pink-600" />
           <h1 className="text-xl font-bold">Instagram — Conteúdo</h1>
           <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-pink-100 text-pink-700">
             Admin
@@ -455,7 +455,7 @@ export default function TabInstagramGestor({ token, enabled }: Props) {
       {/* ─── Estado vazio ────────────────────────────────────────────────── */}
       {!loadingPosts && !loadError && posts.length === 0 && (
         <div className="flex flex-col items-center justify-center py-16 text-center text-muted-foreground">
-          <Instagram className="h-10 w-10 mb-3 opacity-25" />
+          <Camera className="h-10 w-10 mb-3 opacity-25" />
           <p className="font-medium">Nenhum post registrado ainda</p>
           <p className="text-sm mt-1">Use o formulário acima para agendar ou publicar um post.</p>
         </div>
