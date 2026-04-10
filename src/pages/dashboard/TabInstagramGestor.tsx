@@ -37,16 +37,18 @@ interface ScheduledPost {
 interface DailyStat {
   date: string
   reach: number
-  impressions: number
-  profileViews: number
+  engaged: number
+  profileTaps: number
   followers: number
   followerGain: number
+  views: number
 }
 
 interface AnalyticsSummary {
   totalReach: number
-  totalImpressions: number
-  totalProfileViews: number
+  totalEngaged: number
+  totalProfileTaps: number
+  totalViews: number
   followerGainTotal: number
   avgDailyReach: number
 }
@@ -68,10 +70,24 @@ interface AnalyticsPost {
   engRate: number
 }
 
+interface AnalyticsStory {
+  id: string
+  mediaType: string
+  mediaUrl?: string
+  timestamp: string
+  impressions: number
+  reach: number
+  replies: number
+  tapsForward: number
+  tapsBack: number
+  exits: number
+}
+
 interface AnalyticsData {
   dailyStats: DailyStat[]
   summary: AnalyticsSummary
   posts: AnalyticsPost[]
+  stories: AnalyticsStory[]
   insightsError: string | null
 }
 
@@ -509,7 +525,7 @@ function AnaliseSection({ token }: { token: string }) {
   if (error) return <TabError message={error} onRetry={load} />
   if (!data) return null
 
-  const { summary, dailyStats, posts, insightsError } = data
+  const { summary, dailyStats, posts, stories, insightsError } = data
 
   // Formata datas para eixo X
   const chartData = dailyStats.map(d => ({
@@ -561,8 +577,8 @@ function AnaliseSection({ token }: { token: string }) {
           color={summary.followerGainTotal >= 0 ? '#7c9885' : '#c17c74'}
         />
         <KpiCard label={`Alcance Total (${days}d)`} value={fmt(summary.totalReach)} color="#5b8fb9" />
-        <KpiCard label={`Contas Engajadas (${days}d)`} value={fmt(summary.totalImpressions)} color="#d4a853" />
-        <KpiCard label="Alcance Médio/Dia" value={fmt(summary.avgDailyReach)} color="#9b7cc1" />
+        <KpiCard label={`Contas Engajadas (${days}d)`} value={fmt(summary.totalEngaged)} color="#d4a853" />
+        <KpiCard label={`Views (${days}d)`} value={fmt(summary.totalViews)} color="#9b7cc1" />
       </div>
 
       {/* Gráfico: Seguidores */}
@@ -612,28 +628,72 @@ function AnaliseSection({ token }: { token: string }) {
         </Card>
       )}
 
-      {/* Gráfico: Alcance diário */}
+      {/* Gráfico: Alcance + Views diário */}
       {chartData.length > 0 && (
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium flex items-center gap-2">
               <Eye className="h-4 w-4 text-purple-600" />
-              Alcance Diário
+              Alcance e Views por Dia
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <ResponsiveContainer width="100%" height={180}>
-              <BarChart data={chartData}>
+            <ResponsiveContainer width="100%" height={200}>
+              <LineChart data={chartData}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
                 <XAxis dataKey="label" tick={{ fontSize: 11 }} tickLine={false} />
                 <YAxis tick={{ fontSize: 11 }} tickLine={false} axisLine={false} width={60}
                   tickFormatter={v => v >= 1000 ? `${(v / 1000).toFixed(0)}k` : String(v)} />
-                <Tooltip formatter={(v: unknown) => [fmt(v as number), 'Alcance']} />
-                <Bar dataKey="reach" fill={CHART_COLORS[2]} radius={[2, 2, 0, 0]} />
-              </BarChart>
+                <Tooltip formatter={(v: unknown, name: unknown) => [fmt(v as number), name === 'reach' ? 'Alcance' : 'Views']} />
+                <Line type="monotone" dataKey="reach" stroke={CHART_COLORS[2]} dot={false} strokeWidth={2} name="reach" />
+                <Line type="monotone" dataKey="views" stroke={CHART_COLORS[4]} dot={false} strokeWidth={2} name="views" />
+              </LineChart>
             </ResponsiveContainer>
+            <div className="flex gap-4 mt-2 justify-center text-xs text-muted-foreground">
+              <span className="flex items-center gap-1"><span className="w-3 h-0.5 inline-block" style={{ background: CHART_COLORS[2] }} /> Alcance</span>
+              <span className="flex items-center gap-1"><span className="w-3 h-0.5 inline-block" style={{ background: CHART_COLORS[4] }} /> Views</span>
+            </div>
           </CardContent>
         </Card>
+      )}
+
+      {/* Stories ativos */}
+      {stories.length > 0 && (
+        <div>
+          <SectionHeader
+            title="Stories Ativos (últimas 24h)"
+            description={`${stories.length} story(ies) no ar agora`}
+          />
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {stories.map(story => (
+              <Card key={story.id}>
+                <CardContent className="pt-4">
+                  <div className="flex gap-3">
+                    {story.mediaUrl && (
+                      <div className="shrink-0 w-14 h-20 rounded bg-muted overflow-hidden border">
+                        <img src={story.mediaUrl} alt="" className="h-full w-full object-cover" />
+                      </div>
+                    )}
+                    <div className="flex-1 space-y-1.5 text-xs">
+                      <p className="text-muted-foreground">
+                        {new Date(story.timestamp).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                      </p>
+                      <div className="grid grid-cols-2 gap-y-1">
+                        <span className="flex items-center gap-1"><Eye className="h-3 w-3 text-purple-500" /> {fmt(story.impressions)} imp.</span>
+                        <span className="flex items-center gap-1"><Users className="h-3 w-3 text-blue-500" /> {fmt(story.reach)} alcance</span>
+                        <span className="flex items-center gap-1"><MessageCircle className="h-3 w-3 text-green-500" /> {fmt(story.replies)} resp.</span>
+                        <span className="flex items-center gap-1 text-red-500"><X className="h-3 w-3" /> {fmt(story.exits)} saídas</span>
+                        <span className="col-span-2 text-muted-foreground">
+                          ▶ {fmt(story.tapsForward)} frente · ◀ {fmt(story.tapsBack)} atrás
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        </div>
       )}
 
       {/* Posts: top por engajamento */}
