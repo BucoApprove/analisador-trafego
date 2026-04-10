@@ -1,46 +1,61 @@
-﻿@tailwind base;
+@tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 240 10% 4%;
-    --card: 0 0% 100%;
-    --card-foreground: 240 10% 4%;
-    --border: 240 5% 90%;
-    --input: 240 5% 90%;
-    --ring: 37 67% 58%;
-    --primary: 37 67% 58%;
+    /* Superfícies */
+    --background:        220 20% 97%;   /* #F4F6FB — cinza-azulado suave */
+    --foreground:        224 16% 14%;   /* #1E2330 — quase preto com tom azul */
+    --card:              0 0% 100%;     /* branco puro */
+    --card-foreground:   224 16% 14%;
+
+    /* Bordas e inputs */
+    --border:            220 14% 91%;   /* #E3E7F0 — borda sutil */
+    --input:             220 14% 91%;
+    --ring:              37 67% 58%;    /* gold — foco */
+
+    /* Primária: gold */
+    --primary:           37 67% 58%;
     --primary-foreground: 0 0% 100%;
-    --secondary: 240 5% 96%;
-    --secondary-foreground: 240 6% 10%;
-    --muted: 240 5% 96%;
-    --muted-foreground: 240 4% 46%;
-    --accent: 240 5% 96%;
-    --accent-foreground: 240 6% 10%;
-    --destructive: 0 84% 60%;
+
+    /* Secundária */
+    --secondary:         220 14% 95%;
+    --secondary-foreground: 224 16% 14%;
+
+    /* Muted */
+    --muted:             220 14% 95%;
+    --muted-foreground:  220 10% 50%;
+
+    /* Accent: gold muito suave */
+    --accent:            37 80% 96%;
+    --accent-foreground: 37 50% 35%;
+
+    /* Destrutivo */
+    --destructive:       0 84% 60%;
     --destructive-foreground: 0 0% 98%;
-    --radius: 0.5rem;
+
+    /* Border radius — mais arredondado */
+    --radius:            0.75rem;
   }
 
   .dark {
-    --background: 240 10% 4%;
-    --foreground: 0 0% 98%;
-    --card: 240 10% 8%;
-    --card-foreground: 0 0% 98%;
-    --border: 240 6% 18%;
-    --input: 240 6% 18%;
-    --ring: 37 67% 58%;
-    --primary: 37 67% 58%;
-    --primary-foreground: 240 10% 4%;
-    --secondary: 240 6% 14%;
-    --secondary-foreground: 0 0% 98%;
-    --muted: 240 6% 14%;
-    --muted-foreground: 240 5% 64%;
-    --accent: 240 6% 14%;
-    --accent-foreground: 0 0% 98%;
-    --destructive: 0 62% 50%;
+    --background:        224 16% 8%;
+    --foreground:        0 0% 96%;
+    --card:              224 16% 12%;
+    --card-foreground:   0 0% 96%;
+    --border:            224 12% 20%;
+    --input:             224 12% 20%;
+    --ring:              37 67% 58%;
+    --primary:           37 67% 58%;
+    --primary-foreground: 224 16% 8%;
+    --secondary:         224 12% 16%;
+    --secondary-foreground: 0 0% 96%;
+    --muted:             224 12% 16%;
+    --muted-foreground:  220 10% 55%;
+    --accent:            37 30% 18%;
+    --accent-foreground: 37 67% 75%;
+    --destructive:       0 62% 50%;
     --destructive-foreground: 0 0% 98%;
   }
 }
@@ -52,8 +67,27 @@
   body {
     @apply bg-background text-foreground;
     margin: 0;
+    font-feature-settings: "cv11", "ss01";
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
   #root {
     min-height: 100vh;
+  }
+
+  /* Scrollbar discreta */
+  ::-webkit-scrollbar {
+    width: 5px;
+    height: 5px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply bg-border;
+    border-radius: 999px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-muted-foreground/30;
   }
 }
