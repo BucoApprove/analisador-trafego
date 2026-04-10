@@ -1,9 +1,10 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import {
   Calendar, Clock, Image, Send, X, RefreshCw, Camera,
   AlertCircle, CheckCircle, Loader2, ExternalLink, Film,
   Heart, MessageCircle, Bookmark, Share2, Eye, TrendingUp, Users,
-  UserPlus, Link2, Timer, Repeat2,
+  UserPlus, Link2, Timer, Repeat2, LayoutGrid, List,
+  ArrowUpDown, ArrowUp, ArrowDown,
 } from 'lucide-react'
 import {
   ResponsiveContainer, LineChart, Line, BarChart, Bar,
@@ -538,7 +539,33 @@ function AnaliseSection({ token }: { token: string }) {
     label: new Date(d.date + 'T12:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }),
   }))
 
-  const topPosts = [...posts].sort((a, b) => b.engRate - a.engRate)
+  type SortKey = 'timestamp' | 'likeCount' | 'commentsCount' | 'saved' | 'shares' |
+    'reach' | 'videoViews' | 'follows' | 'profileVisits' | 'engRate' | 'avgWatchTimeSec'
+  const [sortKey, setSortKey]       = useState<SortKey>('engRate')
+  const [sortDir, setSortDir]       = useState<'asc' | 'desc'>('desc')
+  const [postView, setPostView]     = useState<'grid' | 'table'>('grid')
+
+  const sortedPosts = useMemo(() => {
+    return [...posts].sort((a, b) => {
+      const av = sortKey === 'timestamp' ? new Date(a.timestamp).getTime() : (a[sortKey] as number)
+      const bv = sortKey === 'timestamp' ? new Date(b.timestamp).getTime() : (b[sortKey] as number)
+      return sortDir === 'desc' ? bv - av : av - bv
+    })
+  }, [posts, sortKey, sortDir])
+
+  function handleSort(key: SortKey) {
+    if (key === sortKey) setSortDir(d => d === 'desc' ? 'asc' : 'desc')
+    else { setSortKey(key); setSortDir('desc') }
+  }
+
+  function SortIcon({ col }: { col: SortKey }) {
+    if (col !== sortKey) return <ArrowUpDown className="h-3 w-3 opacity-40" />
+    return sortDir === 'desc'
+      ? <ArrowDown className="h-3 w-3 text-primary" />
+      : <ArrowUp className="h-3 w-3 text-primary" />
+  }
+
+  const isVideo = (p: AnalyticsPost) => p.mediaType === 'VIDEO' || p.mediaType === 'REELS'
 
   return (
     <div className="space-y-6">
@@ -701,119 +728,180 @@ function AnaliseSection({ token }: { token: string }) {
         </div>
       )}
 
-      {/* Posts: top por engajamento */}
-      {topPosts.length > 0 && (
+      {/* Posts: desempenho */}
+      {sortedPosts.length > 0 && (
         <div>
-          <SectionHeader
-            title="Desempenho dos Posts"
-            description="Últimos 20 posts ordenados por taxa de engajamento"
-          />
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {topPosts.map(post => (
-              <div key={post.id} className="rounded-lg border p-3 space-y-3 hover:bg-muted/30 transition-colors">
-                {/* Miniatura */}
-                {(post.mediaUrl || post.thumbnailUrl) && (
-                  <div className="relative aspect-square overflow-hidden rounded-md bg-muted">
-                    <img
-                      src={post.thumbnailUrl ?? post.mediaUrl}
-                      alt=""
-                      className="h-full w-full object-cover"
-                    />
-                    <Badge variant="secondary" className="absolute right-2 top-2 text-xs">
-                      {post.mediaType === 'VIDEO' || post.mediaType === 'REELS' ? 'Reels'
-                        : post.mediaType === 'CAROUSEL_ALBUM' ? 'Carrossel' : 'Imagem'}
-                    </Badge>
-                  </div>
-                )}
-                {post.caption && (
-                  <p className="line-clamp-2 text-xs text-muted-foreground">{post.caption}</p>
-                )}
-                {/* Métricas principais */}
-                <div className="grid grid-cols-3 gap-y-1.5 text-xs">
-                  <div className="flex items-center gap-1">
-                    <Heart className="h-3 w-3 text-rose-500" />
-                    <span>{fmt(post.likeCount)}</span>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <MessageCircle className="h-3 w-3 text-blue-500" />
-                    <span>{fmt(post.commentsCount)}</span>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <Bookmark className="h-3 w-3 text-yellow-500" />
-                    <span>{fmt(post.saved)}</span>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <Share2 className="h-3 w-3 text-green-500" />
-                    <span>{fmt(post.shares)}</span>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <Eye className="h-3 w-3 text-purple-500" />
-                    <span>{fmt(post.reach)}</span>
-                  </div>
-                  <div className="font-medium text-pink-600">
-                    {formatPercent(post.engRate)} eng.
-                  </div>
-                </div>
-
-                {/* Novos seguidores + cliques externos */}
-                <div className="grid grid-cols-2 gap-y-1 text-xs border-t pt-2 mt-1">
-                  <div className="flex items-center gap-1">
-                    <UserPlus className="h-3 w-3 text-emerald-500" />
-                    <span className="text-muted-foreground">Seguidores:</span>
-                    <span className="font-medium">+{fmt(post.follows)}</span>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <Link2 className="h-3 w-3 text-sky-500" />
-                    <span className="text-muted-foreground">Cliques ext.:</span>
-                    <span className="font-medium">{fmt(post.profileVisits)}</span>
-                  </div>
-                </div>
-
-                {/* Métricas de Reels */}
-                {(post.mediaType === 'VIDEO' || post.mediaType === 'REELS') && (
-                  <div className="grid grid-cols-2 gap-y-1 text-xs border-t pt-2 mt-1 bg-violet-50/60 rounded-md px-2 pb-2">
-                    <div className="col-span-2 text-[10px] font-semibold text-violet-600 uppercase tracking-wide pt-1 mb-0.5">
-                      Reels
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <Eye className="h-3 w-3 text-violet-500" />
-                      <span className="text-muted-foreground">Views:</span>
-                      <span className="font-medium">{fmt(post.videoViews)}</span>
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <Repeat2 className="h-3 w-3 text-violet-500" />
-                      <span className="text-muted-foreground">Replays:</span>
-                      <span className="font-medium">{fmt(post.replays)}</span>
-                    </div>
-                    {post.avgWatchTimeSec > 0 && (
-                      <div className="flex items-center gap-1 col-span-2">
-                        <Timer className="h-3 w-3 text-violet-500" />
-                        <span className="text-muted-foreground">Tempo médio:</span>
-                        <span className="font-medium">{post.avgWatchTimeSec}s</span>
-                        {post.videoViews > 0 && post.replays > 0 && (
-                          <span className="ml-auto text-violet-600 font-medium">
-                            {formatPercent((post.replays / post.videoViews) * 100)} replay
-                          </span>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                )}
-                {/* Rodapé */}
-                <div className="flex items-center justify-between text-xs text-muted-foreground">
-                  <span>{new Date(post.timestamp).toLocaleDateString('pt-BR')}</span>
-                  <a
-                    href={post.permalink}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="flex items-center gap-1 hover:text-foreground"
-                  >
-                    Ver <ExternalLink className="h-3 w-3" />
-                  </a>
-                </div>
-              </div>
-            ))}
+          {/* Cabeçalho + controles */}
+          <div className="flex items-start justify-between mb-4 gap-3 flex-wrap">
+            <div>
+              <h2 className="text-base font-bold tracking-tight">Desempenho dos Posts</h2>
+              <p className="text-sm text-muted-foreground mt-0.5">
+                {sortedPosts.length} posts · clique nas colunas para ordenar
+              </p>
+            </div>
+            <div className="flex items-center gap-1 border rounded-xl p-0.5">
+              <button
+                onClick={() => setPostView('grid')}
+                className={`p-1.5 rounded-lg transition-colors ${postView === 'grid' ? 'bg-primary text-white' : 'text-muted-foreground hover:text-foreground'}`}
+                title="Visualização em grade"
+              >
+                <LayoutGrid className="h-4 w-4" />
+              </button>
+              <button
+                onClick={() => setPostView('table')}
+                className={`p-1.5 rounded-lg transition-colors ${postView === 'table' ? 'bg-primary text-white' : 'text-muted-foreground hover:text-foreground'}`}
+                title="Visualização em tabela"
+              >
+                <List className="h-4 w-4" />
+              </button>
+            </div>
           </div>
+
+          {/* ── GRADE ── */}
+          {postView === 'grid' && (
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {sortedPosts.map(post => (
+                <div key={post.id} className="rounded-xl border p-3 space-y-3 hover:bg-muted/30 transition-colors">
+                  {(post.mediaUrl || post.thumbnailUrl) && (
+                    <div className="relative aspect-square overflow-hidden rounded-lg bg-muted">
+                      <img src={post.thumbnailUrl ?? post.mediaUrl} alt="" className="h-full w-full object-cover" />
+                      <Badge variant="secondary" className="absolute right-2 top-2 text-xs">
+                        {isVideo(post) ? 'Reels' : post.mediaType === 'CAROUSEL_ALBUM' ? 'Carrossel' : 'Imagem'}
+                      </Badge>
+                    </div>
+                  )}
+                  {post.caption && (
+                    <p className="line-clamp-2 text-xs text-muted-foreground">{post.caption}</p>
+                  )}
+                  <div className="grid grid-cols-3 gap-y-1.5 text-xs">
+                    <div className="flex items-center gap-1"><Heart className="h-3 w-3 text-rose-500" /><span>{fmt(post.likeCount)}</span></div>
+                    <div className="flex items-center gap-1"><MessageCircle className="h-3 w-3 text-blue-500" /><span>{fmt(post.commentsCount)}</span></div>
+                    <div className="flex items-center gap-1"><Bookmark className="h-3 w-3 text-yellow-500" /><span>{fmt(post.saved)}</span></div>
+                    <div className="flex items-center gap-1"><Share2 className="h-3 w-3 text-green-500" /><span>{fmt(post.shares)}</span></div>
+                    <div className="flex items-center gap-1"><Eye className="h-3 w-3 text-purple-500" /><span>{fmt(post.reach)}</span></div>
+                    <div className="font-medium text-pink-600">{formatPercent(post.engRate)} eng.</div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-y-1 text-xs border-t pt-2">
+                    <div className="flex items-center gap-1"><UserPlus className="h-3 w-3 text-emerald-500" /><span className="text-muted-foreground">Seguido.:</span><span className="font-medium">+{fmt(post.follows)}</span></div>
+                    <div className="flex items-center gap-1"><Link2 className="h-3 w-3 text-sky-500" /><span className="text-muted-foreground">Cliques:</span><span className="font-medium">{fmt(post.profileVisits)}</span></div>
+                  </div>
+                  {isVideo(post) && (
+                    <div className="grid grid-cols-2 gap-y-1 text-xs border-t pt-2 bg-violet-50/60 rounded-lg px-2 pb-2">
+                      <div className="col-span-2 text-[10px] font-semibold text-violet-600 uppercase tracking-wide pt-1 mb-0.5">Reels</div>
+                      <div className="flex items-center gap-1"><Eye className="h-3 w-3 text-violet-500" /><span className="text-muted-foreground">Views:</span><span className="font-medium">{fmt(post.videoViews)}</span></div>
+                      <div className="flex items-center gap-1"><Repeat2 className="h-3 w-3 text-violet-500" /><span className="text-muted-foreground">Replays:</span><span className="font-medium">{fmt(post.replays)}</span></div>
+                      {post.avgWatchTimeSec > 0 && (
+                        <div className="flex items-center gap-1 col-span-2">
+                          <Timer className="h-3 w-3 text-violet-500" />
+                          <span className="text-muted-foreground">Tempo médio:</span>
+                          <span className="font-medium">{post.avgWatchTimeSec}s</span>
+                          {post.videoViews > 0 && post.replays > 0 && (
+                            <span className="ml-auto text-violet-600 font-medium">{formatPercent((post.replays / post.videoViews) * 100)} replay</span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  <div className="flex items-center justify-between text-xs text-muted-foreground">
+                    <span>{new Date(post.timestamp).toLocaleDateString('pt-BR')}</span>
+                    <a href={post.permalink} target="_blank" rel="noreferrer" className="flex items-center gap-1 hover:text-foreground">
+                      Ver <ExternalLink className="h-3 w-3" />
+                    </a>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* ── TABELA ── */}
+          {postView === 'table' && (
+            <div className="overflow-x-auto rounded-xl border">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b bg-muted/40 text-left">
+                    <th className="px-3 py-2.5 font-semibold text-muted-foreground w-10"></th>
+                    <th className="px-3 py-2.5 font-semibold text-muted-foreground min-w-[120px]">Post</th>
+                    {([
+                      ['timestamp',      'Data'],
+                      ['likeCount',      '❤️ Curtidas'],
+                      ['commentsCount',  '💬 Coment.'],
+                      ['saved',          '🔖 Salvos'],
+                      ['shares',         '↗️ Compart.'],
+                      ['reach',          '👁️ Alcance'],
+                      ['videoViews',     '▶️ Views'],
+                      ['follows',        '➕ Seguido.'],
+                      ['profileVisits',  '🔗 Cliques'],
+                      ['engRate',        '📊 Eng.%'],
+                      ['avgWatchTimeSec','⏱️ T.Médio'],
+                    ] as [string, string][]).map(([key, label]) => (
+                      <th
+                        key={key}
+                        className="px-3 py-2.5 font-semibold text-muted-foreground cursor-pointer hover:text-foreground select-none whitespace-nowrap"
+                        onClick={() => handleSort(key as SortKey)}
+                      >
+                        <span className="flex items-center gap-1">
+                          {label}
+                          <SortIcon col={key as SortKey} />
+                        </span>
+                      </th>
+                    ))}
+                    <th className="px-3 py-2.5 w-10"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {sortedPosts.map((post, i) => (
+                    <tr key={post.id} className={`border-b last:border-0 hover:bg-muted/30 transition-colors ${i % 2 === 0 ? '' : 'bg-muted/10'}`}>
+                      <td className="px-3 py-2">
+                        {(post.mediaUrl || post.thumbnailUrl) ? (
+                          <div className="h-10 w-10 rounded-lg overflow-hidden bg-muted shrink-0">
+                            <img src={post.thumbnailUrl ?? post.mediaUrl} alt="" className="h-full w-full object-cover" />
+                          </div>
+                        ) : (
+                          <div className="h-10 w-10 rounded-lg bg-muted flex items-center justify-center">
+                            <Camera className="h-4 w-4 text-muted-foreground/40" />
+                          </div>
+                        )}
+                      </td>
+                      <td className="px-3 py-2 max-w-[180px]">
+                        <div className="flex flex-col gap-0.5">
+                          <Badge variant="secondary" className="self-start text-[10px] px-1.5 py-0">
+                            {isVideo(post) ? 'Reels' : post.mediaType === 'CAROUSEL_ALBUM' ? 'Carrossel' : 'Imagem'}
+                          </Badge>
+                          {post.caption && (
+                            <span className="line-clamp-2 text-muted-foreground leading-tight">{post.caption}</span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-3 py-2 whitespace-nowrap text-muted-foreground">
+                        {new Date(post.timestamp).toLocaleDateString('pt-BR')}
+                      </td>
+                      <td className="px-3 py-2 font-medium">{fmt(post.likeCount)}</td>
+                      <td className="px-3 py-2 font-medium">{fmt(post.commentsCount)}</td>
+                      <td className="px-3 py-2 font-medium">{fmt(post.saved)}</td>
+                      <td className="px-3 py-2 font-medium">{fmt(post.shares)}</td>
+                      <td className="px-3 py-2 font-medium">{fmt(post.reach)}</td>
+                      <td className="px-3 py-2 font-medium">
+                        {isVideo(post) ? fmt(post.videoViews) : <span className="text-muted-foreground">—</span>}
+                      </td>
+                      <td className="px-3 py-2 font-medium text-emerald-600">+{fmt(post.follows)}</td>
+                      <td className="px-3 py-2 font-medium text-sky-600">{fmt(post.profileVisits)}</td>
+                      <td className="px-3 py-2 font-semibold text-pink-600">{formatPercent(post.engRate)}</td>
+                      <td className="px-3 py-2 font-medium">
+                        {isVideo(post) && post.avgWatchTimeSec > 0
+                          ? <span className="text-violet-600">{post.avgWatchTimeSec}s</span>
+                          : <span className="text-muted-foreground">—</span>}
+                      </td>
+                      <td className="px-3 py-2">
+                        <a href={post.permalink} target="_blank" rel="noreferrer" className="text-muted-foreground hover:text-foreground">
+                          <ExternalLink className="h-3.5 w-3.5" />
+                        </a>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
     </div>
