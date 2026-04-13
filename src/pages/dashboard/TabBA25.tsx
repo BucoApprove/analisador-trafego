@@ -183,21 +183,29 @@ const PIE_COLORS = [
   '#14b8a6', '#8b5cf6', '#f97316', '#06b6d4',
 ]
 
-function preparePieData(rows: UtmSalesAttribution[], maxSlices = 15) {
+function preparePieData(
+  rows: UtmSalesAttribution[],
+  field: 'lastBefore' | 'origin' | 'anyTime' = 'lastBefore',
+  maxSlices = 15,
+) {
   const withSales = rows
-    .filter(r => r.lastBefore > 0)
-    .sort((a, b) => b.lastBefore - a.lastBefore)
+    .filter(r => r[field] > 0)
+    .sort((a, b) => b[field] - a[field])
   if (withSales.length === 0) return []
   if (withSales.length <= maxSlices) {
-    return withSales.map(r => ({ name: r.name, value: r.lastBefore }))
+    return withSales.map(r => ({ name: r.name, value: r[field] }))
   }
   const top = withSales.slice(0, maxSlices - 1)
-  const others = withSales.slice(maxSlices - 1).reduce((s, r) => s + r.lastBefore, 0)
-  return [...top.map(r => ({ name: r.name, value: r.lastBefore })), { name: 'Outros', value: others }]
+  const others = withSales.slice(maxSlices - 1).reduce((s, r) => s + r[field], 0)
+  return [...top.map(r => ({ name: r.name, value: r[field] })), { name: 'Outros', value: others }]
 }
 
-function SalesPieChart({ title, rows }: { title: string; rows: UtmSalesAttribution[] }) {
-  const pieData = preparePieData(rows)
+function SalesPieChart({ title, rows, field = 'lastBefore' }: {
+  title: string
+  rows: UtmSalesAttribution[]
+  field?: 'lastBefore' | 'origin' | 'anyTime'
+}) {
+  const pieData = preparePieData(rows, field)
   const total = pieData.reduce((s, d) => s + d.value, 0)
 
   return (
@@ -812,18 +820,37 @@ export default function TabBA25({ token, enabled }: Props) {
 
           {/* Distribuição de vendas por UTM (gráficos de pizza) */}
           {salesUtmData && salesUtmData.totalBuyers > 0 && (
-            <div className="rounded-lg border bg-card overflow-hidden">
-              <div className="px-4 py-2 border-b bg-muted/40 flex flex-wrap items-center justify-between gap-2">
-                <p className="text-sm font-semibold">Distribuição de Vendas por UTM</p>
-                <p className="text-xs text-muted-foreground">
-                  Última UTM antes da compra · {salesUtmData.totalBuyers} compradores · desde {FIXED_SALES_SINCE}
-                </p>
+            <div className="space-y-3">
+              {/* Bloco 1: última UTM antes da compra */}
+              <div className="rounded-lg border bg-card overflow-hidden">
+                <div className="px-4 py-2 border-b bg-muted/40 flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-sm font-semibold">Distribuição de Vendas por UTM — Última UTM antes da compra</p>
+                  <p className="text-xs text-muted-foreground">
+                    {salesUtmData.totalBuyers} compradores · desde {FIXED_SALES_SINCE}
+                  </p>
+                </div>
+                <div className="p-4 grid grid-cols-2 xl:grid-cols-4 gap-6">
+                  <SalesPieChart title="Fonte (utm_source)"     rows={salesUtmData.bySource}   field="lastBefore" />
+                  <SalesPieChart title="Público (utm_medium)"   rows={salesUtmData.byMedium}   field="lastBefore" />
+                  <SalesPieChart title="Campanha"               rows={salesUtmData.byCampaign} field="lastBefore" />
+                  <SalesPieChart title="Criativo (utm_content)" rows={salesUtmData.byContent}  field="lastBefore" />
+                </div>
               </div>
-              <div className="p-4 grid grid-cols-2 xl:grid-cols-4 gap-6">
-                <SalesPieChart title="Fonte (utm_source)"    rows={salesUtmData.bySource} />
-                <SalesPieChart title="Público (utm_medium)"  rows={salesUtmData.byMedium} />
-                <SalesPieChart title="Campanha"              rows={salesUtmData.byCampaign} />
-                <SalesPieChart title="Criativo (utm_content)" rows={salesUtmData.byContent} />
+
+              {/* Bloco 2: primeira UTM do comprador (origem) */}
+              <div className="rounded-lg border bg-card overflow-hidden">
+                <div className="px-4 py-2 border-b bg-muted/40 flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-sm font-semibold">Distribuição de Vendas por UTM — UTM de origem do comprador</p>
+                  <p className="text-xs text-muted-foreground">
+                    {salesUtmData.totalBuyers} compradores · desde {FIXED_SALES_SINCE}
+                  </p>
+                </div>
+                <div className="p-4 grid grid-cols-2 xl:grid-cols-4 gap-6">
+                  <SalesPieChart title="Fonte (utm_source)"     rows={salesUtmData.bySource}   field="origin" />
+                  <SalesPieChart title="Público (utm_medium)"   rows={salesUtmData.byMedium}   field="origin" />
+                  <SalesPieChart title="Campanha"               rows={salesUtmData.byCampaign} field="origin" />
+                  <SalesPieChart title="Criativo (utm_content)" rows={salesUtmData.byContent}  field="origin" />
+                </div>
               </div>
             </div>
           )}
