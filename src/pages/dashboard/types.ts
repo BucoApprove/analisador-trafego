@@ -235,6 +235,7 @@ export interface SalesUtmData {
   byContent:    UtmSalesAttribution[]
   daysToConvert: { label: string; count: number }[]
   tagCountDist:  { label: string; count: number }[]
+  drilldown:     { campaign: string; medium: string; content: string; count: number }[]
 }
 
 // ─── Vendas (Hotmart/Greenn) ─────────────────────────────────────────────────
