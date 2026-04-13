@@ -6,6 +6,7 @@ import {
 } from './components'
 import {
   LineChart, Line,
+  BarChart, Bar,
   PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts'
@@ -263,6 +264,49 @@ function SalesPieChart({ title, rows, field = 'lastBefore' }: {
             ))}
           </div>
         </>
+      )}
+    </div>
+  )
+}
+
+function DistributionBarChart({
+  title,
+  description,
+  data,
+  color = CHART_COLORS[0],
+}: {
+  title: string
+  description?: string
+  data: { label: string; count: number }[]
+  color?: string
+}) {
+  const total = data.reduce((s, d) => s + d.count, 0)
+  return (
+    <div className="rounded-lg border bg-card p-4">
+      <p className="text-sm font-semibold mb-0.5">{title}</p>
+      {description && <p className="text-xs text-muted-foreground mb-3">{description}</p>}
+      {total === 0 ? (
+        <div className="h-44 flex items-center justify-center text-xs text-muted-foreground">Sem dados</div>
+      ) : (
+        <ResponsiveContainer width="100%" height={200}>
+          <BarChart data={data} margin={{ top: 4, right: 8, left: -20, bottom: 44 }}>
+            <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
+            <XAxis
+              dataKey="label"
+              tick={{ fontSize: 10 }}
+              angle={-35}
+              textAnchor="end"
+              interval={0}
+            />
+            <YAxis tick={{ fontSize: 10 }} allowDecimals={false} />
+            <Tooltip
+              formatter={(value) => [`${value} compradores`, '']}
+              labelStyle={{ fontSize: '11px' }}
+              contentStyle={{ fontSize: '11px' }}
+            />
+            <Bar dataKey="count" fill={color} radius={[3, 3, 0, 0]} />
+          </BarChart>
+        </ResponsiveContainer>
       )}
     </div>
   )
@@ -852,6 +896,24 @@ export default function TabBA25({ token, enabled }: Props) {
                   <SalesPieChart title="Criativo (utm_content)" rows={salesUtmData.byContent}  field="origin" />
                 </div>
               </div>
+
+              {/* Distribuições: tempo até compra + registros na base */}
+              {(salesUtmData.daysToConvert.length > 0 || salesUtmData.tagCountDist.length > 0) && (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                  <DistributionBarChart
+                    title="Tempo na base até a compra"
+                    description="Dias entre o primeiro registro do lead e a data de compra"
+                    data={salesUtmData.daysToConvert}
+                    color={CHART_COLORS[1]}
+                  />
+                  <DistributionBarChart
+                    title="Registros na base por comprador"
+                    description="Número de tags distintas que o comprador possui na base"
+                    data={salesUtmData.tagCountDist}
+                    color={CHART_COLORS[2]}
+                  />
+                </div>
+              )}
             </div>
           )}
 

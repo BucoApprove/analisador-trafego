@@ -229,10 +229,12 @@ export interface SalesUtmData {
   totalBuyers: number
   since: string
   until: string
-  bySource:   UtmSalesAttribution[]
-  byMedium:   UtmSalesAttribution[]
-  byCampaign: UtmSalesAttribution[]
-  byContent:  UtmSalesAttribution[]
+  bySource:     UtmSalesAttribution[]
+  byMedium:     UtmSalesAttribution[]
+  byCampaign:   UtmSalesAttribution[]
+  byContent:    UtmSalesAttribution[]
+  daysToConvert: { label: string; count: number }[]
+  tagCountDist:  { label: string; count: number }[]
 }
 
 // ─── Vendas (Hotmart/Greenn) ─────────────────────────────────────────────────

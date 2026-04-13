@@ -42,7 +42,9 @@ interface UtmRecord {
 }
 
 interface BuyerData {
-  purchaseDate: string  // 'YYYY-MM-DD'
+  purchaseDate:  string       // 'YYYY-MM-DD'
+  firstLeadDate: string | null
+  tagCount:      number
   utms: UtmRecord[]
 }
 
@@ -105,17 +107,30 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
            OR l.utm_campaign IS NOT NULL
            OR l.utm_medium   IS NOT NULL
            OR l.utm_content  IS NOT NULL
+      ),
+      buyer_stats AS (
+        SELECT
+          LOWER(TRIM(l.lead_email)) AS lead_email,
+          MIN(DATE(l.lead_register)) AS first_lead_date,
+          COUNT(DISTINCT l.tag_name) AS tag_count
+        FROM ${tLeads} l
+        INNER JOIN buyers b ON LOWER(TRIM(l.lead_email)) = b.lead_email
+        WHERE l.tag_name IS NOT NULL
+        GROUP BY LOWER(TRIM(l.lead_email))
       )
       SELECT
-        lead_email,
-        purchase_date,
-        utm_date,
-        utm_source,
-        utm_campaign,
-        utm_medium,
-        utm_content
-      FROM utm_history
-      ORDER BY lead_email, utm_date
+        u.lead_email,
+        u.purchase_date,
+        u.utm_date,
+        u.utm_source,
+        u.utm_campaign,
+        u.utm_medium,
+        u.utm_content,
+        s.first_lead_date,
+        s.tag_count
+      FROM utm_history u
+      LEFT JOIN buyer_stats s ON u.lead_email = s.lead_email
+      ORDER BY u.lead_email, u.utm_date
     `
 
     const result = await bqQuery(sql, [
@@ -133,7 +148,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (!email || !purchaseDate) continue
 
       if (!buyers.has(email)) {
-        buyers.set(email, { purchaseDate, utms: [] })
+        buyers.set(email, {
+          purchaseDate,
+          firstLeadDate: row.first_lead_date ?? null,
+          tagCount:      parseInt(row.tag_count ?? '0'),
+          utms: [],
+        })
       }
 
       buyers.get(email)!.utms.push({
@@ -207,6 +227,50 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
+    // ── Distribuições: tempo até compra e registros na base ──────────────────
+
+    const DAYS_BUCKETS: { label: string; max: number }[] = [
+      { label: '0–7 dias',    max: 7   },
+      { label: '8–14 dias',   max: 14  },
+      { label: '15–30 dias',  max: 30  },
+      { label: '31–60 dias',  max: 60  },
+      { label: '61–90 dias',  max: 90  },
+      { label: '91–180 dias', max: 180 },
+      { label: '181+ dias',   max: Infinity },
+    ]
+    const TAG_BUCKET_ORDER = ['1', '2', '3', '4', '5', '6–10', '11–20', '21+']
+
+    const daysBuckets  = new Map<string, number>()
+    const tagBuckets   = new Map<string, number>()
+
+    for (const { purchaseDate, firstLeadDate, tagCount } of buyers.values()) {
+      // Tempo até compra
+      if (purchaseDate && firstLeadDate) {
+        const days = Math.round(
+          (new Date(purchaseDate).getTime() - new Date(firstLeadDate).getTime()) / 86400000
+        )
+        const bucket = DAYS_BUCKETS.find(b => days <= b.max)?.label ?? '181+ dias'
+        daysBuckets.set(bucket, (daysBuckets.get(bucket) ?? 0) + 1)
+      }
+
+      // Registros na base
+      if (tagCount > 0) {
+        const label = tagCount >= 21 ? '21+'
+          : tagCount >= 11 ? '11–20'
+          : tagCount >= 6  ? '6–10'
+          : String(tagCount)
+        tagBuckets.set(label, (tagBuckets.get(label) ?? 0) + 1)
+      }
+    }
+
+    const daysToConvert = DAYS_BUCKETS
+      .map(b => ({ label: b.label, count: daysBuckets.get(b.label) ?? 0 }))
+      .filter(b => b.count > 0)
+
+    const tagCountDist = TAG_BUCKET_ORDER
+      .map(label => ({ label, count: tagBuckets.get(label) ?? 0 }))
+      .filter(b => b.count > 0)
+
     // ── Formata resposta ──────────────────────────────────────────────────────
     function toArray(dim: DimKey) {
       return [...counters[dim].entries()]
@@ -223,10 +287,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       totalBuyers: buyers.size,
       since,
       until,
-      bySource:   toArray('source'),
-      byMedium:   toArray('medium'),
-      byCampaign: toArray('campaign'),
-      byContent:  toArray('content'),
+      bySource:     toArray('source'),
+      byMedium:     toArray('medium'),
+      byCampaign:   toArray('campaign'),
+      byContent:    toArray('content'),
+      daysToConvert,
+      tagCountDist,
     })
   } catch (err) {
     console.error('launch-sales-utms error:', err)
