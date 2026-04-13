@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from 'react'
+import { useState, useCallback, useEffect, useRef, useMemo } from 'react'
 import type { LaunchData, GoalsData, RawLaunchResponse, SalesUtmData, UtmSalesAttribution } from './types'
 import {
   SectionHeader, TabLoading, TabError,
@@ -308,6 +308,140 @@ function DistributionBarChart({
           </BarChart>
         </ResponsiveContainer>
       )}
+    </div>
+  )
+}
+
+// ─── Drill-down Campanha → Público → Criativo ─────────────────────────────────
+
+interface DrillRow { campaign: string; medium: string; content: string; count: number }
+
+function DrillColumn({
+  title,
+  items,
+  selected,
+  onSelect,
+  placeholder,
+}: {
+  title: string
+  items: { name: string; count: number }[]
+  selected: string | null
+  onSelect: (name: string) => void
+  placeholder?: string
+}) {
+  const maxVal = Math.max(...items.map(i => i.count), 1)
+  return (
+    <div className="flex-1 min-w-0 flex flex-col">
+      <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide mb-2 px-1">{title}</p>
+      {items.length === 0 ? (
+        <div className="flex-1 flex items-center justify-center text-xs text-muted-foreground py-8 text-center px-2">
+          {placeholder ?? '—'}
+        </div>
+      ) : (
+        <div className="space-y-0.5 overflow-y-auto max-h-80 pr-1">
+          {items.map(item => {
+            const active = selected === item.name
+            return (
+              <button
+                key={item.name}
+                onClick={() => onSelect(item.name)}
+                title={item.name}
+                className={`w-full text-left px-2 py-1.5 rounded-md text-xs transition-colors ${
+                  active
+                    ? 'bg-primary text-primary-foreground'
+                    : 'hover:bg-muted/70 text-foreground'
+                }`}
+              >
+                <div className="flex items-center justify-between gap-2 mb-1">
+                  <span className="truncate font-medium leading-tight">{item.name}</span>
+                  <span className="tabular-nums font-bold flex-shrink-0 text-[11px]">{item.count}</span>
+                </div>
+                <div className="h-1 rounded-full overflow-hidden" style={{ background: active ? 'rgba(255,255,255,0.25)' : 'hsl(var(--muted))' }}>
+                  <div
+                    className="h-full rounded-full"
+                    style={{
+                      width: `${(item.count / maxVal) * 100}%`,
+                      background: active ? 'rgba(255,255,255,0.7)' : CHART_COLORS[2],
+                    }}
+                  />
+                </div>
+              </button>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function CampaignDrilldown({ drilldown }: { drilldown: DrillRow[] }) {
+  const [selCampaign, setSelCampaign] = useState<string | null>(null)
+  const [selMedium,   setSelMedium]   = useState<string | null>(null)
+
+  const campaigns = useMemo(() => {
+    const m = new Map<string, number>()
+    for (const d of drilldown) m.set(d.campaign, (m.get(d.campaign) ?? 0) + d.count)
+    return [...m.entries()].map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count)
+  }, [drilldown])
+
+  const mediums = useMemo(() => {
+    if (!selCampaign) return []
+    const m = new Map<string, number>()
+    for (const d of drilldown.filter(d => d.campaign === selCampaign))
+      m.set(d.medium, (m.get(d.medium) ?? 0) + d.count)
+    return [...m.entries()].map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count)
+  }, [drilldown, selCampaign])
+
+  const contents = useMemo(() => {
+    if (!selCampaign || !selMedium) return []
+    return drilldown
+      .filter(d => d.campaign === selCampaign && d.medium === selMedium)
+      .map(d => ({ name: d.content, count: d.count }))
+      .sort((a, b) => b.count - a.count)
+  }, [drilldown, selCampaign, selMedium])
+
+  const handleCampaign = (name: string) => {
+    setSelCampaign(prev => { if (prev === name) { setSelMedium(null); return null } return name })
+    setSelMedium(null)
+  }
+  const handleMedium = (name: string) => {
+    setSelMedium(prev => prev === name ? null : name)
+  }
+
+  return (
+    <div className="rounded-lg border bg-card overflow-hidden">
+      <div className="px-4 py-2.5 border-b bg-muted/40">
+        <p className="text-sm font-semibold">Drill-down: Campanha → Público → Criativo</p>
+        <p className="text-xs text-muted-foreground">Última UTM antes da compra · clique para explorar a hierarquia</p>
+      </div>
+      <div className="p-4 flex gap-0 divide-x">
+        <div className="pr-4 flex-1 min-w-0">
+          <DrillColumn
+            title="Campanha (utm_campaign)"
+            items={campaigns}
+            selected={selCampaign}
+            onSelect={handleCampaign}
+          />
+        </div>
+        <div className="px-4 flex-1 min-w-0">
+          <DrillColumn
+            title="Público (utm_medium)"
+            items={mediums}
+            selected={selMedium}
+            onSelect={handleMedium}
+            placeholder="← Selecione uma campanha"
+          />
+        </div>
+        <div className="pl-4 flex-1 min-w-0">
+          <DrillColumn
+            title="Criativo (utm_content)"
+            items={contents}
+            selected={null}
+            onSelect={() => {}}
+            placeholder={selCampaign ? '← Selecione um público' : '← Selecione uma campanha'}
+          />
+        </div>
+      </div>
     </div>
   )
 }
@@ -913,6 +1047,11 @@ export default function TabBA25({ token, enabled }: Props) {
                     color={CHART_COLORS[2]}
                   />
                 </div>
+              )}
+
+              {/* Drill-down interativo Campanha → Público → Criativo */}
+              {salesUtmData.drilldown.length > 0 && (
+                <CampaignDrilldown drilldown={salesUtmData.drilldown} />
               )}
             </div>
           )}
