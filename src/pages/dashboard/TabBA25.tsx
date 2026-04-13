@@ -6,6 +6,7 @@ import {
 } from './components'
 import {
   LineChart, Line,
+  PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts'
 import { RefreshCw, ChevronDown } from 'lucide-react'
@@ -16,6 +17,7 @@ const FIXED_PREFIX = 'BA25'
 const FIXED_SPEND_FILTER = 'BA25'
 const FIXED_OR_FILTER = 'instagram,engajamento,lembrete,remarketing'
 const FIXED_SINCE = '2026-03-01'
+const FIXED_SALES_SINCE = '2026-04-09'
 
 function todayStr() {
   return new Date().toISOString().split('T')[0]
@@ -174,6 +176,90 @@ function UtmTable({
   )
 }
 
+// ─── Paleta e helpers para gráficos de pizza ──────────────────────────────────
+
+const PIE_COLORS = [
+  '#6366f1', '#22c55e', '#f59e0b', '#ec4899',
+  '#14b8a6', '#8b5cf6', '#f97316', '#06b6d4',
+]
+
+function preparePieData(rows: UtmSalesAttribution[], maxSlices = 7) {
+  const withSales = rows
+    .filter(r => r.lastBefore > 0)
+    .sort((a, b) => b.lastBefore - a.lastBefore)
+  if (withSales.length === 0) return []
+  if (withSales.length <= maxSlices) {
+    return withSales.map(r => ({ name: r.name, value: r.lastBefore }))
+  }
+  const top = withSales.slice(0, maxSlices - 1)
+  const others = withSales.slice(maxSlices - 1).reduce((s, r) => s + r.lastBefore, 0)
+  return [...top.map(r => ({ name: r.name, value: r.lastBefore })), { name: 'Outros', value: others }]
+}
+
+function SalesPieChart({ title, rows }: { title: string; rows: UtmSalesAttribution[] }) {
+  const pieData = preparePieData(rows)
+  const total = pieData.reduce((s, d) => s + d.value, 0)
+
+  return (
+    <div className="flex flex-col">
+      <p className="text-xs font-semibold text-center mb-0.5">{title}</p>
+      <p className="text-[10px] text-center text-muted-foreground mb-1">
+        {total > 0 ? `${total} vendas` : 'Sem dados'}
+      </p>
+
+      {total === 0 ? (
+        <div className="flex-1 flex items-center justify-center h-28 text-xs text-muted-foreground">—</div>
+      ) : (
+        <>
+          <ResponsiveContainer width="100%" height={130}>
+            <PieChart>
+              <Pie
+                data={pieData}
+                cx="50%"
+                cy="50%"
+                innerRadius={32}
+                outerRadius={52}
+                paddingAngle={2}
+                dataKey="value"
+              >
+                {pieData.map((_, i) => (
+                  <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
+                ))}
+              </Pie>
+              <Tooltip
+                formatter={(value: number, name: string) => [
+                  `${value} (${total > 0 ? ((value / total) * 100).toFixed(1) : 0}%)`,
+                  name,
+                ]}
+                contentStyle={{ fontSize: '11px' }}
+              />
+            </PieChart>
+          </ResponsiveContainer>
+          <div className="space-y-0.5 mt-1 px-1">
+            {pieData.map((d, i) => (
+              <div key={d.name} className="flex items-center justify-between gap-1 text-[10px]">
+                <div className="flex items-center gap-1 min-w-0">
+                  <span
+                    className="h-2 w-2 rounded-full flex-shrink-0"
+                    style={{ backgroundColor: PIE_COLORS[i % PIE_COLORS.length] }}
+                  />
+                  <span className="truncate text-muted-foreground" title={d.name}>{d.name}</span>
+                </div>
+                <span className="tabular-nums font-semibold flex-shrink-0">
+                  {d.value}
+                  <span className="font-normal text-muted-foreground ml-0.5">
+                    ({total > 0 ? ((d.value / total) * 100).toFixed(0) : 0}%)
+                  </span>
+                </span>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
 export default function TabBA25({ token, enabled }: Props) {
   const [since, setSince] = useState(FIXED_SINCE)
   const [until, setUntil] = useState(todayStr)
@@ -200,7 +286,7 @@ export default function TabBA25({ token, enabled }: Props) {
       const bqUrl = `/api/launch-data?prefix=${encodeURIComponent(FIXED_PREFIX)}&since=${since}&until=${until}&broadSearch=true`
       const metaUrl = `/api/meta-spend?since=${since}&until=${until}&spendFilter=${encodeURIComponent(FIXED_SPEND_FILTER)}&orFilter=${encodeURIComponent(FIXED_OR_FILTER)}`
 
-      const salesUrl = `/api/launch-sales-utms?since=${since}&until=${until}`
+      const salesUrl = `/api/launch-sales-utms?since=${FIXED_SALES_SINCE}&until=${until}`
 
       const t0 = Date.now()
       const [bqRes, metaRes, salesRes] = await Promise.all([
@@ -723,6 +809,24 @@ export default function TabBA25({ token, enabled }: Props) {
               </div>
             )
           })()}
+
+          {/* Distribuição de vendas por UTM (gráficos de pizza) */}
+          {salesUtmData && salesUtmData.totalBuyers > 0 && (
+            <div className="rounded-lg border bg-card overflow-hidden">
+              <div className="px-4 py-2 border-b bg-muted/40 flex flex-wrap items-center justify-between gap-2">
+                <p className="text-sm font-semibold">Distribuição de Vendas por UTM</p>
+                <p className="text-xs text-muted-foreground">
+                  Última UTM antes da compra · {salesUtmData.totalBuyers} compradores · desde {FIXED_SALES_SINCE}
+                </p>
+              </div>
+              <div className="p-4 grid grid-cols-2 xl:grid-cols-4 gap-6">
+                <SalesPieChart title="Fonte (utm_source)"    rows={salesUtmData.bySource} />
+                <SalesPieChart title="Público (utm_medium)"  rows={salesUtmData.byMedium} />
+                <SalesPieChart title="Campanha"              rows={salesUtmData.byCampaign} />
+                <SalesPieChart title="Criativo (utm_content)" rows={salesUtmData.byContent} />
+              </div>
+            </div>
+          )}
 
           {/* Acordeão: UTMs + Evolução diária + Campanhas */}
           <div className="space-y-2">
