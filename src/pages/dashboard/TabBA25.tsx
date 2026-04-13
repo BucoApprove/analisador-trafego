@@ -183,7 +183,7 @@ const PIE_COLORS = [
   '#14b8a6', '#8b5cf6', '#f97316', '#06b6d4',
 ]
 
-function preparePieData(rows: UtmSalesAttribution[], maxSlices = 10) {
+function preparePieData(rows: UtmSalesAttribution[], maxSlices = 15) {
   const withSales = rows
     .filter(r => r.lastBefore > 0)
     .sort((a, b) => b.lastBefore - a.lastBefore)
