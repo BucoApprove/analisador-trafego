@@ -227,10 +227,10 @@ function SalesPieChart({ title, rows }: { title: string; rows: UtmSalesAttributi
                 ))}
               </Pie>
               <Tooltip
-                formatter={(value: number, name: string) => [
-                  `${value} (${total > 0 ? ((value / total) * 100).toFixed(1) : 0}%)`,
-                  name,
-                ]}
+                formatter={(value, name) => {
+                  const v = Number(value ?? 0)
+                  return [`${v} (${total > 0 ? ((v / total) * 100).toFixed(1) : 0}%)`, String(name)]
+                }}
                 contentStyle={{ fontSize: '11px' }}
               />
             </PieChart>
