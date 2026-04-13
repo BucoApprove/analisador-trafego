@@ -216,6 +216,25 @@ export interface GoalsData {
   }
 }
 
+// ─── Atribuição de UTMs por vendas ───────────────────────────────────────────
+
+export interface UtmSalesAttribution {
+  name: string
+  anyTime: number     // compradores que em algum momento tiveram essa UTM
+  lastBefore: number  // compradores cuja última UTM antes da compra foi essa
+  origin: number      // compradores cuja primeira UTM na base foi essa
+}
+
+export interface SalesUtmData {
+  totalBuyers: number
+  since: string
+  until: string
+  bySource:   UtmSalesAttribution[]
+  byMedium:   UtmSalesAttribution[]
+  byCampaign: UtmSalesAttribution[]
+  byContent:  UtmSalesAttribution[]
+}
+
 // ─── Tipos de estado do hook ─────────────────────────────────────────────────
 
 export type FetchStatus = 'idle' | 'loading' | 'success' | 'error'

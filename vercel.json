@@ -9,6 +9,7 @@
     "api/refresh-monthly-cache.ts": { "maxDuration": 60 },
     "api/manychat-monthly.ts": { "maxDuration": 10 },
     "api/launch-data.ts": { "maxDuration": 30 },
+    "api/launch-sales-utms.ts": { "maxDuration": 60 },
     "api/meta-spend.ts": { "maxDuration": 30 },
     "api/dashboard-data.ts": { "maxDuration": 60 },
     "api/meta-ads-data.ts": { "maxDuration": 60 },

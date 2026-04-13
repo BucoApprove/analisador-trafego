@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
-import type { LaunchData, GoalsData, RawLaunchResponse } from './types'
+import type { LaunchData, GoalsData, RawLaunchResponse, SalesUtmData, UtmSalesAttribution } from './types'
 import {
   SectionHeader, TabLoading, TabError,
   ChartTooltip, CHART_COLORS,
@@ -61,6 +61,8 @@ function UtmTable({
   hint,
   getCpl,
   cplNote,
+  salesRows,
+  totalBuyers,
 }: {
   title: string
   rows: { name: string; value: number }[]
@@ -69,13 +71,34 @@ function UtmTable({
   hint?: string
   getCpl?: (name: string, leads: number) => number | null
   cplNote?: string
+  salesRows?: UtmSalesAttribution[]
+  totalBuyers?: number
 }) {
   const [filter, setFilter] = useState('')
   const filtered = filter ? rows.filter(r => r.name.toLowerCase().includes(filter.toLowerCase())) : rows
   const maxVal = Math.max(...rows.map(r => r.value), 1)
+  const hasSales = salesRows && salesRows.length > 0
+
+  // Mapeia utm value → atribuição de vendas (case-insensitive)
+  const salesMap = new Map<string, UtmSalesAttribution>()
+  if (salesRows) {
+    for (const s of salesRows) salesMap.set(s.name.toLowerCase(), s)
+  }
+
   return (
     <div>
       <SectionHeader title={title} description={hint} />
+      {hasSales && totalBuyers != null && (
+        <p className="mb-1 text-[10px] text-muted-foreground">
+          {totalBuyers} comprador(es) encontrado(s) no período
+          {' · '}
+          <span title="Em algum momento tiveram essa UTM">Todos</span>
+          {' / '}
+          <span title="Última UTM registrada antes da compra">Última UTM</span>
+          {' / '}
+          <span title="UTM de origem do lead na base">Origem</span>
+        </p>
+      )}
       <div className="mb-2">
         <input
           type="text"
@@ -93,6 +116,11 @@ function UtmTable({
               <th className="px-3 py-2 text-right font-medium">Leads</th>
               <th className="px-3 py-2 text-right font-medium">%</th>
               {getCpl && <th className="px-3 py-2 text-right font-medium">CPL</th>}
+              {hasSales && (
+                <th className="px-3 py-2 text-right font-medium text-xs" title="Vendas: Qualquer interação / Última UTM antes da compra / UTM de origem">
+                  Vendas
+                </th>
+              )}
               <th className="px-3 py-2 w-24"></th>
             </tr>
           </thead>
@@ -100,6 +128,7 @@ function UtmTable({
             {filtered.map(r => {
               const pct = total > 0 ? (r.value / total) * 100 : 0
               const cpl = getCpl ? getCpl(r.name, r.value) : null
+              const sales = hasSales ? salesMap.get(r.name.toLowerCase()) : null
               return (
                 <tr key={r.name} className="hover:bg-muted/40">
                   <td className="px-3 py-1.5 truncate max-w-[200px] font-medium" title={r.name}>{r.name}</td>
@@ -110,6 +139,21 @@ function UtmTable({
                       {cpl != null
                         ? <span className="font-medium" style={{ color: CHART_COLORS[4] }}>R$ {cpl.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                         : <span className="text-muted-foreground">—</span>}
+                    </td>
+                  )}
+                  {hasSales && (
+                    <td className="px-3 py-1.5 text-right tabular-nums whitespace-nowrap">
+                      {sales
+                        ? (
+                          <span className="inline-flex items-center gap-1 text-xs">
+                            <span className="font-semibold" style={{ color: CHART_COLORS[0] }} title="Em algum momento tiveram essa UTM">{sales.anyTime}</span>
+                            <span className="text-muted-foreground">/</span>
+                            <span className="font-semibold" style={{ color: CHART_COLORS[2] }} title="Última UTM antes da compra">{sales.lastBefore}</span>
+                            <span className="text-muted-foreground">/</span>
+                            <span className="font-semibold" style={{ color: CHART_COLORS[3] }} title="UTM de origem">{sales.origin}</span>
+                          </span>
+                        )
+                        : <span className="text-muted-foreground">— / — / —</span>}
                     </td>
                   )}
                   <td className="px-3 py-1.5">
@@ -137,6 +181,7 @@ export default function TabBA25({ token, enabled }: Props) {
   const [status, setStatus] = useState<'idle' | 'loading' | 'error'>('idle')
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
   const [goals, setGoals] = useState<GoalsData | null>(null)
+  const [salesUtmData, setSalesUtmData] = useState<SalesUtmData | null>(null)
 
   const loadGoals = useCallback(async () => {
     try {
@@ -155,10 +200,13 @@ export default function TabBA25({ token, enabled }: Props) {
       const bqUrl = `/api/launch-data?prefix=${encodeURIComponent(FIXED_PREFIX)}&since=${since}&until=${until}&broadSearch=true`
       const metaUrl = `/api/meta-spend?since=${since}&until=${until}&spendFilter=${encodeURIComponent(FIXED_SPEND_FILTER)}&orFilter=${encodeURIComponent(FIXED_OR_FILTER)}`
 
+      const salesUrl = `/api/launch-sales-utms?since=${since}&until=${until}`
+
       const t0 = Date.now()
-      const [bqRes, metaRes] = await Promise.all([
+      const [bqRes, metaRes, salesRes] = await Promise.all([
         fetch(bqUrl, { headers }),
         fetch(metaUrl, { headers }),
+        fetch(salesUrl, { headers }),
       ])
       console.log(`[BA25] BQ: ${bqRes.status} | Meta: ${metaRes.status} | ${Date.now() - t0}ms`)
 
@@ -270,6 +318,14 @@ export default function TabBA25({ token, enabled }: Props) {
         const metaBody = await metaRes.json().catch(() => ({}))
         console.warn(`[BA25] Meta falhou ${metaRes.status}:`, metaBody)
         setData(processed)
+      }
+
+      if (salesRes.ok) {
+        const salesData: SalesUtmData = await salesRes.json()
+        setSalesUtmData(salesData)
+      } else {
+        console.warn(`[BA25] Sales UTMs falhou ${salesRes.status}`)
+        setSalesUtmData(null)
       }
 
       setStatus('idle')
@@ -680,6 +736,8 @@ export default function TabBA25({ token, enabled }: Props) {
                     color={CHART_COLORS[0]}
                     getCpl={makeGetCpl(data.spendByUtm?.source)}
                     cplNote="CPL calculado a partir do gasto real dos anúncios com esse utm_source no período."
+                    salesRows={salesUtmData?.bySource}
+                    totalBuyers={salesUtmData?.totalBuyers}
                   />
                 )}
                 {data.byMedium.length > 0 && (
@@ -691,6 +749,8 @@ export default function TabBA25({ token, enabled }: Props) {
                     hint="No BA25 corresponde ao nome do conjunto de anúncios (adset), ex: Env7d_Visitantes180d."
                     getCpl={makeGetCpl(data.spendByUtm?.medium)}
                     cplNote="CPL calculado a partir do gasto real por conjunto de anúncios (adset) no período."
+                    salesRows={salesUtmData?.byMedium}
+                    totalBuyers={salesUtmData?.totalBuyers}
                   />
                 )}
                 {data.byCampaign.length > 0 && (
@@ -701,6 +761,8 @@ export default function TabBA25({ token, enabled }: Props) {
                     color={CHART_COLORS[2]}
                     getCpl={makeGetCpl(data.spendByUtm?.campaign)}
                     cplNote="CPL calculado a partir do gasto real da campanha no período."
+                    salesRows={salesUtmData?.byCampaign}
+                    totalBuyers={salesUtmData?.totalBuyers}
                   />
                 )}
                 {data.byContent.filter(r => r.name !== '(não informado)').length > 0 && (
@@ -712,6 +774,8 @@ export default function TabBA25({ token, enabled }: Props) {
                     hint="No BA25 corresponde ao nome do anúncio (ad), ex: BA25_Ad_Captura_22."
                     getCpl={makeGetCpl(data.spendByUtm?.content)}
                     cplNote="CPL calculado a partir do gasto real por anúncio no período."
+                    salesRows={salesUtmData?.byContent}
+                    totalBuyers={salesUtmData?.totalBuyers}
                   />
                 )}
               </div>
