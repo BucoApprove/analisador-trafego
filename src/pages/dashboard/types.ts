@@ -235,6 +235,185 @@ export interface SalesUtmData {
   byContent:  UtmSalesAttribution[]
 }
 
+// ─── Vendas (Hotmart/Greenn) ─────────────────────────────────────────────────
+
+export interface VendaRow {
+  txnId: string
+  dataPedido: string | null
+  dataAprovacao: string | null
+  nomeComprador: string
+  emailComprador: string
+  telefone: string | null
+  cidade: string | null
+  estado: string | null
+  produto: string
+  valorProduto: number | null
+  valorPago: number | null
+  status: string
+  metodoPagamento: string | null
+  parcelas: string | null
+}
+
+export interface VendasMetrics {
+  total: number
+  uniqueBuyers: number
+  revenue: number
+  distinctProducts: number
+}
+
+export interface VendasFilters {
+  statuses: string[]
+  products: string[]
+  states: string[]
+  paymentMethods: string[]
+}
+
+export interface VendasData {
+  vendas: VendaRow[]
+  total: number
+  nextCursor: string | null
+  metrics: VendasMetrics
+  filters: VendasFilters
+}
+
+// ─── Cruzamento de Produtos ──────────────────────────────────────────────────
+
+export interface CruzamentoSummary {
+  totalGrupoA: number
+  totalProdutoB: number
+  compraramAmbos: number
+  bPrimeiro: number
+  mesmaDia: number
+  taxaConversao: string
+  mediaDiasAtoB: number | null
+}
+
+export interface CruzamentoRow {
+  nome: string
+  email: string
+  produtoA: string
+  dataA: string | null
+  dataB: string | null
+  diasEntre: number | null
+  sequencia: string
+}
+
+export interface CruzamentoData {
+  summary: CruzamentoSummary
+  intersection: CruzamentoRow[]
+  bFirst: CruzamentoRow[]
+  onlyACount: number
+  onlyBCount: number
+  products: string[]
+}
+
+// ─── Análises Cruzadas ───────────────────────────────────────────────────────
+
+export interface LeadToCompraRow {
+  nome: string
+  email: string
+  dataLead: string
+  dataCompra: string
+  dias: number
+}
+
+export interface LeadToCompraResult {
+  count: number
+  media: number | null
+  mediana: number | null
+  min: number | null
+  max: number | null
+  rows: LeadToCompraRow[]
+}
+
+export interface AllProductsLTCRow {
+  produto: string
+  leadsQueCompraram: number
+  mediana: number
+  minimo: number
+  maximo: number
+  media: number
+}
+
+export interface AvgTagsResult {
+  count: number
+  media: number
+  mediana: number
+  max: number
+  distribution: { tags: number; count: number }[]
+}
+
+export interface UtmContentRow {
+  utmContent: string
+  leadsUnicos: number
+}
+
+export interface FirstEntryResult {
+  byTag: { category: string; compradores: number }[]
+  byForm: { category: string; compradores: number }[]
+}
+
+export interface UtmFunnelRow {
+  utm: string
+  leads: number
+  compradores: number
+  taxaConversao: number
+}
+
+export interface BuyerTagRow {
+  tag: string
+  compradores: number
+  pct: number
+}
+
+export interface BehaviorTagResult {
+  count: number
+  soAntes: number
+  soDepois: number
+  ambos: number
+  nenhum: number
+  mediaAntes: number
+  mediaDepois: number
+  products: { product: string; antes: number; depois: number }[]
+}
+
+export interface CrossAnalysisData {
+  leadToCompra: LeadToCompraResult
+  allProductsLTC: AllProductsLTCRow[]
+  avgTags: AvgTagsResult
+  utmContent: UtmContentRow[]
+  firstEntry: FirstEntryResult
+  utmFunnel: Record<string, UtmFunnelRow[]>
+  buyerTags: BuyerTagRow[]
+  availableTags: string[]
+  availableProducts: string[]
+}
+
+// ─── Análise de Leads (UTM + Comportamento) ──────────────────────────────────
+
+export interface LeadsUTMRow {
+  value: string
+  count: number
+}
+
+export interface LeadsUTMData {
+  utmSource: LeadsUTMRow[]
+  utmCampaign: LeadsUTMRow[]
+  utmMedium: LeadsUTMRow[]
+  utmContent: LeadsUTMRow[]
+}
+
+export interface LeadsBehaviorData {
+  total: number
+  soAntes: number
+  soDepois: number
+  ambos: number
+  nenhum: number
+  mediaAntes: number
+  mediaDepois: number
+  products: { product: string; antes: number; depois: number }[]
+}
+
 // ─── Tipos de estado do hook ─────────────────────────────────────────────────
 
 export type FetchStatus = 'idle' | 'loading' | 'success' | 'error'

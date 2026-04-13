@@ -3,6 +3,7 @@ import { Tabs, TabsContent } from '@/components/ui/tabs'
 import {
   LogOut, BarChart2, TrendingUp, Users, Camera, Mail,
   Search, Zap, Menu, X, Target, Settings, PieChart, UserCheck,
+  ShoppingCart, GitMerge, Activity,
 } from 'lucide-react'
 import TabVisaoGeral from './TabVisaoGeral'
 import TabLancamento from './TabLancamento'
@@ -15,6 +16,9 @@ import TabPaidTraffic from './TabPaidTraffic'
 import TabPesquisa from './TabPesquisa'
 import TabMetasMensais from './TabMetasMensais'
 import TabInstagramGestor from './TabInstagramGestor'
+import TabVendas from './TabVendas'
+import TabCruzamento from './TabCruzamento'
+import TabAnalisesCruzadas from './TabAnalisesCruzadas'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -34,15 +38,18 @@ interface NavItem {
 // ─── Navigation config ────────────────────────────────────────────────────────
 
 const USER_NAV: NavItem[] = [
-  { id: 'ba25',        label: 'BA25 🚀',     icon: BarChart2  },
-  { id: 'visao-geral', label: 'Visão Geral', icon: PieChart   },
-  { id: 'campanhas',   label: 'Campanhas',   icon: TrendingUp },
-  { id: 'lancamento',  label: 'Lançamento',  icon: Zap        },
-  { id: 'leads',       label: 'Leads',       icon: Users      },
-  { id: 'inscritos',   label: 'Inscritos',   icon: UserCheck  },
-  { id: 'instagram',   label: 'Instagram',   icon: Camera     },
-  { id: 'email',       label: 'Email',       icon: Mail       },
-  { id: 'pesquisa',    label: 'Pesquisa',    icon: Search     },
+  { id: 'ba25',        label: 'BA25 🚀',     icon: BarChart2    },
+  { id: 'visao-geral', label: 'Visão Geral', icon: PieChart     },
+  { id: 'campanhas',   label: 'Campanhas',   icon: TrendingUp   },
+  { id: 'lancamento',  label: 'Lançamento',  icon: Zap          },
+  { id: 'leads',       label: 'Leads',       icon: Users        },
+  { id: 'inscritos',   label: 'Inscritos',   icon: UserCheck    },
+  { id: 'instagram',   label: 'Instagram',   icon: Camera       },
+  { id: 'email',       label: 'Email',       icon: Mail         },
+  { id: 'pesquisa',    label: 'Pesquisa',    icon: Search       },
+  { id: 'vendas',      label: 'Vendas',      icon: ShoppingCart },
+  { id: 'cruzamento',  label: 'Cruzamento',  icon: GitMerge     },
+  { id: 'analises',    label: 'Análises',    icon: Activity     },
 ]
 
 const ADMIN_NAV: NavItem[] = [
@@ -279,6 +286,15 @@ export default function DashboardLayout({ token, role, userName, onLogout }: Das
             </TabsContent>
             <TabsContent value="pesquisa" className="mt-0">
               <TabPesquisa token={token} enabled={activeTab === 'pesquisa'} />
+            </TabsContent>
+            <TabsContent value="vendas" className="mt-0">
+              <TabVendas token={token} enabled={activeTab === 'vendas'} />
+            </TabsContent>
+            <TabsContent value="cruzamento" className="mt-0">
+              <TabCruzamento token={token} enabled={activeTab === 'cruzamento'} />
+            </TabsContent>
+            <TabsContent value="analises" className="mt-0">
+              <TabAnalisesCruzadas token={token} enabled={activeTab === 'analises'} />
             </TabsContent>
             {role === 'admin' && (
               <>
