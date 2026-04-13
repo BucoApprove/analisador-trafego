@@ -1008,10 +1008,10 @@ export default function TabBA25({ token, enabled }: Props) {
                   </p>
                 </div>
                 <div className="p-4 grid grid-cols-2 xl:grid-cols-4 gap-6">
-                  <SalesPieChart title="Fonte (utm_source)"     rows={salesUtmData.bySource}   field="lastBefore" />
-                  <SalesPieChart title="Público (utm_medium)"   rows={salesUtmData.byMedium}   field="lastBefore" />
-                  <SalesPieChart title="Campanha"               rows={salesUtmData.byCampaign} field="lastBefore" />
-                  <SalesPieChart title="Criativo (utm_content)" rows={salesUtmData.byContent}  field="lastBefore" />
+                  <SalesPieChart title="Fonte (utm_source)"     rows={salesUtmData.bySource   ?? []} field="lastBefore" />
+                  <SalesPieChart title="Público (utm_medium)"   rows={salesUtmData.byMedium   ?? []} field="lastBefore" />
+                  <SalesPieChart title="Campanha"               rows={salesUtmData.byCampaign ?? []} field="lastBefore" />
+                  <SalesPieChart title="Criativo (utm_content)" rows={salesUtmData.byContent  ?? []} field="lastBefore" />
                 </div>
               </div>
 
@@ -1024,34 +1024,34 @@ export default function TabBA25({ token, enabled }: Props) {
                   </p>
                 </div>
                 <div className="p-4 grid grid-cols-2 xl:grid-cols-4 gap-6">
-                  <SalesPieChart title="Fonte (utm_source)"     rows={salesUtmData.bySource}   field="origin" />
-                  <SalesPieChart title="Público (utm_medium)"   rows={salesUtmData.byMedium}   field="origin" />
-                  <SalesPieChart title="Campanha"               rows={salesUtmData.byCampaign} field="origin" />
-                  <SalesPieChart title="Criativo (utm_content)" rows={salesUtmData.byContent}  field="origin" />
+                  <SalesPieChart title="Fonte (utm_source)"     rows={salesUtmData.bySource   ?? []} field="origin" />
+                  <SalesPieChart title="Público (utm_medium)"   rows={salesUtmData.byMedium   ?? []} field="origin" />
+                  <SalesPieChart title="Campanha"               rows={salesUtmData.byCampaign ?? []} field="origin" />
+                  <SalesPieChart title="Criativo (utm_content)" rows={salesUtmData.byContent  ?? []} field="origin" />
                 </div>
               </div>
 
               {/* Distribuições: tempo até compra + registros na base */}
-              {(salesUtmData.daysToConvert.length > 0 || salesUtmData.tagCountDist.length > 0) && (
+              {((salesUtmData.daysToConvert?.length ?? 0) > 0 || (salesUtmData.tagCountDist?.length ?? 0) > 0) && (
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
                   <DistributionBarChart
                     title="Tempo na base até a compra"
                     description="Dias entre o primeiro registro do lead e a data de compra"
-                    data={salesUtmData.daysToConvert}
+                    data={salesUtmData.daysToConvert ?? []}
                     color={CHART_COLORS[1]}
                   />
                   <DistributionBarChart
                     title="Registros na base por comprador"
                     description="Número de tags distintas que o comprador possui na base"
-                    data={salesUtmData.tagCountDist}
+                    data={salesUtmData.tagCountDist ?? []}
                     color={CHART_COLORS[2]}
                   />
                 </div>
               )}
 
               {/* Drill-down interativo Campanha → Público → Criativo */}
-              {salesUtmData.drilldown.length > 0 && (
-                <CampaignDrilldown drilldown={salesUtmData.drilldown} />
+              {(salesUtmData.drilldown?.length ?? 0) > 0 && (
+                <CampaignDrilldown drilldown={salesUtmData.drilldown ?? []} />
               )}
             </div>
           )}

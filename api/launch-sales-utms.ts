@@ -166,6 +166,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // ── Computa as 3 métricas por dimensão ────────────────────────────────────
+    const drilldownMap  = new Map<string, number>()
+    const drilldownKeys = new Map<string, { campaign: string; medium: string; content: string }>()
+
     const counters: Record<DimKey, Map<string, DimCounters>> = {
       source:   new Map(),
       medium:   new Map(),
@@ -210,12 +213,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
       }
 
-      // lastBefore
+      // lastBefore + drilldown (campaign > medium > content)
       if (lastBefore) {
         for (const dim of DIMS) {
           const val = lastBefore[dim]
           if (val) getCounter(dim, val).lastBefore.add(email)
         }
+        const c  = lastBefore.campaign || '(sem campanha)'
+        const m  = lastBefore.medium   || '(não informado)'
+        const ct = lastBefore.content  || '(não informado)'
+        const key = `${c}\0${m}\0${ct}`
+        drilldownMap.set(key, (drilldownMap.get(key) ?? 0) + 1)
+        if (!drilldownKeys.has(key)) drilldownKeys.set(key, { campaign: c, medium: m, content: ct })
       }
 
       // origin
@@ -283,6 +292,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .sort((a, b) => b.anyTime - a.anyTime)
     }
 
+    const drilldown = [...drilldownMap.entries()]
+      .map(([key, count]) => ({ ...drilldownKeys.get(key)!, count }))
+      .sort((a, b) => b.count - a.count)
+
     res.json({
       totalBuyers: buyers.size,
       since,
@@ -293,6 +306,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       byContent:    toArray('content'),
       daysToConvert,
       tagCountDist,
+      drilldown,
     })
   } catch (err) {
     console.error('launch-sales-utms error:', err)
