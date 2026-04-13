@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react'
 import type { CrossAnalysisData, BehaviorTagResult } from './types'
-import { KpiCard, SectionHeader, TabLoading, CHART_COLORS } from './components'
+import { KpiCard, SectionHeader, CHART_COLORS } from './components'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Play, X } from 'lucide-react'
+import { Play } from 'lucide-react'
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell,
   PieChart, Pie, Legend,
@@ -38,7 +38,7 @@ function DonutChart({ data }: { data: { name: string; value: number }[] }) {
         <Pie data={data} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={50} outerRadius={80}>
           {data.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
         </Pie>
-        <Tooltip formatter={(v: number) => v.toLocaleString('pt-BR')} />
+        <Tooltip formatter={(v) => (v as number).toLocaleString('pt-BR')} />
         <Legend iconSize={10} wrapperStyle={{ fontSize: 12 }} />
       </PieChart>
     </ResponsiveContainer>

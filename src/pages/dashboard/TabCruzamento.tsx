@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import type { CruzamentoData } from './types'
-import { KpiCard, SectionHeader, TabLoading, TabError, CHART_COLORS } from './components'
+import { KpiCard, SectionHeader, TabLoading, CHART_COLORS } from './components'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { X, Play, ChevronDown, ChevronUp } from 'lucide-react'
@@ -217,7 +217,7 @@ export default function TabCruzamento({ token, enabled }: Props) {
                   <BarChart layout="vertical" data={funnelData} margin={{ left: 10, right: 40 }}>
                     <XAxis type="number" tick={{ fontSize: 11 }} />
                     <YAxis type="category" dataKey="name" width={130} tick={{ fontSize: 11 }} />
-                    <Tooltip formatter={(v: number) => v.toLocaleString('pt-BR')} />
+                    <Tooltip formatter={(v) => (v as number).toLocaleString('pt-BR')} />
                     <Bar dataKey="value" radius={[0, 4, 4, 0]}>
                       {funnelData.map((d, i) => <Cell key={i} fill={d.fill} />)}
                     </Bar>
@@ -233,7 +233,7 @@ export default function TabCruzamento({ token, enabled }: Props) {
                     <Pie data={seqData} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={45} outerRadius={70}>
                       {seqData.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
                     </Pie>
-                    <Tooltip formatter={(v: number) => v.toLocaleString('pt-BR')} />
+                    <Tooltip formatter={(v) => (v as number).toLocaleString('pt-BR')} />
                     <Legend iconSize={10} wrapperStyle={{ fontSize: 12 }} />
                   </PieChart>
                 </ResponsiveContainer>

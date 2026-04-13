@@ -192,7 +192,7 @@ export default function TabLeads({ token, enabled }: Props) {
                 <BarChart layout="vertical" data={utmChartData} margin={{ left: 8, right: 60 }}>
                   <XAxis type="number" tick={{ fontSize: 11 }} />
                   <YAxis type="category" dataKey="value" width={180} tick={{ fontSize: 11 }} />
-                  <Tooltip formatter={(v: number) => `${v.toLocaleString('pt-BR')} leads`} />
+                  <Tooltip formatter={(v) => `${(v as number).toLocaleString('pt-BR')} leads`} />
                   <Bar dataKey="count" fill={CHART_COLORS[0]} radius={[0, 4, 4, 0]} />
                 </BarChart>
               </ResponsiveContainer>
@@ -239,7 +239,7 @@ export default function TabLeads({ token, enabled }: Props) {
                         <Pie data={behaviorPieData} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={45} outerRadius={70}>
                           {behaviorPieData.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
                         </Pie>
-                        <Tooltip formatter={(v: number) => v.toLocaleString('pt-BR')} />
+                        <Tooltip formatter={(v) => (v as number).toLocaleString('pt-BR')} />
                         <Legend iconSize={10} wrapperStyle={{ fontSize: 12 }} />
                       </PieChart>
                     </ResponsiveContainer>
