@@ -238,6 +238,26 @@ export interface SalesUtmData {
   drilldown:     { campaign: string; medium: string; content: string; count: number }[]
 }
 
+// ─── Perfil dos compradores BA25 (UTM + receita + fase) ──────────────────────
+
+export interface BA25ProfileEntry {
+  name:      string
+  buyers:    number
+  revenue:   number
+  avgTicket: number
+}
+
+export interface BA25ProfileData {
+  totalBuyers:    number
+  totalRevenue:   number
+  surveyMatches:  number
+  byCampaign:     BA25ProfileEntry[]
+  byMedium:       BA25ProfileEntry[]
+  byContent:      BA25ProfileEntry[]
+  byPhase:        BA25ProfileEntry[]
+  phaseXCampaign: { phase: string; campaign: string; buyers: number }[]
+}
+
 // ─── Pesquisa de boas-vindas × Compradores ───────────────────────────────────
 
 export interface SurveyBuyersData {

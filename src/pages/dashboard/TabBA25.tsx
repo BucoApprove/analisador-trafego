@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react'
-import type { LaunchData, GoalsData, RawLaunchResponse, SalesUtmData, UtmSalesAttribution, SurveyBuyersData } from './types'
+import type { LaunchData, GoalsData, RawLaunchResponse, SalesUtmData, UtmSalesAttribution, SurveyBuyersData, BA25ProfileData, BA25ProfileEntry } from './types'
 import {
   SectionHeader, TabLoading, TabError,
   ChartTooltip, CHART_COLORS,
@@ -339,6 +339,80 @@ function SurveyBar({ data, color }: { data: { name: string; count: number }[]; c
   )
 }
 
+// ─── Tabela de receita + CPL + ROAS ──────────────────────────────────────────
+
+function RevenueTable({
+  rows,
+  spendMap,
+  leadsMap,
+}: {
+  rows: BA25ProfileEntry[]
+  spendMap?: Record<string, number>
+  leadsMap?: Record<string, number>  // leads por utm (para CPL)
+}) {
+  const brl = (v: number) => v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  const hasSpend = spendMap && Object.keys(spendMap).length > 0
+
+  return (
+    <div className="overflow-x-auto rounded-md border">
+      <table className="w-full text-xs">
+        <thead className="bg-muted/60">
+          <tr>
+            <th className="px-3 py-2 text-left font-medium">UTM</th>
+            <th className="px-3 py-2 text-right font-medium">Vendas</th>
+            <th className="px-3 py-2 text-right font-medium">Receita</th>
+            <th className="px-3 py-2 text-right font-medium">Ticket Médio</th>
+            {hasSpend && <th className="px-3 py-2 text-right font-medium">Investido</th>}
+            {hasSpend && <th className="px-3 py-2 text-right font-medium">ROAS</th>}
+            {hasSpend && leadsMap && <th className="px-3 py-2 text-right font-medium">CPL</th>}
+            {hasSpend && <th className="px-3 py-2 text-right font-medium">CPV</th>}
+          </tr>
+        </thead>
+        <tbody className="divide-y">
+          {rows.map(r => {
+            const spend  = spendMap?.[r.name] ?? null
+            const leads  = leadsMap?.[r.name] ?? null
+            const roas   = spend != null && spend > 0 && r.revenue > 0 ? r.revenue / spend : null
+            const cpl    = spend != null && leads != null && leads > 0 ? spend / leads : null
+            const cpv    = spend != null && spend > 0 && r.buyers > 0 ? spend / r.buyers : null
+            const roasColor = roas == null ? undefined : roas >= 3 ? CHART_COLORS[1] : roas >= 1.5 ? CHART_COLORS[2] : '#c17c74'
+            return (
+              <tr key={r.name} className="hover:bg-muted/40">
+                <td className="px-3 py-1.5 font-medium truncate max-w-[220px]" title={r.name}>{r.name}</td>
+                <td className="px-3 py-1.5 text-right tabular-nums">{r.buyers}</td>
+                <td className="px-3 py-1.5 text-right tabular-nums font-semibold" style={{ color: CHART_COLORS[1] }}>
+                  R$ {brl(r.revenue)}
+                </td>
+                <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">R$ {brl(r.avgTicket)}</td>
+                {hasSpend && (
+                  <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
+                    {spend != null ? `R$ ${brl(spend)}` : '—'}
+                  </td>
+                )}
+                {hasSpend && (
+                  <td className="px-3 py-1.5 text-right tabular-nums font-semibold" style={{ color: roasColor }}>
+                    {roas != null ? `${roas.toFixed(2)}x` : '—'}
+                  </td>
+                )}
+                {hasSpend && leadsMap && (
+                  <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
+                    {cpl != null ? `R$ ${brl(cpl)}` : '—'}
+                  </td>
+                )}
+                {hasSpend && (
+                  <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
+                    {cpv != null ? `R$ ${brl(cpv)}` : '—'}
+                  </td>
+                )}
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
 // ─── Drill-down Campanha → Público → Criativo ─────────────────────────────────
 
 interface DrillRow { campaign: string; medium: string; content: string; count: number }
@@ -476,6 +550,7 @@ export default function TabBA25({ token, enabled }: Props) {
   const [goals, setGoals] = useState<GoalsData | null>(null)
   const [salesUtmData, setSalesUtmData] = useState<SalesUtmData | null>(null)
   const [surveyData,   setSurveyData]   = useState<SurveyBuyersData | null>(null)
+  const [profileData,  setProfileData]  = useState<BA25ProfileData | null>(null)
 
   const loadGoals = useCallback(async () => {
     try {
@@ -495,14 +570,16 @@ export default function TabBA25({ token, enabled }: Props) {
       const metaUrl = `/api/meta-spend?since=${since}&until=${until}&spendFilter=${encodeURIComponent(FIXED_SPEND_FILTER)}&orFilter=${encodeURIComponent(FIXED_OR_FILTER)}`
 
       const salesUrl  = `/api/launch-sales-utms?since=${FIXED_SALES_SINCE}&until=${until}`
-      const surveyUrl = `/api/survey-buyers?since=${FIXED_SALES_SINCE}&until=${until}`
+      const surveyUrl  = `/api/survey-buyers?since=${FIXED_SALES_SINCE}&until=${until}`
+      const profileUrl = `/api/ba25-profile?since=${FIXED_SALES_SINCE}&until=${until}`
 
       const t0 = Date.now()
-      const [bqRes, metaRes, salesRes, surveyRes] = await Promise.all([
+      const [bqRes, metaRes, salesRes, surveyRes, profileRes] = await Promise.all([
         fetch(bqUrl, { headers }),
         fetch(metaUrl, { headers }),
         fetch(salesUrl, { headers }),
         fetch(surveyUrl, { headers }),
+        fetch(profileUrl, { headers }),
       ])
       console.log(`[BA25] BQ: ${bqRes.status} | Meta: ${metaRes.status} | ${Date.now() - t0}ms`)
 
@@ -629,6 +706,13 @@ export default function TabBA25({ token, enabled }: Props) {
       } else {
         console.warn(`[BA25] Survey falhou ${surveyRes.status}`)
         setSurveyData(null)
+      }
+
+      if (profileRes.ok) {
+        setProfileData(await profileRes.json())
+      } else {
+        console.warn(`[BA25] Profile falhou ${profileRes.status}`)
+        setProfileData(null)
       }
 
       setStatus('idle')
@@ -1122,6 +1206,142 @@ export default function TabBA25({ token, enabled }: Props) {
               )}
             </div>
           )}
+
+          {/* Receita por UTM + CPV por Fase */}
+          {profileData && profileData.totalBuyers > 0 && (() => {
+            const brl = (v: number) => v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+
+            // Mapas de spend e leads por UTM (do meta-spend, já disponível em data)
+            const spendCampaign = data?.spendByUtm?.campaign ?? {}
+            const spendMedium   = data?.spendByUtm?.medium   ?? {}
+            const spendContent  = data?.spendByUtm?.content  ?? {}
+
+            // Mapa de leads por UTM (para CPL)
+            const leadsFromArr = (arr: { name: string; value: number }[]) =>
+              Object.fromEntries(arr.map(r => [r.name, r.value]))
+            const leadsCampaign = leadsFromArr(data?.byCampaign ?? [])
+            const leadsMedium   = leadsFromArr(data?.byMedium   ?? [])
+            const leadsContent  = leadsFromArr(data?.byContent  ?? [])
+
+            // CPV por fase via atribuição proporcional (fase × campanha × spend)
+            const campaignBuyersMap: Record<string, number> = {}
+            for (const c of profileData.byCampaign) campaignBuyersMap[c.name] = c.buyers
+
+            const phaseSpend: Record<string, number> = {}
+            for (const { phase, campaign, buyers } of profileData.phaseXCampaign) {
+              const totalFromCampaign = campaignBuyersMap[campaign] ?? 1
+              const spend = spendCampaign[campaign] ?? 0
+              phaseSpend[phase] = (phaseSpend[phase] ?? 0) + spend * (buyers / totalFromCampaign)
+            }
+
+            const totalSpend  = data?.metaSpend ?? 0
+            const globalCpv   = profileData.totalBuyers > 0 ? totalSpend / profileData.totalBuyers : null
+
+            return (
+              <div className="space-y-3">
+                {/* Header */}
+                <div className="rounded-lg border bg-card overflow-hidden">
+                  <div className="px-4 py-2.5 border-b bg-muted/40 flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <p className="text-sm font-semibold">Receita por UTM — CPL · ROAS · CPV</p>
+                      <p className="text-xs text-muted-foreground">
+                        {profileData.totalBuyers} compradores · Receita total: R$ {brl(profileData.totalRevenue)}
+                        {globalCpv != null && ` · CPV global: R$ ${brl(globalCpv)}`}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="p-4 space-y-5">
+                    {profileData.byCampaign.length > 0 && (
+                      <div>
+                        <p className="text-xs font-semibold mb-2 text-muted-foreground uppercase tracking-wide">Por Campanha (utm_campaign)</p>
+                        <RevenueTable
+                          rows={profileData.byCampaign}
+                          spendMap={spendCampaign}
+                          leadsMap={leadsCampaign}
+                        />
+                      </div>
+                    )}
+                    {profileData.byMedium.length > 0 && (
+                      <div>
+                        <p className="text-xs font-semibold mb-2 text-muted-foreground uppercase tracking-wide">Por Público (utm_medium)</p>
+                        <RevenueTable
+                          rows={profileData.byMedium}
+                          spendMap={spendMedium}
+                          leadsMap={leadsMedium}
+                        />
+                      </div>
+                    )}
+                    {profileData.byContent.length > 0 && (
+                      <div>
+                        <p className="text-xs font-semibold mb-2 text-muted-foreground uppercase tracking-wide">Por Criativo (utm_content)</p>
+                        <RevenueTable
+                          rows={profileData.byContent}
+                          spendMap={spendContent}
+                          leadsMap={leadsContent}
+                        />
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* CPV por fase */}
+                {profileData.byPhase.length > 0 && (
+                  <div className="rounded-lg border bg-card overflow-hidden">
+                    <div className="px-4 py-2.5 border-b bg-muted/40">
+                      <p className="text-sm font-semibold">CPV por Fase de Formação</p>
+                      <p className="text-xs text-muted-foreground">
+                        {profileData.surveyMatches} de {profileData.totalBuyers} compradores responderam a pesquisa
+                        {' · '}CPV via atribuição proporcional à campanha de entrada
+                      </p>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-xs">
+                        <thead className="bg-muted/60">
+                          <tr>
+                            <th className="px-3 py-2 text-left font-medium">Fase de Formação</th>
+                            <th className="px-3 py-2 text-right font-medium">Vendas</th>
+                            <th className="px-3 py-2 text-right font-medium">%</th>
+                            <th className="px-3 py-2 text-right font-medium">Receita</th>
+                            <th className="px-3 py-2 text-right font-medium">Ticket Médio</th>
+                            {totalSpend > 0 && <th className="px-3 py-2 text-right font-medium">CPV (atrib.)</th>}
+                            <th className="px-3 py-2 w-24"></th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y">
+                          {profileData.byPhase.map(p => {
+                            const cpv = phaseSpend[p.name] != null && p.buyers > 0
+                              ? phaseSpend[p.name] / p.buyers : null
+                            const pct = profileData.surveyMatches > 0 ? (p.buyers / profileData.surveyMatches) * 100 : 0
+                            return (
+                              <tr key={p.name} className="hover:bg-muted/40">
+                                <td className="px-3 py-2 font-medium">{p.name}</td>
+                                <td className="px-3 py-2 text-right tabular-nums">{p.buyers}</td>
+                                <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">{pct.toFixed(1)}%</td>
+                                <td className="px-3 py-2 text-right tabular-nums font-semibold" style={{ color: CHART_COLORS[1] }}>
+                                  R$ {brl(p.revenue)}
+                                </td>
+                                <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">R$ {brl(p.avgTicket)}</td>
+                                {totalSpend > 0 && (
+                                  <td className="px-3 py-2 text-right tabular-nums font-semibold" style={{ color: CHART_COLORS[0] }}>
+                                    {cpv != null ? `R$ ${brl(cpv)}` : '—'}
+                                  </td>
+                                )}
+                                <td className="px-3 py-2">
+                                  <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+                                    <div className="h-full rounded-full" style={{ width: `${pct}%`, backgroundColor: CHART_COLORS[2] }} />
+                                  </div>
+                                </td>
+                              </tr>
+                            )
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )
+          })()}
 
           {/* Acordeão: UTMs + Evolução diária + Campanhas */}
           <div className="space-y-2">
