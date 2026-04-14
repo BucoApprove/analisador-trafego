@@ -378,41 +378,37 @@ function CampaignDrilldown({ drilldown }: { drilldown: DrillRow[] }) {
   const [selCampaign, setSelCampaign] = useState<string | null>(null)
   const [selMedium,   setSelMedium]   = useState<string | null>(null)
 
+  // Campaigns: se um medium estiver selecionado, filtra por ele
   const campaigns = useMemo(() => {
+    const src = selMedium ? drilldown.filter(d => d.medium === selMedium) : drilldown
     const m = new Map<string, number>()
-    for (const d of drilldown) m.set(d.campaign, (m.get(d.campaign) ?? 0) + d.count)
+    for (const d of src) m.set(d.campaign, (m.get(d.campaign) ?? 0) + d.count)
     return [...m.entries()].map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count)
-  }, [drilldown])
+  }, [drilldown, selMedium])
 
+  // Mediums: se uma campaign estiver selecionada, filtra por ela
   const mediums = useMemo(() => {
-    if (!selCampaign) return []
+    const src = selCampaign ? drilldown.filter(d => d.campaign === selCampaign) : drilldown
     const m = new Map<string, number>()
-    for (const d of drilldown.filter(d => d.campaign === selCampaign))
-      m.set(d.medium, (m.get(d.medium) ?? 0) + d.count)
+    for (const d of src) m.set(d.medium, (m.get(d.medium) ?? 0) + d.count)
     return [...m.entries()].map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count)
   }, [drilldown, selCampaign])
 
+  // Contents: filtra por campaign e/ou medium se selecionados
   const contents = useMemo(() => {
-    if (!selCampaign || !selMedium) return []
-    return drilldown
-      .filter(d => d.campaign === selCampaign && d.medium === selMedium)
-      .map(d => ({ name: d.content, count: d.count }))
-      .sort((a, b) => b.count - a.count)
+    let src = drilldown
+    if (selCampaign) src = src.filter(d => d.campaign === selCampaign)
+    if (selMedium)   src = src.filter(d => d.medium   === selMedium)
+    const m = new Map<string, number>()
+    for (const d of src) m.set(d.content, (m.get(d.content) ?? 0) + d.count)
+    return [...m.entries()].map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count)
   }, [drilldown, selCampaign, selMedium])
-
-  const handleCampaign = (name: string) => {
-    setSelCampaign(prev => { if (prev === name) { setSelMedium(null); return null } return name })
-    setSelMedium(null)
-  }
-  const handleMedium = (name: string) => {
-    setSelMedium(prev => prev === name ? null : name)
-  }
 
   return (
     <div className="rounded-lg border bg-card overflow-hidden">
       <div className="px-4 py-2.5 border-b bg-muted/40">
-        <p className="text-sm font-semibold">Drill-down: Campanha → Público → Criativo</p>
-        <p className="text-xs text-muted-foreground">Última UTM antes da compra · clique para explorar a hierarquia</p>
+        <p className="text-sm font-semibold">Drill-down: Campanha · Público · Criativo</p>
+        <p className="text-xs text-muted-foreground">Última UTM antes da compra · clique em qualquer coluna para cruzar os filtros</p>
       </div>
       <div className="p-4 flex gap-0 divide-x">
         <div className="pr-4 flex-1 min-w-0">
@@ -420,7 +416,7 @@ function CampaignDrilldown({ drilldown }: { drilldown: DrillRow[] }) {
             title="Campanha (utm_campaign)"
             items={campaigns}
             selected={selCampaign}
-            onSelect={handleCampaign}
+            onSelect={name => setSelCampaign(prev => prev === name ? null : name)}
           />
         </div>
         <div className="px-4 flex-1 min-w-0">
@@ -428,8 +424,7 @@ function CampaignDrilldown({ drilldown }: { drilldown: DrillRow[] }) {
             title="Público (utm_medium)"
             items={mediums}
             selected={selMedium}
-            onSelect={handleMedium}
-            placeholder="← Selecione uma campanha"
+            onSelect={name => setSelMedium(prev => prev === name ? null : name)}
           />
         </div>
         <div className="pl-4 flex-1 min-w-0">
@@ -438,7 +433,6 @@ function CampaignDrilldown({ drilldown }: { drilldown: DrillRow[] }) {
             items={contents}
             selected={null}
             onSelect={() => {}}
-            placeholder={selCampaign ? '← Selecione um público' : '← Selecione uma campanha'}
           />
         </div>
       </div>
