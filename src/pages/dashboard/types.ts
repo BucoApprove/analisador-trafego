@@ -238,6 +238,15 @@ export interface SalesUtmData {
   drilldown:     { campaign: string; medium: string; content: string; count: number }[]
 }
 
+// ─── Pesquisa de boas-vindas × Compradores ───────────────────────────────────
+
+export interface SurveyBuyersData {
+  totalBuyers: number
+  surveyMatches: number
+  byAge:   { name: string; count: number }[]
+  byPhase: { name: string; count: number }[]
+}
+
 // ─── Vendas (Hotmart/Greenn) ─────────────────────────────────────────────────
 
 export interface VendaRow {

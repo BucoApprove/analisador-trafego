@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react'
-import type { LaunchData, GoalsData, RawLaunchResponse, SalesUtmData, UtmSalesAttribution } from './types'
+import type { LaunchData, GoalsData, RawLaunchResponse, SalesUtmData, UtmSalesAttribution, SurveyBuyersData } from './types'
 import {
   SectionHeader, TabLoading, TabError,
   ChartTooltip, CHART_COLORS,
@@ -305,6 +305,40 @@ function DistributionBarChart({
   )
 }
 
+// ─── Pesquisa de boas-vindas ──────────────────────────────────────────────────
+
+function SurveyBar({ data, color }: { data: { name: string; count: number }[]; color: string }) {
+  const max   = Math.max(...data.map(d => d.count), 1)
+  const total = data.reduce((s, d) => s + d.count, 0)
+  return (
+    <div className="space-y-2">
+      {data.map(d => {
+        const pct = total > 0 ? ((d.count / total) * 100) : 0
+        return (
+          <div key={d.name} className="flex items-center gap-2 text-xs">
+            <span
+              className="w-44 text-right text-[11px] text-muted-foreground flex-shrink-0 leading-tight"
+              title={d.name}
+            >
+              {d.name}
+            </span>
+            <div className="flex-1 h-3 rounded-full bg-muted overflow-hidden">
+              <div
+                className="h-full rounded-full transition-all"
+                style={{ width: `${(d.count / max) * 100}%`, backgroundColor: color }}
+              />
+            </div>
+            <span className="tabular-nums text-[11px] font-semibold flex-shrink-0 w-16 text-right">
+              {d.count}
+              <span className="font-normal text-muted-foreground ml-0.5">({pct.toFixed(0)}%)</span>
+            </span>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 // ─── Drill-down Campanha → Público → Criativo ─────────────────────────────────
 
 interface DrillRow { campaign: string; medium: string; content: string; count: number }
@@ -441,6 +475,7 @@ export default function TabBA25({ token, enabled }: Props) {
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
   const [goals, setGoals] = useState<GoalsData | null>(null)
   const [salesUtmData, setSalesUtmData] = useState<SalesUtmData | null>(null)
+  const [surveyData,   setSurveyData]   = useState<SurveyBuyersData | null>(null)
 
   const loadGoals = useCallback(async () => {
     try {
@@ -459,13 +494,15 @@ export default function TabBA25({ token, enabled }: Props) {
       const bqUrl = `/api/launch-data?prefix=${encodeURIComponent(FIXED_PREFIX)}&since=${since}&until=${until}&broadSearch=true`
       const metaUrl = `/api/meta-spend?since=${since}&until=${until}&spendFilter=${encodeURIComponent(FIXED_SPEND_FILTER)}&orFilter=${encodeURIComponent(FIXED_OR_FILTER)}`
 
-      const salesUrl = `/api/launch-sales-utms?since=${FIXED_SALES_SINCE}&until=${until}`
+      const salesUrl  = `/api/launch-sales-utms?since=${FIXED_SALES_SINCE}&until=${until}`
+      const surveyUrl = `/api/survey-buyers?since=${FIXED_SALES_SINCE}&until=${until}`
 
       const t0 = Date.now()
-      const [bqRes, metaRes, salesRes] = await Promise.all([
+      const [bqRes, metaRes, salesRes, surveyRes] = await Promise.all([
         fetch(bqUrl, { headers }),
         fetch(metaUrl, { headers }),
         fetch(salesUrl, { headers }),
+        fetch(surveyUrl, { headers }),
       ])
       console.log(`[BA25] BQ: ${bqRes.status} | Meta: ${metaRes.status} | ${Date.now() - t0}ms`)
 
@@ -585,6 +622,13 @@ export default function TabBA25({ token, enabled }: Props) {
       } else {
         console.warn(`[BA25] Sales UTMs falhou ${salesRes.status}`)
         setSalesUtmData(null)
+      }
+
+      if (surveyRes.ok) {
+        setSurveyData(await surveyRes.json())
+      } else {
+        console.warn(`[BA25] Survey falhou ${surveyRes.status}`)
+        setSurveyData(null)
       }
 
       setStatus('idle')
@@ -1039,6 +1083,42 @@ export default function TabBA25({ token, enabled }: Props) {
               {/* Drill-down interativo Campanha → Público → Criativo */}
               {(salesUtmData.drilldown?.length ?? 0) > 0 && (
                 <CampaignDrilldown drilldown={salesUtmData.drilldown ?? []} />
+              )}
+            </div>
+          )}
+
+          {/* Pesquisa de boas-vindas × Compradores */}
+          {surveyData && (
+            <div className="rounded-lg border bg-card overflow-hidden">
+              <div className="px-4 py-2.5 border-b bg-muted/40 flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <p className="text-sm font-semibold">Perfil dos Compradores — Pesquisa de Boas-Vindas BA25</p>
+                  <p className="text-xs text-muted-foreground">
+                    {surveyData.surveyMatches > 0
+                      ? `${surveyData.surveyMatches} de ${surveyData.totalBuyers} compradores responderam (${surveyData.totalBuyers > 0 ? Math.round((surveyData.surveyMatches / surveyData.totalBuyers) * 100) : 0}%)`
+                      : `${surveyData.totalBuyers} comprador(es) · nenhum encontrado na pesquisa`}
+                  </p>
+                </div>
+              </div>
+              {surveyData.surveyMatches === 0 ? (
+                <div className="p-6 text-center text-sm text-muted-foreground">
+                  Nenhum comprador encontrado na planilha de pesquisa. Verifique se a planilha está com acesso público e se os e-mails coincidem.
+                </div>
+              ) : (
+                <div className="p-4 grid grid-cols-1 lg:grid-cols-2 gap-8">
+                  {surveyData.byAge.length > 0 && (
+                    <div>
+                      <p className="text-xs font-semibold mb-3 text-muted-foreground uppercase tracking-wide">Qual sua idade?</p>
+                      <SurveyBar data={surveyData.byAge} color={CHART_COLORS[0]} />
+                    </div>
+                  )}
+                  {surveyData.byPhase.length > 0 && (
+                    <div>
+                      <p className="text-xs font-semibold mb-3 text-muted-foreground uppercase tracking-wide">Em que fase da sua formação você está?</p>
+                      <SurveyBar data={surveyData.byPhase} color={CHART_COLORS[2]} />
+                    </div>
+                  )}
+                </div>
               )}
             </div>
           )}
