@@ -79,7 +79,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       bqQuery(`
         SELECT
           LOWER(TRIM(\`${emailCol}\`)) AS email,
-          SUM(IFNULL(Valor_Pago_pelo_Comprador_Sem_Taxas_e_Impostos, 0)) AS total_revenue
+          -- coluna armazenada em centavos na tabela BQ; dividir por 100 → reais
+          SUM(IFNULL(Valor_Pago_pelo_Comprador_Sem_Taxas_e_Impostos, 0)) / 100.0 AS total_revenue
         FROM ${tVendas}
         WHERE Status IN ('COMPLETO', 'APROVADO')
           AND LOWER(TRIM(Nome_do_Produto)) LIKE '%buco%approve%'
