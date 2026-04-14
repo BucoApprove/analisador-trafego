@@ -187,18 +187,11 @@ const PIE_COLORS = [
 function preparePieData(
   rows: UtmSalesAttribution[],
   field: 'lastBefore' | 'origin' | 'anyTime' = 'lastBefore',
-  maxSlices = 15,
 ) {
-  const withSales = rows
+  return rows
     .filter(r => r[field] > 0)
     .sort((a, b) => b[field] - a[field])
-  if (withSales.length === 0) return []
-  if (withSales.length <= maxSlices) {
-    return withSales.map(r => ({ name: r.name, value: r[field] }))
-  }
-  const top = withSales.slice(0, maxSlices - 1)
-  const others = withSales.slice(maxSlices - 1).reduce((s, r) => s + r[field], 0)
-  return [...top.map(r => ({ name: r.name, value: r[field] })), { name: 'Outros', value: others }]
+    .map(r => ({ name: r.name, value: r[field] }))
 }
 
 function SalesPieChart({ title, rows, field = 'lastBefore' }: {
