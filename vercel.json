@@ -8,7 +8,7 @@
     "api/refresh-report-cache.ts": { "maxDuration": 60 },
     "api/refresh-monthly-cache.ts": { "maxDuration": 60 },
     "api/manychat-monthly.ts": { "maxDuration": 10 },
-    "api/launch-data.ts": { "maxDuration": 30 },
+    "api/launch-data.ts": { "maxDuration": 60 },
     "api/launch-sales-utms.ts": { "maxDuration": 60 },
     "api/survey-buyers.ts": { "maxDuration": 30 },
     "api/ba25-profile.ts": { "maxDuration": 60 },
