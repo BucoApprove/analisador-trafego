@@ -79,9 +79,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       bqQuery(`
         SELECT
           LOWER(TRIM(\`${emailCol}\`)) AS email,
-          -- Valor_do_Produto = preço cheio do produto (centavos); MAX por comprador
-          -- evita somar múltiplas parcelas quando o comprador parcelou
-          MAX(IFNULL(Valor_do_Produto, 0)) / 100.0 AS total_revenue
+          -- Valor_do_Produto = valor por parcela (centavos); N__mero_de_Parcelas = qtd
+          -- ticket real = (parcela × n_parcelas) / 100 → reais
+          -- MAX descarta rows duplicadas de cada parcela já aprovada
+          MAX(
+            IFNULL(Valor_do_Produto, 0)
+            * IFNULL(CAST(N__mero_de_Parcelas AS INT64), 1)
+          ) / 100.0 AS total_revenue
         FROM ${tVendas}
         WHERE Status IN ('COMPLETO', 'APROVADO')
           AND LOWER(TRIM(Nome_do_Produto)) LIKE '%buco%approve%'
