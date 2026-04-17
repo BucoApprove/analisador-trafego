@@ -123,7 +123,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const adsetInsightFields = [
     'campaign_id', 'campaign_name', 'adset_id', 'adset_name',
-    'spend', 'actions', 'landing_page_views',
+    'spend', 'actions',
     'video_thruplay_watched_actions', 'video_p25_watched_actions',
   ].join(',')
 
@@ -212,7 +212,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         adsetRow.videoViews25pct = Number(row.video_p25_watched_actions?.[0]?.value ?? 0)
       } else {
         const results          = actionVal(row.actions, ...resultTypes)
-        const landingPageViews = Number(row.landing_page_views ?? 0)
+        const landingPageViews = actionVal(row.actions, 'landing_page_view')
         adsetRow.results       = results
         adsetRow.costPerResult = results > 0 ? spend / results : 0
         if (isLead) {
