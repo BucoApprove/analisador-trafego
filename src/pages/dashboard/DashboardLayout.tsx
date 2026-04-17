@@ -19,6 +19,7 @@ import TabInstagramGestor from './TabInstagramGestor'
 import TabVendas from './TabVendas'
 import TabCruzamento from './TabCruzamento'
 import TabAnalisesCruzadas from './TabAnalisesCruzadas'
+import TabPerpetuo from './TabPerpetuo'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -50,6 +51,7 @@ const USER_NAV: NavItem[] = [
   { id: 'vendas',      label: 'Vendas',      icon: ShoppingCart },
   { id: 'cruzamento',  label: 'Cruzamento',  icon: GitMerge     },
   { id: 'analises',    label: 'Análises',    icon: Activity     },
+  { id: 'perpetuo',    label: 'Perpétuo',    icon: Target       },
 ]
 
 const ADMIN_NAV: NavItem[] = [
@@ -295,6 +297,9 @@ export default function DashboardLayout({ token, role, userName, onLogout }: Das
             </TabsContent>
             <TabsContent value="analises" className="mt-0">
               <TabAnalisesCruzadas token={token} enabled={activeTab === 'analises'} />
+            </TabsContent>
+            <TabsContent value="perpetuo" className="mt-0">
+              <TabPerpetuo token={token} enabled={activeTab === 'perpetuo'} />
             </TabsContent>
             {role === 'admin' && (
               <>
