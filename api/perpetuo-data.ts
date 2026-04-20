@@ -25,6 +25,26 @@ const NAME_FILTERS: Record<string, NameFilter> = {
 
 const VALID_VIEWS = new Set(Object.keys(NAME_FILTERS))
 
+// Deriva os action_types que o Meta usa como "Resultado" para uma campanha,
+// com base no promoted_object retornado pela API — sem precisar hardcodar IDs.
+function getResultTypes(campaign: {
+  objective?: string
+  promoted_object?: { custom_conversion_id?: string; custom_event_type?: string }
+}): string[] {
+  const po = campaign.promoted_object
+  if (po?.custom_conversion_id) {
+    return [`offsite_conversion.custom.${po.custom_conversion_id}`]
+  }
+  const event = po?.custom_event_type ?? ''
+  if (event === 'LEAD')                  return ['lead', 'onsite_conversion.lead_grouped']
+  if (event === 'PURCHASE')              return ['purchase', 'offsite_conversion.fb_pixel_purchase']
+  if (event === 'COMPLETE_REGISTRATION') return ['complete_registration']
+  const obj = campaign.objective ?? ''
+  if (['LEAD_GENERATION', 'OUTCOME_LEADS'].includes(obj))  return ['lead', 'onsite_conversion.lead_grouped']
+  if (['OUTCOME_SALES', 'CONVERSIONS'].includes(obj))      return ['purchase', 'offsite_conversion.fb_pixel_purchase']
+  return ['lead', 'onsite_conversion.lead_grouped']
+}
+
 function matchesFilter(campaignName: string, filter: NameFilter): boolean {
   const lower = campaignName.toLowerCase()
   if (filter.exclude?.some(kw => lower.includes(kw))) return false
@@ -120,9 +140,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const isVideo = view === 'etapa3'
   const isLead  = view === 'etapa2' || view === 'anatomia' || view === 'patologia'
-  const resultTypes = isLead
-    ? ['lead', 'onsite_conversion.lead_grouped']
-    : ['purchase', 'offsite_conversion.fb_pixel_purchase']
 
   const adsetInsightFields = [
     'campaign_id', 'campaign_name', 'adset_id', 'adset_name',
@@ -131,7 +148,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   ].join(',')
 
   const adInsightFields = [
-    'campaign_name', 'adset_id', 'ad_id', 'ad_name', 'spend', 'actions',
+    'campaign_id', 'campaign_name', 'adset_id', 'ad_id', 'ad_name', 'spend', 'actions',
   ].join(',')
 
   try {
@@ -157,11 +174,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     budgetUrl.searchParams.set('access_token',  accessToken)
     budgetUrl.searchParams.set('limit',         '500')
 
-    const [adsetInsights, adInsights, adsetsRaw] = await Promise.all([
+    // ── 4. Campanhas com promoted_object para saber o resultado correto ────────
+    // Inclui todos os status para cobrir campanhas pausadas no período consultado
+    const campaignUrl = new URL(`${META_BASE}/${acctId}/campaigns`)
+    campaignUrl.searchParams.set('fields',           'id,name,objective,promoted_object')
+    campaignUrl.searchParams.set('effective_status', JSON.stringify(['ACTIVE', 'PAUSED', 'ARCHIVED', 'DELETED']))
+    campaignUrl.searchParams.set('access_token',     accessToken)
+    campaignUrl.searchParams.set('limit',            '500')
+
+    const [adsetInsights, adInsights, adsetsRaw, campaignsRaw] = await Promise.all([
       metaGet(adsetUrl),
       metaGet(adUrl),
       metaGet(budgetUrl),
+      metaGet(campaignUrl),
     ])
+
+    // Mapa campaignId → action_types corretos para "Resultado"
+    const campaignResultTypes = new Map<string, string[]>()
+    for (const c of (campaignsRaw.data as any[]) ?? []) {
+      campaignResultTypes.set(c.id as string, getResultTypes(c))
+    }
 
     // Mapa de orçamentos: adsetId → { daily, lifetime }
     type Budget = { daily: number | null; lifetime: number | null }
@@ -198,8 +230,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         lifetimeBudget: budget.lifetime,
         spend,
         ads: (adsByAdset.get(row.adset_id as string) ?? []).map((ad: any): AdRow => {
-          const adSpend   = Number(ad.spend ?? 0)
-          const adResults = isVideo ? 0 : actionVal(ad.actions, ...resultTypes)
+          const adSpend      = Number(ad.spend ?? 0)
+          const adResTypes   = campaignResultTypes.get(ad.campaign_id as string) ?? ['lead']
+          const adResults    = isVideo ? 0 : actionVal(ad.actions, ...adResTypes)
           return {
             adId:          ad.ad_id,
             adName:        ad.ad_name,
@@ -214,7 +247,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         adsetRow.videoViews3s    = Number(row.video_thruplay_watched_actions?.[0]?.value ?? 0)
         adsetRow.videoViews25pct = Number(row.video_p25_watched_actions?.[0]?.value ?? 0)
       } else {
-        const results          = actionVal(row.actions, ...resultTypes)
+        const rowResTypes      = campaignResultTypes.get(row.campaign_id as string) ?? ['lead']
+        const results          = actionVal(row.actions, ...rowResTypes)
         const landingPageViews = actionVal(row.actions, 'landing_page_view')
         adsetRow.results       = results
         adsetRow.costPerResult = results > 0 ? spend / results : 0
