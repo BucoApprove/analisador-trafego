@@ -84,8 +84,8 @@ function UtmBarChart({ data, color }: { data: UtmDist[]; color: string }) {
             tickFormatter={(v: string) => v.length > 24 ? v.slice(0, 24) + '…' : v}
           />
           <Tooltip
-            formatter={(v: number, _: string, props: { payload?: UtmDist }) => [
-              `${v.toLocaleString('pt-BR')} leads (${props.payload?.pct ?? 0}%)`,
+            formatter={(v, _name, props: { payload?: UtmDist }) => [
+              `${Number(v).toLocaleString('pt-BR')} leads (${props.payload?.pct ?? 0}%)`,
               'Leads',
             ]}
           />
