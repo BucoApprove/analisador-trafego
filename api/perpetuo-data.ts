@@ -178,7 +178,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Inclui todos os status para cobrir campanhas pausadas no período consultado
     const campaignUrl = new URL(`${META_BASE}/${acctId}/campaigns`)
     campaignUrl.searchParams.set('fields',           'id,name,objective,promoted_object')
-    campaignUrl.searchParams.set('effective_status', JSON.stringify(['ACTIVE', 'PAUSED', 'ARCHIVED', 'DELETED']))
+    campaignUrl.searchParams.set('effective_status', JSON.stringify(['ACTIVE', 'PAUSED', 'ARCHIVED']))
     campaignUrl.searchParams.set('access_token',     accessToken)
     campaignUrl.searchParams.set('limit',            '500')
 
