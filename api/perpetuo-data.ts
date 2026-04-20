@@ -25,27 +25,35 @@ const NAME_FILTERS: Record<string, NameFilter> = {
 
 const VALID_VIEWS = new Set(Object.keys(NAME_FILTERS))
 
-// Deriva os action_types que o Meta usa como "Resultado" para um adset,
-// com base no promoted_object do adset (onde custom_conversion_id é definido)
-// e no objective da campanha como fallback.
+// Deriva os action_types que o Meta usa como "Resultado" para um adset.
 function getResultTypes(adset: {
   optimization_goal?: string
-  promoted_object?: { custom_conversion_id?: string; custom_event_type?: string }
-}, campaignObjective?: string): string[] {
+  promoted_object?: { custom_conversion_id?: string; custom_event_type?: string; custom_event_str?: string }
+}, campaignObjective?: string, customConvByEvent?: Map<string, string>): string[] {
   const po = adset.promoted_object
+  // Custom conversion explícita (tem ID)
   if (po?.custom_conversion_id) {
     return [`offsite_conversion.custom.${po.custom_conversion_id}`]
   }
+  // Custom event do pixel (custom_event_type=OTHER + custom_event_str)
+  const eventStr = po?.custom_event_str ?? ''
+  if (po?.custom_event_type === 'OTHER' && eventStr) {
+    const ccId = customConvByEvent?.get(eventStr.toLowerCase())
+    if (ccId) return [`offsite_conversion.custom.${ccId}`]
+    return ['offsite_conversion.fb_pixel_custom']
+  }
+  // Evento padrão
   const event = po?.custom_event_type ?? ''
   if (event === 'LEAD')                  return ['lead', 'onsite_conversion.lead_grouped']
   if (event === 'PURCHASE')              return ['purchase', 'offsite_conversion.fb_pixel_purchase']
   if (event === 'COMPLETE_REGISTRATION') return ['complete_registration']
+  // Fallback pelo optimization_goal
   const goal = adset.optimization_goal ?? ''
-  if (['LEAD_GENERATION', 'LEAD'].includes(goal))    return ['lead', 'onsite_conversion.lead_grouped']
-  if (['OFFSITE_CONVERSIONS', 'VALUE'].includes(goal)) return ['purchase', 'offsite_conversion.fb_pixel_purchase']
+  if (['LEAD_GENERATION', 'LEAD'].includes(goal))        return ['lead', 'onsite_conversion.lead_grouped']
+  // Fallback pelo objective da campanha
   const obj = campaignObjective ?? ''
-  if (['LEAD_GENERATION', 'OUTCOME_LEADS'].includes(obj))  return ['lead', 'onsite_conversion.lead_grouped']
-  if (['OUTCOME_SALES', 'CONVERSIONS'].includes(obj))      return ['purchase', 'offsite_conversion.fb_pixel_purchase']
+  if (['LEAD_GENERATION', 'OUTCOME_LEADS'].includes(obj)) return ['lead', 'onsite_conversion.lead_grouped']
+  if (['OUTCOME_SALES', 'CONVERSIONS'].includes(obj))     return ['purchase', 'offsite_conversion.fb_pixel_purchase']
   return ['lead', 'onsite_conversion.lead_grouped']
 }
 
@@ -185,12 +193,34 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     campaignUrl.searchParams.set('access_token',     accessToken)
     campaignUrl.searchParams.set('limit',            '500')
 
-    const [adsetInsights, adInsights, adsetsRaw, campaignsRaw] = await Promise.all([
+    // ── 5. Custom conversions: mapeia custom_event_str → custom_conversion_id ──
+    const customConvUrl = new URL(`${META_BASE}/${acctId}/customconversions`)
+    customConvUrl.searchParams.set('fields',       'id,name,rule')
+    customConvUrl.searchParams.set('access_token', accessToken)
+    customConvUrl.searchParams.set('limit',        '200')
+
+    const [adsetInsights, adInsights, adsetsRaw, campaignsRaw, customConvsRaw] = await Promise.all([
       metaGet(adsetUrl),
       metaGet(adUrl),
       metaGet(budgetUrl),
       metaGet(campaignUrl),
+      metaGet(customConvUrl),
     ])
+
+    // Mapa: eventStr (lowercase) → custom_conversion_id (primeira correspondência)
+    const customConvByEvent = new Map<string, string>()
+    for (const cc of (customConvsRaw.data as any[]) ?? []) {
+      try {
+        const rule = JSON.parse(cc.rule as string ?? '{}')
+        const filters: any[] = rule?.filter?.filters ?? []
+        for (const f of filters) {
+          if (f.field === 'event' && f.operator === '=' && f.value) {
+            const key = (f.value as string).toLowerCase()
+            if (!customConvByEvent.has(key)) customConvByEvent.set(key, cc.id as string)
+          }
+        }
+      } catch { /* rule inválida */ }
+    }
 
     // Mapa campaignId → objective (fallback)
     const campaignObjective = new Map<string, string>()
@@ -210,7 +240,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         lifetime: s.lifetime_budget ? Number(s.lifetime_budget) / 100 : null,
       })
       const obj = campaignObjective.get(s.campaign_id as string)
-      adsetResultTypes.set(s.id as string, getResultTypes(s, obj))
+      adsetResultTypes.set(s.id as string, getResultTypes(s, obj, customConvByEvent))
     }
 
     // Insights de anúncios agrupados por adsetId
@@ -292,6 +322,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           campaign:          adsetInsightRow.campaign_name,
           optimization_goal: s.optimization_goal,
           promoted_object:   s.promoted_object,
+          customConvId:      customConvByEvent.get((s.promoted_object?.custom_event_str ?? '').toLowerCase()),
           resultTypes:       adsetResultTypes.get(s.id as string),
         }
       }
