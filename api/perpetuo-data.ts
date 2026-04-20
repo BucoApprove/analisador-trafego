@@ -12,11 +12,11 @@ const ACCOUNT_IDS: Record<string, string> = {
 interface NameFilter { include: string[]; exclude?: string[] }
 
 const NAME_FILTERS: Record<string, NameFilter> = {
-  etapa1:             { include: ['impulsi', 'boost', 'seguidor'] },
+  etapa1:             { include: ['impulsi', 'boost', 'seguidor', '[instagram] - post'] },
   etapa2:             { include: ['captura', 'aula'], exclude: ['ba25', 'ba 25'] },
   etapa3:             { include: ['relacionamento'], exclude: ['ba25', 'ba 25'] },
-  etapa4:             { include: ['convers'], exclude: ['ba25', 'ba 25'] },
-  etapa5:             { include: ['remarketing', 'retarget'], exclude: ['ba25', 'ba 25'] },
+  etapa4:             { include: ['convers', 'venda'], exclude: ['ba25', 'ba 25'] },
+  etapa5:             { include: ['remarketing', 'retarget', 'rmkt'], exclude: ['ba25', 'ba 25'] },
   anatomia:           { include: ['anatomia'] },
   patologia:          { include: ['patologia'] },
   'lowticket-brasil': { include: ['low ticket brasil', 'lt brasil'] },
