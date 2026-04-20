@@ -324,6 +324,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       campaignMap.get(cid)!.adsets.push(adsetRow)
     }
 
+    // Modo allcampaigns: lista todos os nomes únicos de campanhas (sem filtro) para diagnóstico de filtros
+    if (req.query.allcampaigns === 'true') {
+      const campaignNames = [...new Set(adsetInsightsData.map((r: any) => r.campaign_name as string))].sort()
+      return res.json({ allCampaignNames: campaignNames, total: campaignNames.length, dateRange: { since, until } })
+    }
+
     // Modo debug: retorna todos os action_types distintos para identificar conversões customizadas
     if (req.query.debug === 'true') {
       const actionTypeSummary: Record<string, number> = {}
