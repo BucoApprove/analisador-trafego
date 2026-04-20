@@ -228,6 +228,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       campaignMap.get(cid)!.adsets.push(adsetRow)
     }
 
+    // Modo debug: retorna todos os action_types distintos para identificar conversões customizadas
+    if (req.query.debug === 'true') {
+      const actionTypeSummary: Record<string, number> = {}
+      for (const row of (adsetInsights.data as any[]) ?? []) {
+        if (!matchesFilter(row.campaign_name as string, keywords)) continue
+        for (const action of (row.actions ?? []) as { action_type: string; value: string }[]) {
+          actionTypeSummary[action.action_type] = (actionTypeSummary[action.action_type] ?? 0) + Number(action.value)
+        }
+      }
+      return res.json({ debug: true, actionTypes: actionTypeSummary, dateRange: { since, until } })
+    }
+
     return res.json({
       view,
       campaigns: [...campaignMap.values()],
