@@ -90,6 +90,13 @@ function BudgetCell({ daily, lifetime }: { daily: number | null; lifetime: numbe
   return <span className="text-muted-foreground">—</span>
 }
 
+// Campanhas com esses prefixos são de lançamento (BA25, PPT-BA, etc.)
+const LANCAMENTO_KEYWORDS = ['ba25', 'ppt-ba', 'ba 25']
+function isLancamento(name: string): boolean {
+  const lower = name.toLowerCase()
+  return LANCAMENTO_KEYWORDS.some(kw => lower.includes(kw))
+}
+
 // ─── Table ────────────────────────────────────────────────────────────────────
 
 function CampaignTable({
@@ -348,14 +355,43 @@ export default function TabPerpetuo({ token, enabled }: TabPerpetuoProps) {
       )}
 
       {/* ── Tabelas por campanha ── */}
-      {!loading && data && data.campaigns.map(campaign => (
-        <CampaignTable
-          key={campaign.campaignId}
-          campaign={campaign}
-          isVideo={isVideo}
-          isLead={isLead}
-        />
-      ))}
+      {!loading && data && (() => {
+        const campaigns = data.campaigns
+        const isCaptura = view === 'etapa2'
+        if (!isCaptura) {
+          return campaigns.map(c => (
+            <CampaignTable key={c.campaignId} campaign={c} isVideo={isVideo} isLead={isLead} />
+          ))
+        }
+        const perpetuo   = campaigns.filter(c => !isLancamento(c.campaignName))
+        const lancamento = campaigns.filter(c =>  isLancamento(c.campaignName))
+        return (
+          <div className="space-y-6">
+            {perpetuo.length > 0 && (
+              <div className="space-y-3">
+                <div className="flex items-center gap-3">
+                  <span className="text-[10px] font-bold tracking-widest uppercase text-emerald-700 bg-emerald-100 rounded-full px-3 py-1">Perpétuo</span>
+                  <div className="flex-1 h-px bg-border" />
+                </div>
+                {perpetuo.map(c => (
+                  <CampaignTable key={c.campaignId} campaign={c} isVideo={isVideo} isLead={isLead} />
+                ))}
+              </div>
+            )}
+            {lancamento.length > 0 && (
+              <div className="space-y-3">
+                <div className="flex items-center gap-3">
+                  <span className="text-[10px] font-bold tracking-widest uppercase text-blue-700 bg-blue-100 rounded-full px-3 py-1">Lançamento</span>
+                  <div className="flex-1 h-px bg-border" />
+                </div>
+                {lancamento.map(c => (
+                  <CampaignTable key={c.campaignId} campaign={c} isVideo={isVideo} isLead={isLead} />
+                ))}
+              </div>
+            )}
+          </div>
+        )
+      })()}
 
       {/* ── Vazio ── */}
       {!loading && data && data.campaigns.length === 0 && (
