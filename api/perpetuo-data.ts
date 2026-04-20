@@ -83,6 +83,25 @@ async function metaGet(url: URL): Promise<Record<string, unknown>> {
   return res.json() as Promise<Record<string, unknown>>
 }
 
+// Busca todas as páginas de uma API do Meta (segue paging.next automaticamente)
+async function metaGetAll(url: URL): Promise<any[]> {
+  const allData: any[] = []
+  let nextUrl: string | null = url.toString()
+  while (nextUrl) {
+    const res = await fetch(nextUrl)
+    if (!res.ok) {
+      const txt = await res.text()
+      throw new Error(`Meta API ${res.status}: ${txt.substring(0, 300)}`)
+    }
+    const json = await res.json() as Record<string, unknown>
+    const pageData = (json.data as any[]) ?? []
+    allData.push(...pageData)
+    const paging = json.paging as any
+    nextUrl = paging?.next ?? null
+  }
+  return allData
+}
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface AdRow {
@@ -199,17 +218,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     customConvUrl.searchParams.set('access_token', accessToken)
     customConvUrl.searchParams.set('limit',        '200')
 
-    const [adsetInsights, adInsights, adsetsRaw, campaignsRaw, customConvsRaw] = await Promise.all([
-      metaGet(adsetUrl),
-      metaGet(adUrl),
-      metaGet(budgetUrl),
-      metaGet(campaignUrl),
-      metaGet(customConvUrl),
+    const [adsetInsightsData, adInsightsData, adsetsData, campaignsData, customConvsData] = await Promise.all([
+      metaGetAll(adsetUrl),
+      metaGetAll(adUrl),
+      metaGetAll(budgetUrl),
+      metaGetAll(campaignUrl),
+      metaGetAll(customConvUrl),
     ])
 
     // Mapa: eventStr (lowercase) → custom_conversion_id
     const customConvByEvent = new Map<string, string>()
-    for (const cc of (customConvsRaw.data as any[]) ?? []) {
+    for (const cc of customConvsData) {
       try {
         const rule = JSON.parse(cc.rule as string ?? '{}')
         // Formato real: {"and":[{"event":{"eq":"EventName"}}, ...]}
@@ -226,7 +245,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // Mapa campaignId → objective (fallback)
     const campaignObjective = new Map<string, string>()
-    for (const c of (campaignsRaw.data as any[]) ?? []) {
+    for (const c of campaignsData) {
       campaignObjective.set(c.id as string, c.objective ?? '')
     }
 
@@ -236,7 +255,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Mapa de orçamentos + resultTypes por adset
     type Budget = { daily: number | null; lifetime: number | null }
     const budgetMap = new Map<string, Budget>()
-    for (const s of (adsetsRaw.data as any[]) ?? []) {
+    for (const s of adsetsData) {
       budgetMap.set(s.id, {
         daily:    s.daily_budget    ? Number(s.daily_budget)    / 100 : null,
         lifetime: s.lifetime_budget ? Number(s.lifetime_budget) / 100 : null,
@@ -247,7 +266,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // Insights de anúncios agrupados por adsetId
     const adsByAdset = new Map<string, any[]>()
-    for (const ad of (adInsights.data as any[]) ?? []) {
+    for (const ad of adInsightsData) {
       if (!matchesFilter(ad.campaign_name as string, filter)) continue
       const list = adsByAdset.get(ad.adset_id as string) ?? []
       list.push(ad)
@@ -257,7 +276,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Monta resposta agrupada por campanha
     const campaignMap = new Map<string, CampaignRow>()
 
-    for (const row of (adsetInsights.data as any[]) ?? []) {
+    for (const row of adsetInsightsData) {
       if (!matchesFilter(row.campaign_name as string, filter)) continue
 
       const spend  = Number(row.spend ?? 0)
@@ -308,7 +327,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Modo debug: retorna todos os action_types distintos para identificar conversões customizadas
     if (req.query.debug === 'true') {
       const actionTypeSummary: Record<string, number> = {}
-      for (const row of (adsetInsights.data as any[]) ?? []) {
+      for (const row of adsetInsightsData) {
         if (!matchesFilter(row.campaign_name as string, filter)) continue
         for (const action of (row.actions ?? []) as { action_type: string; value: string }[]) {
           actionTypeSummary[action.action_type] = (actionTypeSummary[action.action_type] ?? 0) + Number(action.value)
@@ -316,8 +335,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
       // Mostra promoted_object e resultTypes por adset para diagnóstico
       const adsetDebug: Record<string, unknown> = {}
-      for (const s of (adsetsRaw.data as any[]) ?? []) {
-        const adsetInsightRow = (adsetInsights.data as any[])?.find((r: any) => r.adset_id === s.id)
+      for (const s of adsetsData) {
+        const adsetInsightRow = adsetInsightsData.find((r: any) => r.adset_id === s.id)
         if (!adsetInsightRow) continue
         if (!matchesFilter(adsetInsightRow.campaign_name as string, filter)) continue
         adsetDebug[s.id] = {
@@ -332,7 +351,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         debug: true,
         actionTypes: actionTypeSummary,
         adsets: adsetDebug,
-        customConversions: (customConvsRaw.data as any[])?.map((cc: any) => ({
+        customConversions: customConvsData.map((cc: any) => ({
           id: cc.id, name: cc.name, rule: cc.rule,
         })),
         dateRange: { since, until },
