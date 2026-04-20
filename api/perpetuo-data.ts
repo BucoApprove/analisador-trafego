@@ -326,7 +326,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           resultTypes:       adsetResultTypes.get(s.id as string),
         }
       }
-      return res.json({ debug: true, actionTypes: actionTypeSummary, adsets: adsetDebug, dateRange: { since, until } })
+      return res.json({
+        debug: true,
+        actionTypes: actionTypeSummary,
+        adsets: adsetDebug,
+        customConversions: (customConvsRaw.data as any[])?.slice(0, 10).map((cc: any) => ({
+          id: cc.id, name: cc.name, rule: cc.rule,
+        })),
+        dateRange: { since, until },
+      })
     }
 
     return res.json({
