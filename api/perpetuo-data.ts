@@ -207,15 +207,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       metaGet(customConvUrl),
     ])
 
-    // Mapa: eventStr (lowercase) → custom_conversion_id (primeira correspondência)
+    // Mapa: eventStr (lowercase) → custom_conversion_id
     const customConvByEvent = new Map<string, string>()
     for (const cc of (customConvsRaw.data as any[]) ?? []) {
       try {
         const rule = JSON.parse(cc.rule as string ?? '{}')
-        const filters: any[] = rule?.filter?.filters ?? []
-        for (const f of filters) {
-          if (f.field === 'event' && f.operator === '=' && f.value) {
-            const key = (f.value as string).toLowerCase()
+        // Formato real: {"and":[{"event":{"eq":"EventName"}}, ...]}
+        const andClauses: any[] = rule?.and ?? []
+        for (const clause of andClauses) {
+          const eventName = clause?.event?.eq
+          if (eventName) {
+            const key = (eventName as string).toLowerCase()
             if (!customConvByEvent.has(key)) customConvByEvent.set(key, cc.id as string)
           }
         }
@@ -330,7 +332,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         debug: true,
         actionTypes: actionTypeSummary,
         adsets: adsetDebug,
-        customConversions: (customConvsRaw.data as any[])?.slice(0, 10).map((cc: any) => ({
+        customConversions: (customConvsRaw.data as any[])?.map((cc: any) => ({
           id: cc.id, name: cc.name, rule: cc.rule,
         })),
         dateRange: { since, until },
