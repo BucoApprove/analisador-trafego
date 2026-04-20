@@ -9,23 +9,26 @@ const ACCOUNT_IDS: Record<string, string> = {
 }
 
 // Keywords para identificar qual campanha pertence a qual etapa/produto
-const NAME_FILTERS: Record<string, string[]> = {
-  etapa1:             ['impulsi', 'boost', 'seguidor'],
-  etapa2:             ['captura', 'aula'],
-  etapa3:             ['relacionamento'],
-  etapa4:             ['convers'],
-  etapa5:             ['remarketing', 'retarget'],
-  anatomia:           ['anatomia'],
-  patologia:          ['patologia'],
-  'lowticket-brasil': ['low ticket brasil', 'lt brasil'],
-  'lowticket-latam':  ['low ticket latam', 'lt latam'],
+interface NameFilter { include: string[]; exclude?: string[] }
+
+const NAME_FILTERS: Record<string, NameFilter> = {
+  etapa1:             { include: ['impulsi', 'boost', 'seguidor'] },
+  etapa2:             { include: ['captura', 'aula'], exclude: ['ba25', 'ba 25'] },
+  etapa3:             { include: ['relacionamento'], exclude: ['ba25', 'ba 25'] },
+  etapa4:             { include: ['convers'], exclude: ['ba25', 'ba 25'] },
+  etapa5:             { include: ['remarketing', 'retarget'], exclude: ['ba25', 'ba 25'] },
+  anatomia:           { include: ['anatomia'] },
+  patologia:          { include: ['patologia'] },
+  'lowticket-brasil': { include: ['low ticket brasil', 'lt brasil'] },
+  'lowticket-latam':  { include: ['low ticket latam', 'lt latam'] },
 }
 
 const VALID_VIEWS = new Set(Object.keys(NAME_FILTERS))
 
-function matchesFilter(campaignName: string, keywords: string[]): boolean {
+function matchesFilter(campaignName: string, filter: NameFilter): boolean {
   const lower = campaignName.toLowerCase()
-  return keywords.some(kw => lower.includes(kw))
+  if (filter.exclude?.some(kw => lower.includes(kw))) return false
+  return filter.include.some(kw => lower.includes(kw))
 }
 
 function actionVal(
@@ -113,7 +116,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const acctId    = ACCOUNT_IDS[account]
   const timeRange = JSON.stringify({ since, until })
-  const keywords  = NAME_FILTERS[view]
+  const filter    = NAME_FILTERS[view]
 
   const isVideo = view === 'etapa3'
   const isLead  = view === 'etapa2' || view === 'anatomia' || view === 'patologia'
@@ -173,7 +176,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Insights de anúncios agrupados por adsetId
     const adsByAdset = new Map<string, any[]>()
     for (const ad of (adInsights.data as any[]) ?? []) {
-      if (!matchesFilter(ad.campaign_name as string, keywords)) continue
+      if (!matchesFilter(ad.campaign_name as string, filter)) continue
       const list = adsByAdset.get(ad.adset_id as string) ?? []
       list.push(ad)
       adsByAdset.set(ad.adset_id as string, list)
@@ -183,7 +186,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const campaignMap = new Map<string, CampaignRow>()
 
     for (const row of (adsetInsights.data as any[]) ?? []) {
-      if (!matchesFilter(row.campaign_name as string, keywords)) continue
+      if (!matchesFilter(row.campaign_name as string, filter)) continue
 
       const spend  = Number(row.spend ?? 0)
       const budget = budgetMap.get(row.adset_id as string) ?? { daily: null, lifetime: null }
@@ -232,7 +235,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (req.query.debug === 'true') {
       const actionTypeSummary: Record<string, number> = {}
       for (const row of (adsetInsights.data as any[]) ?? []) {
-        if (!matchesFilter(row.campaign_name as string, keywords)) continue
+        if (!matchesFilter(row.campaign_name as string, filter)) continue
         for (const action of (row.actions ?? []) as { action_type: string; value: string }[]) {
           actionTypeSummary[action.action_type] = (actionTypeSummary[action.action_type] ?? 0) + Number(action.value)
         }
