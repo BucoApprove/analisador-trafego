@@ -274,7 +274,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           actionTypeSummary[action.action_type] = (actionTypeSummary[action.action_type] ?? 0) + Number(action.value)
         }
       }
-      return res.json({ debug: true, actionTypes: actionTypeSummary, dateRange: { since, until } })
+      // Mostra também o promoted_object de cada campanha para diagnóstico
+      const campaignDebug: Record<string, unknown> = {}
+      for (const c of (campaignsRaw.data as any[]) ?? []) {
+        if (matchesFilter(c.name as string, filter)) {
+          campaignDebug[c.id] = {
+            name:             c.name,
+            objective:        c.objective,
+            promoted_object:  c.promoted_object,
+            resultTypes:      campaignResultTypes.get(c.id as string),
+          }
+        }
+      }
+      return res.json({ debug: true, actionTypes: actionTypeSummary, campaigns: campaignDebug, dateRange: { since, until } })
     }
 
     return res.json({
