@@ -17,10 +17,10 @@ const NAME_FILTERS: Record<string, NameFilter> = {
   etapa3:             { include: ['relacionamento', 'engajamento'], exclude: ['ba25', 'ba 25'] },
   etapa4:             { include: ['convers', 'venda'], exclude: ['ba25', 'ba 25'] },
   etapa5:             { include: ['remarketing', 'retarget', 'rmkt'] },
-  anatomia:           { include: ['anatomia'] },
-  patologia:          { include: ['patologia'] },
-  'lowticket-brasil': { include: ['low ticket brasil', 'lt brasil'] },
-  'lowticket-latam':  { include: ['low ticket latam', 'lt latam'] },
+  anatomia:           { include: ['anatomia', 'anato'],                    exclude: ['[low]', 'low_'] },
+  patologia:          { include: ['patologia', '[pato', 'pós pato'],        exclude: ['[low]', 'low_'] },
+  'lowticket-brasil': { include: ['[low', 'low_'],                          exclude: ['latam', 'mexico', 'colombia'] },
+  'lowticket-latam':  { include: ['latam', 'mexico', 'colombia'] },
 }
 
 const VALID_VIEWS = new Set(Object.keys(NAME_FILTERS))
