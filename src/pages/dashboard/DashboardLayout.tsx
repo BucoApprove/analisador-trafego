@@ -3,7 +3,7 @@ import { Tabs, TabsContent } from '@/components/ui/tabs'
 import {
   LogOut, BarChart2, TrendingUp, Users, Camera, Mail,
   Search, Zap, Menu, X, Target, Settings, PieChart, UserCheck,
-  ShoppingCart, GitMerge, Activity, Tags,
+  ShoppingCart, GitMerge, Activity, Tags, Link,
 } from 'lucide-react'
 import TabVisaoGeral from './TabVisaoGeral'
 import TabLancamento from './TabLancamento'
@@ -21,6 +21,7 @@ import TabCruzamento from './TabCruzamento'
 import TabAnalisesCruzadas from './TabAnalisesCruzadas'
 import TabPerpetuo from './TabPerpetuo'
 import TabUtmLeads from './TabUtmLeads'
+import TabReport from './TabReport'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -54,6 +55,7 @@ const USER_NAV: NavItem[] = [
   { id: 'analises',    label: 'Análises',    icon: Activity     },
   { id: 'perpetuo',    label: 'Perpétuo',    icon: Target       },
   { id: 'utm-leads',   label: 'UTMs Leads',  icon: Tags         },
+  { id: 'report',      label: 'Relatório IA', icon: Link         },
 ]
 
 const ADMIN_NAV: NavItem[] = [
@@ -305,6 +307,9 @@ export default function DashboardLayout({ token, role, userName, onLogout }: Das
             </TabsContent>
             <TabsContent value="utm-leads" className="mt-0">
               <TabUtmLeads token={token} enabled={activeTab === 'utm-leads'} />
+            </TabsContent>
+            <TabsContent value="report" className="mt-0">
+              <TabReport dashboardToken={token} />
             </TabsContent>
             {role === 'admin' && (
               <>
