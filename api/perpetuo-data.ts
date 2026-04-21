@@ -141,12 +141,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   res.setHeader('Cache-Control', 's-maxage=300, stale-while-revalidate=60')
 
+  const account = typeof req.query.account === 'string' ? req.query.account : ''
+
   const accessToken = process.env.META_ACCESS_TOKEN ?? ''
   if (!accessToken) {
     return res.status(503).json({ error: 'META_ACCESS_TOKEN não configurado' })
   }
-
-  const account = typeof req.query.account === 'string' ? req.query.account : ''
   const view    = typeof req.query.view    === 'string' ? req.query.view    : ''
 
   if (!ACCOUNT_IDS[account]) {
