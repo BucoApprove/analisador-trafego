@@ -129,6 +129,54 @@ function DimChartsGrid({ dims, suffix = '' }: { dims: DimGroup; suffix?: string 
   )
 }
 
+// ─── UTM Value Picker ────────────────────────────────────────────────────────
+
+function UtmValuePicker({ options, value, onChange }: {
+  options: UtmDist[]
+  value: string
+  onChange: (v: string) => void
+}) {
+  const [filter, setFilter] = useState('')
+  const filtered = filter
+    ? options.filter(o => o.name.toLowerCase().includes(filter.toLowerCase()))
+    : options
+
+  return (
+    <div className="space-y-1">
+      <p className="text-sm font-medium">Valor da UTM</p>
+      <input
+        className="w-full max-w-sm rounded border px-2 py-1.5 text-sm"
+        placeholder={options.length > 0 ? `Filtrar ${options.length} valores…` : 'Ex: BA25-VENDAS'}
+        value={filter}
+        onChange={e => { setFilter(e.target.value); onChange(e.target.value) }}
+      />
+      {options.length > 0 && (
+        <div className="max-w-sm max-h-48 overflow-y-auto rounded border bg-background divide-y text-sm">
+          {filtered.length === 0 && (
+            <p className="px-3 py-2 text-xs text-muted-foreground">Nenhum valor encontrado</p>
+          )}
+          {filtered.map(o => (
+            <button
+              key={o.name}
+              type="button"
+              onClick={() => { onChange(o.name); setFilter(o.name) }}
+              className={`w-full text-left px-3 py-1.5 text-xs hover:bg-muted transition-colors flex items-center justify-between gap-2 ${
+                value === o.name ? 'bg-primary/10 font-medium text-primary' : ''
+              }`}
+            >
+              <span className="truncate">{o.name}</span>
+              <span className="shrink-0 text-muted-foreground">{o.count.toLocaleString('pt-BR')}</span>
+            </button>
+          ))}
+        </div>
+      )}
+      {options.length === 0 && (
+        <p className="text-xs text-muted-foreground">Busque na seção acima para listar os valores disponíveis.</p>
+      )}
+    </div>
+  )
+}
+
 // ─── Main Tab ─────────────────────────────────────────────────────────────────
 
 export default function TabUtmLeads({ token, enabled }: Props) {
@@ -289,24 +337,11 @@ export default function TabUtmLeads({ token, enabled }: Props) {
         </div>
 
         {/* Valor da UTM */}
-        <div className="space-y-1">
-          <p className="text-sm font-medium">Valor da UTM</p>
-          <input
-            className="w-full max-w-sm rounded border px-2 py-1.5 text-sm"
-            placeholder="Ex: BA25-VENDAS"
-            list="utm-value-list"
-            value={utmValue}
-            onChange={e => setUtmValue(e.target.value)}
-          />
-          <datalist id="utm-value-list">
-            {dimOptions.map(o => <option key={o.name} value={o.name} />)}
-          </datalist>
-          {dimOptions.length > 0 && (
-            <p className="text-xs text-muted-foreground">
-              {dimOptions.length} valores disponíveis — busque primeiro na seção acima para popular as sugestões
-            </p>
-          )}
-        </div>
+        <UtmValuePicker
+          options={dimOptions}
+          value={utmValue}
+          onChange={setUtmValue}
+        />
 
         {/* Escopo */}
         <div className="space-y-2">
