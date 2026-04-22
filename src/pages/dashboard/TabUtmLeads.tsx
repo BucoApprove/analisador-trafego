@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { SectionHeader, TabLoading, CHART_COLORS } from './components'
 import { Button } from '@/components/ui/button'
 import { Play, Search } from 'lucide-react'
@@ -140,6 +140,11 @@ function UtmValuePicker({ options, value, onChange }: {
   const filtered = filter
     ? options.filter(o => o.name.toLowerCase().includes(filter.toLowerCase()))
     : options
+
+  // Quando o valor externo é resetado (troca de dimensão), limpa o filtro
+  useEffect(() => {
+    if (value === '') setFilter('')
+  }, [value])
 
   return (
     <div className="space-y-1">
