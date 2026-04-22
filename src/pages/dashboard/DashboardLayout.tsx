@@ -36,6 +36,7 @@ interface NavItem {
   id: string
   label: string
   icon: React.FC<{ className?: string }>
+  hidden?: boolean
 }
 
 // ─── Navigation config ────────────────────────────────────────────────────────
@@ -43,14 +44,14 @@ interface NavItem {
 const USER_NAV: NavItem[] = [
   { id: 'ba25',        label: 'BA25 🚀',     icon: BarChart2    },
   { id: 'visao-geral', label: 'Visão Geral', icon: PieChart     },
-  { id: 'campanhas',   label: 'Campanhas',   icon: TrendingUp   },
-  { id: 'lancamento',  label: 'Lançamento',  icon: Zap          },
-  { id: 'leads',       label: 'Leads',       icon: Users        },
-  { id: 'inscritos',   label: 'Inscritos',   icon: UserCheck    },
-  { id: 'instagram',   label: 'Instagram',   icon: Camera       },
-  { id: 'email',       label: 'Email',       icon: Mail         },
-  { id: 'pesquisa',    label: 'Pesquisa',    icon: Search       },
-  { id: 'vendas',      label: 'Vendas',      icon: ShoppingCart },
+  { id: 'campanhas',   label: 'Campanhas',   icon: TrendingUp,   hidden: true },
+  { id: 'lancamento',  label: 'Lançamento',  icon: Zap,          hidden: true },
+  { id: 'leads',       label: 'Leads',       icon: Users,        hidden: true },
+  { id: 'inscritos',   label: 'Inscritos',   icon: UserCheck,    hidden: true },
+  { id: 'instagram',   label: 'Instagram',   icon: Camera,       hidden: true },
+  { id: 'email',       label: 'Email',       icon: Mail,         hidden: true },
+  { id: 'pesquisa',    label: 'Pesquisa',    icon: Search,       hidden: true },
+  { id: 'vendas',      label: 'Vendas',      icon: ShoppingCart, hidden: true },
   { id: 'cruzamento',  label: 'Cruzamento',  icon: GitMerge     },
   { id: 'analises',    label: 'Análises',    icon: Activity     },
   { id: 'perpetuo',    label: 'Perpétuo',    icon: Target       },
@@ -144,7 +145,7 @@ function Sidebar({
 
       {/* ── Navigation ── */}
       <nav className="flex-1 px-3 py-4 space-y-0.5 overflow-y-auto">
-        {USER_NAV.map(item => (
+        {USER_NAV.filter(item => !item.hidden).map(item => (
           <SidebarNavBtn
             key={item.id}
             item={item}
