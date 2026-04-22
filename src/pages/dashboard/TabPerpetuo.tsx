@@ -1,4 +1,4 @@
-import { useState, useEffect, Fragment } from 'react'
+import { useState, useEffect, useRef, Fragment } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -196,20 +196,41 @@ interface TabPerpetuoProps {
   enabled: boolean
 }
 
+// Cache global (sobrevive re-renders, limpo apenas pelo botão Atualizar)
+type CacheEntry = { data: PerpetuoResponse; fetchedAt: Date }
+const _cache: Map<string, CacheEntry> = new Map()
+
 export default function TabPerpetuo({ token, enabled }: TabPerpetuoProps) {
   const [account, setAccount] = useState<'conta1' | 'conta2'>('conta1')
   const [view, setView]       = useState('etapa2')
   const [since, setSince]     = useState(firstOfMonthIso)
   const [until, setUntil]     = useState(todayIso)
   const [data, setData]       = useState<PerpetuoResponse | null>(null)
+  const [fetchedAt, setFetchedAt] = useState<Date | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError]     = useState<string | null>(null)
+
+  // Rastreia quais chaves já foram buscadas nesta sessão
+  const fetchedKeys = useRef<Set<string>>(new Set())
 
   const currentViews = account === 'conta1' ? CONTA1_VIEWS : CONTA2_VIEWS
   const isVideo      = view === 'etapa3'
   const isLead       = view === 'etapa2' || view === 'anatomia' || view === 'patologia'
 
-  async function loadData() {
+  function cacheKey() {
+    return `${account}|${view}|${since}|${until}`
+  }
+
+  async function loadData(force = false) {
+    const key = cacheKey()
+    if (!force) {
+      const cached = _cache.get(key)
+      if (cached) {
+        setData(cached.data)
+        setFetchedAt(cached.fetchedAt)
+        return
+      }
+    }
     setLoading(true)
     setError(null)
     try {
@@ -219,7 +240,11 @@ export default function TabPerpetuo({ token, enabled }: TabPerpetuoProps) {
       })
       const json = await res.json()
       if (!res.ok) throw new Error(json.error ?? 'Erro ao carregar dados')
+      const now = new Date()
+      _cache.set(key, { data: json, fetchedAt: now })
+      fetchedKeys.current.add(key)
       setData(json)
+      setFetchedAt(now)
     } catch (e: any) {
       setError(e.message)
     } finally {
@@ -227,20 +252,26 @@ export default function TabPerpetuo({ token, enabled }: TabPerpetuoProps) {
     }
   }
 
-  // Carrega ao ativar a aba ou trocar view/conta
+  // Carrega ao ativar a aba pela primeira vez ou trocar view/conta/período
   useEffect(() => {
-    if (enabled) loadData()
+    if (!enabled) return
+    const key = cacheKey()
+    const cached = _cache.get(key)
+    if (cached) {
+      setData(cached.data)
+      setFetchedAt(cached.fetchedAt)
+    } else {
+      loadData()
+    }
   }, [enabled, account, view]) // eslint-disable-line react-hooks/exhaustive-deps
 
   function handleAccountChange(acc: 'conta1' | 'conta2') {
     setAccount(acc)
     setView(acc === 'conta1' ? 'etapa2' : 'anatomia')
-    setData(null)
   }
 
   function handleViewChange(v: string) {
     setView(v)
-    setData(null)
   }
 
   // Totais consolidados para o sumário rápido
@@ -304,7 +335,7 @@ export default function TabPerpetuo({ token, enabled }: TabPerpetuoProps) {
             onChange={e => setUntil(e.target.value)}
             className="w-36 h-8 text-sm"
           />
-          <Button onClick={loadData} disabled={loading} size="sm">
+          <Button onClick={() => loadData(true)} disabled={loading} size="sm">
             {loading
               ? <Loader2 className="h-4 w-4 animate-spin" />
               : <RefreshCw className="h-4 w-4" />
@@ -313,6 +344,13 @@ export default function TabPerpetuo({ token, enabled }: TabPerpetuoProps) {
           </Button>
         </div>
       </div>
+
+      {/* ── Timestamp última atualização ── */}
+      {fetchedAt && !loading && (
+        <p className="text-xs text-muted-foreground -mt-2">
+          Dados carregados às {fetchedAt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })} — troque de aba sem perder os dados
+        </p>
+      )}
 
       {/* ── Erro ── */}
       {error && (
