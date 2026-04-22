@@ -348,7 +348,7 @@ export default function TabPerpetuo({ token, enabled }: TabPerpetuoProps) {
       {/* ── Timestamp última atualização ── */}
       {fetchedAt && !loading && (
         <p className="text-xs text-muted-foreground -mt-2">
-          Dados carregados às {fetchedAt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })} — troque de aba sem perder os dados
+          Dados carregados às {fetchedAt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
         </p>
       )}
 

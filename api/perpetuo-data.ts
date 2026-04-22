@@ -39,7 +39,9 @@ function getResultTypes(adset: {
   const eventStr = po?.custom_event_str ?? ''
   if (po?.custom_event_type === 'OTHER' && eventStr) {
     const ccId = customConvByEvent?.get(eventStr.toLowerCase())
-    if (ccId) return [`offsite_conversion.custom.${ccId}`]
+    // Retorna o ID da custom conversion + fb_pixel_custom como fallback para dados históricos
+    // actionVal usará o primeiro tipo que tiver valor > 0 (sem double-count)
+    if (ccId) return [`offsite_conversion.custom.${ccId}`, 'offsite_conversion.fb_pixel_custom']
     return ['offsite_conversion.fb_pixel_custom']
   }
   // Evento padrão
@@ -68,10 +70,12 @@ function actionVal(
   ...types: string[]
 ): number {
   if (!actions) return 0
-  return types.reduce(
-    (sum, t) => sum + Number(actions.find(a => a.action_type === t)?.value ?? 0),
-    0,
-  )
+  // Usa o primeiro tipo que tiver valor > 0 (evita double-count entre custom conversion e fb_pixel_custom)
+  for (const t of types) {
+    const val = Number(actions.find(a => a.action_type === t)?.value ?? 0)
+    if (val > 0) return val
+  }
+  return 0
 }
 
 async function metaGet(url: URL): Promise<Record<string, unknown>> {
