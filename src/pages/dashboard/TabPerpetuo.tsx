@@ -17,6 +17,8 @@ interface AdRow {
 interface AdsetRow {
   adsetId: string
   adsetName: string
+  adsetStatus: string
+  audienceName: string | null
   dailyBudget: number | null
   lifetimeBudget: number | null
   spend: number
@@ -103,11 +105,21 @@ function CampaignTable({
   campaign,
   isVideo,
   isLead,
+  isRmkt,
+  onlyActive,
 }: {
   campaign: CampaignRow
   isVideo: boolean
   isLead: boolean
+  isRmkt: boolean
+  onlyActive: boolean
 }) {
+  const visibleAdsets = onlyActive
+    ? campaign.adsets.filter(a => a.adsetStatus === 'ACTIVE')
+    : campaign.adsets
+
+  if (visibleAdsets.length === 0) return null
+
   return (
     <Card>
       <CardHeader className="pb-3">
@@ -118,7 +130,7 @@ function CampaignTable({
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b text-muted-foreground text-xs">
-                <th className="pb-2 font-medium text-left pr-6">Conjunto / Anúncio</th>
+                <th className="pb-2 font-medium text-left pr-6">{isRmkt ? 'Público / Anúncio' : 'Conjunto / Anúncio'}</th>
                 <th className="pb-2 font-medium text-right pr-6">Orçamento</th>
                 <th className="pb-2 font-medium text-right pr-6">Investido</th>
                 {isVideo ? (
@@ -136,51 +148,60 @@ function CampaignTable({
               </tr>
             </thead>
             <tbody>
-              {campaign.adsets.map(adset => (
-                <Fragment key={adset.adsetId}>
-                  {/* Adset row */}
-                  <tr className="border-b bg-muted/30">
-                    <td className="py-2 pr-6 font-medium">{adset.adsetName}</td>
-                    <td className="py-2 pr-6 text-right">
-                      <BudgetCell daily={adset.dailyBudget} lifetime={adset.lifetimeBudget} />
-                    </td>
-                    <td className="py-2 pr-6 text-right">{brl(adset.spend)}</td>
-                    {isVideo ? (
-                      <>
-                        <td className="py-2 pr-6 text-right">{fmt(adset.videoViews3s ?? 0)}</td>
-                        <td className="py-2 text-right">{fmt(adset.videoViews25pct ?? 0)}</td>
-                      </>
-                    ) : (
-                      <>
-                        <td className="py-2 pr-6 text-right">{fmt(adset.results ?? 0)}</td>
-                        <td className="py-2 pr-6 text-right">
-                          {(adset.results ?? 0) > 0 ? brl(adset.costPerResult ?? 0) : '—'}
-                        </td>
-                        {isLead && (
-                          <td className="py-2 text-right">
-                            {(adset.landingPageViews ?? 0) > 0 ? pct(adset.conversionRate ?? 0) : '—'}
-                          </td>
+              {visibleAdsets.map(adset => {
+                const displayName = isRmkt && adset.audienceName ? adset.audienceName : adset.adsetName
+                const isPaused = adset.adsetStatus !== 'ACTIVE'
+                return (
+                  <Fragment key={adset.adsetId}>
+                    {/* Adset row */}
+                    <tr className={`border-b bg-muted/30 ${isPaused ? 'opacity-50' : ''}`}>
+                      <td className="py-2 pr-6 font-medium">
+                        {displayName}
+                        {isPaused && (
+                          <span className="ml-2 text-xs font-normal text-muted-foreground">(pausado)</span>
                         )}
-                      </>
-                    )}
-                  </tr>
-                  {/* Ad rows — skip for video view */}
-                  {!isVideo && adset.ads.map(ad => (
-                    <tr key={ad.adId} className="border-b hover:bg-muted/20">
-                      <td className="py-1.5 pr-6 pl-6 text-muted-foreground">
-                        <span className="mr-1 opacity-50">↳</span>{ad.adName}
                       </td>
-                      <td className="py-1.5 pr-6 text-right text-muted-foreground">—</td>
-                      <td className="py-1.5 pr-6 text-right text-muted-foreground">{brl(ad.spend)}</td>
-                      <td className="py-1.5 pr-6 text-right text-muted-foreground">{fmt(ad.results)}</td>
-                      <td className="py-1.5 pr-6 text-right text-muted-foreground">
-                        {ad.results > 0 ? brl(ad.costPerResult) : '—'}
+                      <td className="py-2 pr-6 text-right">
+                        <BudgetCell daily={adset.dailyBudget} lifetime={adset.lifetimeBudget} />
                       </td>
-                      {isLead && <td className="py-1.5 text-right text-muted-foreground">—</td>}
+                      <td className="py-2 pr-6 text-right">{brl(adset.spend)}</td>
+                      {isVideo ? (
+                        <>
+                          <td className="py-2 pr-6 text-right">{fmt(adset.videoViews3s ?? 0)}</td>
+                          <td className="py-2 text-right">{fmt(adset.videoViews25pct ?? 0)}</td>
+                        </>
+                      ) : (
+                        <>
+                          <td className="py-2 pr-6 text-right">{fmt(adset.results ?? 0)}</td>
+                          <td className="py-2 pr-6 text-right">
+                            {(adset.results ?? 0) > 0 ? brl(adset.costPerResult ?? 0) : '—'}
+                          </td>
+                          {isLead && (
+                            <td className="py-2 text-right">
+                              {(adset.landingPageViews ?? 0) > 0 ? pct(adset.conversionRate ?? 0) : '—'}
+                            </td>
+                          )}
+                        </>
+                      )}
                     </tr>
-                  ))}
-                </Fragment>
-              ))}
+                    {/* Ad rows — skip for video view */}
+                    {!isVideo && adset.ads.map(ad => (
+                      <tr key={ad.adId} className={`border-b hover:bg-muted/20 ${isPaused ? 'opacity-50' : ''}`}>
+                        <td className="py-1.5 pr-6 pl-6 text-muted-foreground">
+                          <span className="mr-1 opacity-50">↳</span>{ad.adName}
+                        </td>
+                        <td className="py-1.5 pr-6 text-right text-muted-foreground">—</td>
+                        <td className="py-1.5 pr-6 text-right text-muted-foreground">{brl(ad.spend)}</td>
+                        <td className="py-1.5 pr-6 text-right text-muted-foreground">{fmt(ad.results)}</td>
+                        <td className="py-1.5 pr-6 text-right text-muted-foreground">
+                          {ad.results > 0 ? brl(ad.costPerResult) : '—'}
+                        </td>
+                        {isLead && <td className="py-1.5 text-right text-muted-foreground">—</td>}
+                      </tr>
+                    ))}
+                  </Fragment>
+                )
+              })}
             </tbody>
           </table>
         </div>
@@ -209,6 +230,7 @@ export default function TabPerpetuo({ token, enabled }: TabPerpetuoProps) {
   const [fetchedAt, setFetchedAt] = useState<Date | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError]     = useState<string | null>(null)
+  const [onlyActive, setOnlyActive] = useState(true)
 
   // Rastreia quais chaves já foram buscadas nesta sessão
   const fetchedKeys = useRef<Set<string>>(new Set())
@@ -290,7 +312,7 @@ export default function TabPerpetuo({ token, enabled }: TabPerpetuoProps) {
     <div className="space-y-5">
 
       {/* ── Seletor de conta ── */}
-      <div className="flex gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <Button
           size="sm"
           variant={account === 'conta1' ? 'default' : 'outline'}
@@ -305,6 +327,17 @@ export default function TabPerpetuo({ token, enabled }: TabPerpetuoProps) {
         >
           GBS — Pós-graduações
         </Button>
+        <div className="ml-auto flex items-center gap-2">
+          <button
+            onClick={() => setOnlyActive(v => !v)}
+            className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none ${onlyActive ? 'bg-primary' : 'bg-muted-foreground/40'}`}
+          >
+            <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${onlyActive ? 'translate-x-4' : 'translate-x-0.5'}`} />
+          </button>
+          <span className="text-sm text-muted-foreground">
+            {onlyActive ? 'Somente ativos' : 'Todos (incl. pausados)'}
+          </span>
+        </div>
       </div>
 
       {/* ── Seletor de etapa/produto + período ── */}
@@ -396,9 +429,10 @@ export default function TabPerpetuo({ token, enabled }: TabPerpetuoProps) {
       {!loading && data && (() => {
         const campaigns = data.campaigns
         const isCaptura = view === 'etapa2'
+        const isRmkt    = view === 'etapa5'
         if (!isCaptura) {
           return campaigns.map(c => (
-            <CampaignTable key={c.campaignId} campaign={c} isVideo={isVideo} isLead={isLead} />
+            <CampaignTable key={c.campaignId} campaign={c} isVideo={isVideo} isLead={isLead} isRmkt={isRmkt} onlyActive={onlyActive} />
           ))
         }
         const perpetuo   = campaigns.filter(c => !isLancamento(c.campaignName))
@@ -412,7 +446,7 @@ export default function TabPerpetuo({ token, enabled }: TabPerpetuoProps) {
                   <div className="flex-1 h-px bg-border" />
                 </div>
                 {perpetuo.map(c => (
-                  <CampaignTable key={c.campaignId} campaign={c} isVideo={isVideo} isLead={isLead} />
+                  <CampaignTable key={c.campaignId} campaign={c} isVideo={isVideo} isLead={isLead} isRmkt={false} onlyActive={onlyActive} />
                 ))}
               </div>
             )}
@@ -423,7 +457,7 @@ export default function TabPerpetuo({ token, enabled }: TabPerpetuoProps) {
                   <div className="flex-1 h-px bg-border" />
                 </div>
                 {lancamento.map(c => (
-                  <CampaignTable key={c.campaignId} campaign={c} isVideo={isVideo} isLead={isLead} />
+                  <CampaignTable key={c.campaignId} campaign={c} isVideo={isVideo} isLead={isLead} isRmkt={false} onlyActive={onlyActive} />
                 ))}
               </div>
             )}

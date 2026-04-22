@@ -119,6 +119,8 @@ interface AdRow {
 interface AdsetRow {
   adsetId: string
   adsetName: string
+  adsetStatus: string
+  audienceName: string | null
   dailyBudget: number | null
   lifetimeBudget: number | null
   spend: number
@@ -205,7 +207,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // ── 3. Adsets: orçamentos + promoted_object (onde custom_conversion_id vive) ──
     const budgetUrl = new URL(`${META_BASE}/${acctId}/adsets`)
-    budgetUrl.searchParams.set('fields',        'id,daily_budget,lifetime_budget,optimization_goal,promoted_object,campaign_id')
+    budgetUrl.searchParams.set('fields',        'id,daily_budget,lifetime_budget,optimization_goal,promoted_object,campaign_id,effective_status,targeting')
     budgetUrl.searchParams.set('access_token',  accessToken)
     budgetUrl.searchParams.set('limit',         '500')
 
@@ -256,13 +258,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Mapa adsetId → action_types corretos para "Resultado"
     const adsetResultTypes = new Map<string, string[]>()
 
-    // Mapa de orçamentos + resultTypes por adset
-    type Budget = { daily: number | null; lifetime: number | null }
+    // Mapa de orçamentos + resultTypes + status + audiência por adset
+    type Budget = { daily: number | null; lifetime: number | null; status: string; audienceName: string | null }
     const budgetMap = new Map<string, Budget>()
     for (const s of adsetsData) {
-      budgetMap.set(s.id, {
-        daily:    s.daily_budget    ? Number(s.daily_budget)    / 100 : null,
-        lifetime: s.lifetime_budget ? Number(s.lifetime_budget) / 100 : null,
+      const audiences = (s.targeting as any)?.custom_audiences as { id: string; name: string }[] | undefined
+      const audienceName = audiences && audiences.length > 0 ? audiences[0].name : null
+      budgetMap.set(s.id as string, {
+        daily:       s.daily_budget    ? Number(s.daily_budget)    / 100 : null,
+        lifetime:    s.lifetime_budget ? Number(s.lifetime_budget) / 100 : null,
+        status:      (s.effective_status as string) ?? 'UNKNOWN',
+        audienceName,
       })
       const obj = campaignObjective.get(s.campaign_id as string)
       adsetResultTypes.set(s.id as string, getResultTypes(s, obj, customConvByEvent))
@@ -289,6 +295,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const adsetRow: AdsetRow = {
         adsetId:        row.adset_id,
         adsetName:      row.adset_name,
+        adsetStatus:    budget.status ?? 'UNKNOWN',
+        audienceName:   budget.audienceName ?? null,
         dailyBudget:    budget.daily,
         lifetimeBudget: budget.lifetime,
         spend,
