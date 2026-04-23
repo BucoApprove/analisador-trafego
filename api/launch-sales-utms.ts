@@ -34,7 +34,7 @@ function firstOfMonthStr() {
 }
 
 interface UtmRecord {
-  date: string          // 'YYYY-MM-DD'
+  date:     string        // 'YYYY-MM-DD'
   source:   string | null
   medium:   string | null
   campaign: string | null
@@ -42,7 +42,7 @@ interface UtmRecord {
 }
 
 interface BuyerData {
-  purchaseDate:  string       // 'YYYY-MM-DD'
+  purchaseDate:  string
   firstLeadDate: string | null
   tagCount:      number
   utms: UtmRecord[]
@@ -75,9 +75,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Cache-Control', 's-maxage=120, stale-while-revalidate=60')
 
   try {
-    // ── Query única com CTE ────────────────────────────────────────────────────
-    // 1. buyers: emails dos compradores no período, com data da primeira compra
-    // 2. utm_history: todos os registros de UTM desses compradores na tabela de leads
     const sql = `
       WITH buyers AS (
         SELECT
@@ -96,7 +93,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         SELECT
           l.lead_email,
           b.purchase_date,
-          DATE(l.lead_register)    AS utm_date,
+          DATE(l.lead_register) AS utm_date,
           l.utm_source,
           l.utm_campaign,
           l.utm_medium,
@@ -143,8 +140,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const buyers = new Map<string, BuyerData>()
 
     for (const row of result.rows) {
-      const email        = row.lead_email       ?? ''
-      const purchaseDate = row.purchase_date    ?? ''
+      const email        = row.lead_email    ?? ''
+      const purchaseDate = row.purchase_date ?? ''
       if (!email || !purchaseDate) continue
 
       if (!buyers.has(email)) {
@@ -166,8 +163,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // ── Computa as 3 métricas por dimensão ────────────────────────────────────
+    // drilldown inclui source + campaign + medium + content
     const drilldownMap  = new Map<string, number>()
-    const drilldownKeys = new Map<string, { campaign: string; medium: string; content: string }>()
+    const drilldownKeys = new Map<string, { source: string; campaign: string; medium: string; content: string }>()
 
     const counters: Record<DimKey, Map<string, DimCounters>> = {
       source:   new Map(),
@@ -178,11 +176,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     function getCounter(dim: DimKey, value: string): DimCounters {
       if (!counters[dim].has(value)) {
-        counters[dim].set(value, {
-          anyTime:    new Set(),
-          lastBefore: new Set(),
-          origin:     new Set(),
-        })
+        counters[dim].set(value, { anyTime: new Set(), lastBefore: new Set(), origin: new Set() })
       }
       return counters[dim].get(value)!
     }
@@ -190,8 +184,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     for (const [email, { purchaseDate, utms }] of buyers) {
       if (utms.length === 0) continue
 
-      // já está ordenado por utm_date (ORDER BY na query)
-      const sorted = utms
+      const sorted = utms // já ordenado por utm_date
 
       // last-before: último registro com data <= data da compra
       const beforePurchase = sorted.filter(u => u.date && purchaseDate && u.date <= purchaseDate)
@@ -200,10 +193,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // origin: primeiro registro de UTM (qualquer data)
       const origin = sorted[0]
 
-      // anyTime: conta para cada valor distinto que o comprador já teve
+      // anyTime
       const seen: Partial<Record<DimKey, Set<string>>> = {}
       for (const dim of DIMS) seen[dim] = new Set()
-
       for (const utm of sorted) {
         for (const dim of DIMS) {
           const val = utm[dim]
@@ -213,18 +205,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
       }
 
-      // lastBefore + drilldown (campaign > medium > content)
+      // lastBefore + drilldown (source + campaign + medium + content)
       if (lastBefore) {
         for (const dim of DIMS) {
           const val = lastBefore[dim]
           if (val) getCounter(dim, val).lastBefore.add(email)
         }
-        const c  = lastBefore.campaign || '(sem campanha)'
-        const m  = lastBefore.medium   || '(não informado)'
-        const ct = lastBefore.content  || '(não informado)'
-        const key = `${c}\0${m}\0${ct}`
+        const src = lastBefore.source   || '(não informado)'
+        const c   = lastBefore.campaign || '(sem campanha)'
+        const m   = lastBefore.medium   || '(não informado)'
+        const ct  = lastBefore.content  || '(não informado)'
+        const key = `${src}\0${c}\0${m}\0${ct}`
         drilldownMap.set(key, (drilldownMap.get(key) ?? 0) + 1)
-        if (!drilldownKeys.has(key)) drilldownKeys.set(key, { campaign: c, medium: m, content: ct })
+        if (!drilldownKeys.has(key)) drilldownKeys.set(key, { source: src, campaign: c, medium: m, content: ct })
       }
 
       // origin
@@ -237,7 +230,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // ── Distribuições: tempo até compra e registros na base ──────────────────
-
     const DAYS_BUCKETS: { label: string; max: number }[] = [
       { label: '0–7 dias',    max: 7   },
       { label: '8–14 dias',   max: 14  },
@@ -249,11 +241,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     ]
     const TAG_BUCKET_ORDER = ['1', '2', '3', '4', '5', '6–10', '11–20', '21+']
 
-    const daysBuckets  = new Map<string, number>()
-    const tagBuckets   = new Map<string, number>()
+    const daysBuckets = new Map<string, number>()
+    const tagBuckets  = new Map<string, number>()
 
     for (const { purchaseDate, firstLeadDate, tagCount } of buyers.values()) {
-      // Tempo até compra
       if (purchaseDate && firstLeadDate) {
         const days = Math.round(
           (new Date(purchaseDate).getTime() - new Date(firstLeadDate).getTime()) / 86400000
@@ -262,7 +253,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         daysBuckets.set(bucket, (daysBuckets.get(bucket) ?? 0) + 1)
       }
 
-      // Registros na base
       if (tagCount > 0) {
         const label = tagCount >= 21 ? '21+'
           : tagCount >= 11 ? '11–20'
