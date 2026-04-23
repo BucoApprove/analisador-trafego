@@ -274,6 +274,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       adsetResultTypes.set(s.id as string, getResultTypes(s, obj, customConvByEvent))
     }
 
+    // Para etapa1 (Posts Impulsionados), resultado = seguidores conquistados
+    if (view === 'etapa1') {
+      for (const [id] of adsetResultTypes) {
+        adsetResultTypes.set(id, ['follow', 'page_fan'])
+      }
+    }
+
     // Insights de anúncios agrupados por adsetId
     const adsByAdset = new Map<string, any[]>()
     for (const ad of adInsightsData) {

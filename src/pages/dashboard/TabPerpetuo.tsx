@@ -106,13 +106,19 @@ function CampaignTable({
   isVideo,
   isLead,
   isRmkt,
+  isFollower,
   onlyActive,
+  resultLabel,
+  cprLabel,
 }: {
   campaign: CampaignRow
   isVideo: boolean
   isLead: boolean
   isRmkt: boolean
+  isFollower: boolean
   onlyActive: boolean
+  resultLabel: string
+  cprLabel: string
 }) {
   const visibleAdsets = onlyActive
     ? campaign.adsets.filter(a => a.adsetStatus === 'ACTIVE')
@@ -140,8 +146,8 @@ function CampaignTable({
                   </>
                 ) : (
                   <>
-                    <th className="pb-2 font-medium text-right pr-6">Resultados</th>
-                    <th className="pb-2 font-medium text-right pr-6">CPR</th>
+                    <th className="pb-2 font-medium text-right pr-6">{resultLabel}</th>
+                    <th className="pb-2 font-medium text-right pr-6">{cprLabel}</th>
                     {isLead && <th className="pb-2 font-medium text-right">Conv. Página</th>}
                   </>
                 )}
@@ -238,6 +244,7 @@ export default function TabPerpetuo({ token, enabled }: TabPerpetuoProps) {
   const currentViews = account === 'conta1' ? CONTA1_VIEWS : CONTA2_VIEWS
   const isVideo      = view === 'etapa3'
   const isLead       = view === 'etapa2' || view === 'anatomia' || view === 'patologia'
+  const isFollower   = view === 'etapa1'
 
   function cacheKey() {
     return `${account}|${view}|${since}|${until}`
@@ -307,6 +314,8 @@ export default function TabPerpetuo({ token, enabled }: TabPerpetuoProps) {
     },
     { spend: 0, results: 0 },
   )
+  const resultLabel = isFollower ? 'Seguidores' : 'Resultados'
+  const cprLabel    = isFollower ? 'CPS' : 'CPR'
 
   return (
     <div className="space-y-5">
@@ -410,13 +419,13 @@ export default function TabPerpetuo({ token, enabled }: TabPerpetuoProps) {
           </Card>
           <Card>
             <CardContent className="pt-5 pb-4">
-              <p className="text-xs text-muted-foreground mb-1">Total Resultados</p>
+              <p className="text-xs text-muted-foreground mb-1">Total {resultLabel}</p>
               <p className="text-xl font-bold">{fmt(totals.results)}</p>
             </CardContent>
           </Card>
           <Card>
             <CardContent className="pt-5 pb-4">
-              <p className="text-xs text-muted-foreground mb-1">CPR Médio</p>
+              <p className="text-xs text-muted-foreground mb-1">{cprLabel} Médio</p>
               <p className="text-xl font-bold">
                 {totals.results > 0 ? brl(totals.spend / totals.results) : '—'}
               </p>
@@ -432,7 +441,7 @@ export default function TabPerpetuo({ token, enabled }: TabPerpetuoProps) {
         const isRmkt    = view === 'etapa5'
         if (!isCaptura) {
           return campaigns.map(c => (
-            <CampaignTable key={c.campaignId} campaign={c} isVideo={isVideo} isLead={isLead} isRmkt={isRmkt} onlyActive={onlyActive} />
+            <CampaignTable key={c.campaignId} campaign={c} isVideo={isVideo} isLead={isLead} isRmkt={isRmkt} isFollower={isFollower} onlyActive={onlyActive} resultLabel={resultLabel} cprLabel={cprLabel} />
           ))
         }
         const perpetuo   = campaigns.filter(c => !isLancamento(c.campaignName))
@@ -446,7 +455,7 @@ export default function TabPerpetuo({ token, enabled }: TabPerpetuoProps) {
                   <div className="flex-1 h-px bg-border" />
                 </div>
                 {perpetuo.map(c => (
-                  <CampaignTable key={c.campaignId} campaign={c} isVideo={isVideo} isLead={isLead} isRmkt={false} onlyActive={onlyActive} />
+                  <CampaignTable key={c.campaignId} campaign={c} isVideo={isVideo} isLead={isLead} isRmkt={false} isFollower={false} onlyActive={onlyActive} resultLabel={resultLabel} cprLabel={cprLabel} />
                 ))}
               </div>
             )}
@@ -457,7 +466,7 @@ export default function TabPerpetuo({ token, enabled }: TabPerpetuoProps) {
                   <div className="flex-1 h-px bg-border" />
                 </div>
                 {lancamento.map(c => (
-                  <CampaignTable key={c.campaignId} campaign={c} isVideo={isVideo} isLead={isLead} isRmkt={false} onlyActive={onlyActive} />
+                  <CampaignTable key={c.campaignId} campaign={c} isVideo={isVideo} isLead={isLead} isRmkt={false} isFollower={false} onlyActive={onlyActive} resultLabel={resultLabel} cprLabel={cprLabel} />
                 ))}
               </div>
             )}
