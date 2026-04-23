@@ -106,7 +106,6 @@ function CampaignTable({
   isVideo,
   isLead,
   isRmkt,
-  isFollower,
   onlyActive,
   resultLabel,
   cprLabel,
@@ -115,7 +114,6 @@ function CampaignTable({
   isVideo: boolean
   isLead: boolean
   isRmkt: boolean
-  isFollower: boolean
   onlyActive: boolean
   resultLabel: string
   cprLabel: string
@@ -441,7 +439,7 @@ export default function TabPerpetuo({ token, enabled }: TabPerpetuoProps) {
         const isRmkt    = view === 'etapa5'
         if (!isCaptura) {
           return campaigns.map(c => (
-            <CampaignTable key={c.campaignId} campaign={c} isVideo={isVideo} isLead={isLead} isRmkt={isRmkt} isFollower={isFollower} onlyActive={onlyActive} resultLabel={resultLabel} cprLabel={cprLabel} />
+            <CampaignTable key={c.campaignId} campaign={c} isVideo={isVideo} isLead={isLead} isRmkt={isRmkt} onlyActive={onlyActive} resultLabel={resultLabel} cprLabel={cprLabel} />
           ))
         }
         const perpetuo   = campaigns.filter(c => !isLancamento(c.campaignName))
@@ -455,7 +453,7 @@ export default function TabPerpetuo({ token, enabled }: TabPerpetuoProps) {
                   <div className="flex-1 h-px bg-border" />
                 </div>
                 {perpetuo.map(c => (
-                  <CampaignTable key={c.campaignId} campaign={c} isVideo={isVideo} isLead={isLead} isRmkt={false} isFollower={false} onlyActive={onlyActive} resultLabel={resultLabel} cprLabel={cprLabel} />
+                  <CampaignTable key={c.campaignId} campaign={c} isVideo={isVideo} isLead={isLead} isRmkt={false} onlyActive={onlyActive} resultLabel={resultLabel} cprLabel={cprLabel} />
                 ))}
               </div>
             )}
@@ -466,7 +464,7 @@ export default function TabPerpetuo({ token, enabled }: TabPerpetuoProps) {
                   <div className="flex-1 h-px bg-border" />
                 </div>
                 {lancamento.map(c => (
-                  <CampaignTable key={c.campaignId} campaign={c} isVideo={isVideo} isLead={isLead} isRmkt={false} isFollower={false} onlyActive={onlyActive} resultLabel={resultLabel} cprLabel={cprLabel} />
+                  <CampaignTable key={c.campaignId} campaign={c} isVideo={isVideo} isLead={isLead} isRmkt={false} onlyActive={onlyActive} resultLabel={resultLabel} cprLabel={cprLabel} />
                 ))}
               </div>
             )}
