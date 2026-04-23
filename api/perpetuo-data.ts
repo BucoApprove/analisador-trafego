@@ -180,12 +180,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const adsetInsightFields = [
     'campaign_id', 'campaign_name', 'adset_id', 'adset_name',
-    'spend', 'actions',
+    'spend', 'actions', 'instagram_profile_visit',
     'video_thruplay_watched_actions', 'video_p25_watched_actions',
   ].join(',')
 
   const adInsightFields = [
-    'campaign_id', 'campaign_name', 'adset_id', 'ad_id', 'ad_name', 'spend', 'actions',
+    'campaign_id', 'campaign_name', 'adset_id', 'ad_id', 'ad_name', 'spend', 'actions', 'instagram_profile_visit',
   ].join(',')
 
   try {
@@ -274,12 +274,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       adsetResultTypes.set(s.id as string, getResultTypes(s, obj, customConvByEvent))
     }
 
-    // Para etapa1 (Posts Impulsionados), resultado = seguidores conquistados
-    if (view === 'etapa1') {
-      for (const [id] of adsetResultTypes) {
-        adsetResultTypes.set(id, ['follow', 'page_fan'])
-      }
-    }
+
 
     // Insights de anúncios agrupados por adsetId
     const adsByAdset = new Map<string, any[]>()
@@ -308,9 +303,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         lifetimeBudget: budget.lifetime,
         spend,
         ads: (adsByAdset.get(row.adset_id as string) ?? []).map((ad: any): AdRow => {
-          const adSpend      = Number(ad.spend ?? 0)
-          const adResTypes   = adsetResultTypes.get(ad.adset_id as string) ?? ['lead']
-          const adResults    = isVideo ? 0 : actionVal(ad.actions, ...adResTypes)
+          const adSpend   = Number(ad.spend ?? 0)
+          let adResults: number
+          if (isVideo) {
+            adResults = 0
+          } else if (view === 'etapa1') {
+            adResults = Number(ad.instagram_profile_visit ?? 0)
+          } else {
+            const adResTypes = adsetResultTypes.get(ad.adset_id as string) ?? ['lead']
+            adResults = actionVal(ad.actions, ...adResTypes)
+          }
           return {
             adId:          ad.ad_id,
             adName:        ad.ad_name,
@@ -324,6 +326,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (isVideo) {
         adsetRow.videoViews3s    = Number(row.video_thruplay_watched_actions?.[0]?.value ?? 0)
         adsetRow.videoViews25pct = Number(row.video_p25_watched_actions?.[0]?.value ?? 0)
+      } else if (view === 'etapa1') {
+        const profileVisits    = Number(row.instagram_profile_visit ?? 0)
+        adsetRow.results       = profileVisits
+        adsetRow.costPerResult = profileVisits > 0 ? spend / profileVisits : 0
       } else {
         const rowResTypes      = adsetResultTypes.get(row.adset_id as string) ?? ['lead']
         const results          = actionVal(row.actions, ...rowResTypes)
