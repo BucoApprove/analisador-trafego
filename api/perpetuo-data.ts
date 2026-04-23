@@ -180,12 +180,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const adsetInsightFields = [
     'campaign_id', 'campaign_name', 'adset_id', 'adset_name',
-    'spend', 'actions', 'instagram_profile_visit',
+    'spend', 'actions',
     'video_thruplay_watched_actions', 'video_p25_watched_actions',
   ].join(',')
 
   const adInsightFields = [
-    'campaign_id', 'campaign_name', 'adset_id', 'ad_id', 'ad_name', 'spend', 'actions', 'instagram_profile_visit',
+    'campaign_id', 'campaign_name', 'adset_id', 'ad_id', 'ad_name', 'spend', 'actions',
   ].join(',')
 
   try {
@@ -308,7 +308,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           if (isVideo) {
             adResults = 0
           } else if (view === 'etapa1') {
-            adResults = Number(ad.instagram_profile_visit ?? 0)
+            adResults = actionVal(ad.actions, 'instagram_profile_visit', 'link_click')
           } else {
             const adResTypes = adsetResultTypes.get(ad.adset_id as string) ?? ['lead']
             adResults = actionVal(ad.actions, ...adResTypes)
@@ -327,7 +327,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         adsetRow.videoViews3s    = Number(row.video_thruplay_watched_actions?.[0]?.value ?? 0)
         adsetRow.videoViews25pct = Number(row.video_p25_watched_actions?.[0]?.value ?? 0)
       } else if (view === 'etapa1') {
-        const profileVisits    = Number(row.instagram_profile_visit ?? 0)
+        // Para VISIT_INSTAGRAM_PROFILE: tenta action type específico, cai no link_click
+        const profileVisits    = actionVal(row.actions, 'instagram_profile_visit', 'link_click')
         adsetRow.results       = profileVisits
         adsetRow.costPerResult = profileVisits > 0 ? spend / profileVisits : 0
       } else {
