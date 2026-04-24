@@ -178,7 +178,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const isVideo = view === 'etapa3'
   const isLead  = view === 'etapa2' || view === 'anatomia' || view === 'patologia'
 
-  const adsetInsightFields = [
+  // ── Modo rawdebug: retorna resposta crua de um único adset para identificar fields ──
+  if (typeof req.query.rawdebug === 'string') {
+    const adsetId = req.query.rawdebug
+    const rawUrl = new URL(`${META_BASE}/${adsetId}/insights`)
+    rawUrl.searchParams.set('fields', [
+      'spend', 'actions', 'unique_actions', 'outbound_clicks',
+      'unique_outbound_clicks', 'clicks', 'unique_clicks', 'inline_link_clicks',
+      'inline_post_engagement', 'post_engagement', 'post_clicks',
+      'cost_per_action_type', 'cost_per_unique_action_type',
+      'website_ctr', 'video_thruplay_watched_actions',
+    ].join(','))
+    rawUrl.searchParams.set('time_range',   timeRange)
+    rawUrl.searchParams.set('access_token', accessToken)
+    rawUrl.searchParams.set('limit',        '10')
+    try {
+      const rawRes = await fetch(rawUrl.toString())
+      const rawJson = await rawRes.json()
+      return res.json({ rawdebug: true, adsetId, dateRange: { since, until }, response: rawJson })
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message })
+    }
+  }
+
     'campaign_id', 'campaign_name', 'adset_id', 'adset_name',
     'spend', 'actions', 'unique_actions', 'outbound_clicks',
     'video_thruplay_watched_actions', 'video_p25_watched_actions',
