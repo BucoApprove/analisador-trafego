@@ -45,13 +45,8 @@ interface PerpetuoResponse {
 
 // ─── Nav config ───────────────────────────────────────────────────────────────
 
-const CONTA1_VIEWS = [
-  { id: 'etapa1', label: 'Posts Impulsionados' },
-  { id: 'etapa2', label: 'Captura' },
-  { id: 'etapa3', label: 'Relacionamento' },
-  { id: 'etapa4', label: 'Conversão' },
-  { id: 'etapa5', label: 'Remarketing' },
-]
+// CONTA1_VIEWS preserved for reference — navigation is now handled by STAGE_CONFIG
+// const CONTA1_VIEWS = [ ... ]
 
 const CONTA2_VIEWS = [
   { id: 'anatomia',           label: 'Pós-Grad. Anatomia'  },
@@ -59,6 +54,61 @@ const CONTA2_VIEWS = [
   { id: 'lowticket-brasil',   label: 'Low Ticket Brasil'   },
   { id: 'lowticket-latam',    label: 'Low Ticket Latam'    },
 ]
+
+// ─── Stage card config (conta1 only) ─────────────────────────────────────────
+
+const STAGE_CONFIG = [
+  {
+    id: 'etapa1', label: 'Descoberta', icon: '📸',
+    bg:        'bg-gradient-to-br from-blue-100 to-blue-200 dark:from-blue-950/50 dark:to-blue-900/50',
+    activeBg:  'from-blue-200 to-blue-300 dark:from-blue-900/70 dark:to-blue-800/70',
+    labelCls:  'text-blue-700 dark:text-blue-400',
+    arrowHex:  '#93c5fd',
+    metricLabel: (results: number) => `${fmt(results)} seguidor${results !== 1 ? 'es' : ''}`,
+    subLabel:  'CPS médio',
+    isVideo:   false,
+  },
+  {
+    id: 'etapa2', label: 'Captura', icon: '🎯',
+    bg:        'bg-gradient-to-br from-purple-100 to-purple-200 dark:from-purple-950/50 dark:to-purple-900/50',
+    activeBg:  'from-purple-200 to-purple-300 dark:from-purple-900/70 dark:to-purple-800/70',
+    labelCls:  'text-purple-700 dark:text-purple-400',
+    arrowHex:  '#c4b5fd',
+    metricLabel: (results: number) => `${fmt(results)} lead${results !== 1 ? 's' : ''}`,
+    subLabel:  'CPL médio',
+    isVideo:   false,
+  },
+  {
+    id: 'etapa3', label: 'Relacionamento', icon: '🤝',
+    bg:        'bg-gradient-to-br from-yellow-100 to-amber-200 dark:from-yellow-950/50 dark:to-amber-900/50',
+    activeBg:  'from-yellow-200 to-amber-300 dark:from-yellow-900/70 dark:to-amber-800/70',
+    labelCls:  'text-yellow-800 dark:text-yellow-400',
+    arrowHex:  '#fde68a',
+    metricLabel: (results: number) => `${fmt(results)} reprod.`,
+    subLabel:  'Views 25%',
+    isVideo:   true,
+  },
+  {
+    id: 'etapa4', label: 'Conversão', icon: '💰',
+    bg:        'bg-gradient-to-br from-orange-100 to-orange-200 dark:from-orange-950/50 dark:to-orange-900/50',
+    activeBg:  'from-orange-200 to-orange-300 dark:from-orange-900/70 dark:to-orange-800/70',
+    labelCls:  'text-orange-700 dark:text-orange-400',
+    arrowHex:  '#fdba74',
+    metricLabel: (results: number) => `${fmt(results)} resultado${results !== 1 ? 's' : ''}`,
+    subLabel:  'CPA médio',
+    isVideo:   false,
+  },
+  {
+    id: 'etapa5', label: 'Remarketing', icon: '🔁',
+    bg:        'bg-gradient-to-br from-pink-100 to-pink-200 dark:from-pink-950/50 dark:to-pink-900/50',
+    activeBg:  'from-pink-200 to-pink-300 dark:from-pink-900/70 dark:to-pink-800/70',
+    labelCls:  'text-pink-700 dark:text-pink-400',
+    arrowHex:  '#f9a8d4',
+    metricLabel: (results: number) => `${fmt(results)} lead${results !== 1 ? 's' : ''}`,
+    subLabel:  'CPL médio',
+    isVideo:   false,
+  },
+] as const
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -422,7 +472,6 @@ export default function TabPerpetuo({ token, enabled }: TabPerpetuoProps) {
   // Rastreia quais chaves já foram buscadas nesta sessão
   const fetchedKeys = useRef<Set<string>>(new Set())
 
-  const currentViews = account === 'conta1' ? CONTA1_VIEWS : CONTA2_VIEWS
   const isVideo      = view === 'etapa3'
   const isLead       = view === 'etapa2' || view === 'anatomia' || view === 'patologia'
   const isFollower   = view === 'etapa1'
@@ -501,50 +550,32 @@ export default function TabPerpetuo({ token, enabled }: TabPerpetuoProps) {
   return (
     <div className="space-y-5">
 
-      {/* ── Seletor de conta ── */}
+      {/* ── Linha superior: contas + toggle + período ── */}
       <div className="flex flex-wrap items-center gap-2">
         <Button
           size="sm"
           variant={account === 'conta1' ? 'default' : 'outline'}
           onClick={() => handleAccountChange('conta1')}
         >
-          GBS Launch — Lançamentos
+          GBS Launch
         </Button>
         <Button
           size="sm"
           variant={account === 'conta2' ? 'default' : 'outline'}
           onClick={() => handleAccountChange('conta2')}
         >
-          GBS — Pós-graduações
+          GBS Pós-grad
         </Button>
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex flex-wrap items-center gap-2">
           <button
             onClick={() => setOnlyActive(v => !v)}
             className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none ${onlyActive ? 'bg-primary' : 'bg-muted-foreground/40'}`}
           >
             <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${onlyActive ? 'translate-x-4' : 'translate-x-0.5'}`} />
           </button>
-          <span className="text-sm text-muted-foreground">
+          <span className="text-sm text-muted-foreground mr-3">
             {onlyActive ? 'Somente ativos' : 'Todos (incl. pausados)'}
           </span>
-        </div>
-      </div>
-
-      {/* ── Seletor de etapa/produto + período ── */}
-      <div className="flex flex-wrap items-end gap-3">
-        <div className="flex flex-wrap gap-2">
-          {currentViews.map(v => (
-            <Button
-              key={v.id}
-              size="sm"
-              variant={view === v.id ? 'default' : 'outline'}
-              onClick={() => handleViewChange(v.id)}
-            >
-              {v.label}
-            </Button>
-          ))}
-        </div>
-        <div className="flex items-center gap-2 ml-auto">
           <Input
             type="date"
             value={since}
@@ -568,6 +599,88 @@ export default function TabPerpetuo({ token, enabled }: TabPerpetuoProps) {
         </div>
       </div>
 
+      {/* ── Stage cards (conta1) / botões produto (conta2) ── */}
+      {account === 'conta1' ? (
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3 pb-2">
+          {STAGE_CONFIG.map(stage => {
+            const cacheKey = `conta1|${stage.id}|${since}|${until}`
+            const cached   = _cache.get(cacheKey)
+            const isActive = view === stage.id
+            let spend = 0; let results = 0; let video25 = 0; let hasData = false
+            if (cached) {
+              hasData = true
+              for (const c of cached.data.campaigns) {
+                for (const a of c.adsets) {
+                  spend   += a.spend
+                  results += stage.isVideo ? (a.videoViews3s ?? 0) : (a.results ?? 0)
+                  video25 += a.videoViews25pct ?? 0
+                }
+              }
+            }
+            const cpr = results > 0 ? spend / results : 0
+            return (
+              <button
+                key={stage.id}
+                onClick={() => handleViewChange(stage.id)}
+                className={`relative rounded-2xl p-4 text-left transition-all duration-200 ${stage.bg} ${
+                  isActive
+                    ? 'ring-2 ring-black/20 dark:ring-white/20 shadow-xl -translate-y-1'
+                    : 'hover:-translate-y-1 hover:shadow-lg'
+                }`}
+              >
+                <span className="text-2xl mb-2 block">{stage.icon}</span>
+                <div className={`text-[10px] font-extrabold uppercase tracking-widest mb-3 ${stage.labelCls}`}>
+                  {stage.label}
+                </div>
+                {hasData ? (
+                  <>
+                    <div className="text-lg font-extrabold text-foreground leading-tight">{brl(spend)}</div>
+                    <div className="text-[11px] text-muted-foreground mb-1.5">Total investido</div>
+                    <div className="text-xs font-bold text-foreground">
+                      {stage.isVideo
+                        ? `${fmt(video25)} views 25%`
+                        : cpr > 0
+                          ? `${stage.subLabel} ${brl(cpr)}`
+                          : stage.metricLabel(results)
+                      }
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="text-lg font-extrabold text-foreground/25">—</div>
+                    <div className="text-[11px] text-muted-foreground mb-1.5">Total investido</div>
+                    <div className="text-xs text-muted-foreground/50">Clique para carregar</div>
+                  </>
+                )}
+                {isActive && (
+                  <div
+                    className="absolute -bottom-3.5 left-1/2 -translate-x-1/2 w-0 h-0"
+                    style={{
+                      borderLeft: '11px solid transparent',
+                      borderRight: '11px solid transparent',
+                      borderTop: `14px solid ${stage.arrowHex}`,
+                    }}
+                  />
+                )}
+              </button>
+            )
+          })}
+        </div>
+      ) : (
+        <div className="flex flex-wrap gap-2">
+          {CONTA2_VIEWS.map(v => (
+            <Button
+              key={v.id}
+              size="sm"
+              variant={view === v.id ? 'default' : 'outline'}
+              onClick={() => handleViewChange(v.id)}
+            >
+              {v.label}
+            </Button>
+          ))}
+        </div>
+      )}
+
       {/* ── Timestamp última atualização ── */}
       {fetchedAt && !loading && (
         <p className="text-xs text-muted-foreground -mt-2">
@@ -589,8 +702,8 @@ export default function TabPerpetuo({ token, enabled }: TabPerpetuoProps) {
         </div>
       )}
 
-      {/* ── Sumário rápido ── */}
-      {!loading && data && totals && !isVideo && (
+      {/* ── Sumário rápido (apenas conta2 — conta1 usa stage cards) ── */}
+      {!loading && data && totals && !isVideo && account === 'conta2' && (
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
           <Card>
             <CardContent className="pt-5 pb-4">
