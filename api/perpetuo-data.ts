@@ -180,12 +180,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const adsetInsightFields = [
     'campaign_id', 'campaign_name', 'adset_id', 'adset_name',
-    'spend', 'actions', 'unique_actions',
+    'spend', 'actions', 'unique_actions', 'outbound_clicks',
     'video_thruplay_watched_actions', 'video_p25_watched_actions',
   ].join(',')
 
   const adInsightFields = [
-    'campaign_id', 'campaign_name', 'adset_id', 'ad_id', 'ad_name', 'spend', 'actions', 'unique_actions',
+    'campaign_id', 'campaign_name', 'adset_id', 'ad_id', 'ad_name', 'spend', 'actions', 'unique_actions', 'outbound_clicks',
   ].join(',')
 
   try {
@@ -308,7 +308,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           if (isVideo) {
             adResults = 0
           } else if (view === 'etapa1') {
-            adResults = actionVal(ad.unique_actions, 'link_click')
+            adResults = actionVal(ad.outbound_clicks, 'outbound_click')
           } else {
             const adResTypes = adsetResultTypes.get(ad.adset_id as string) ?? ['lead']
             adResults = actionVal(ad.actions, ...adResTypes)
@@ -327,8 +327,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         adsetRow.videoViews3s    = Number(row.video_thruplay_watched_actions?.[0]?.value ?? 0)
         adsetRow.videoViews25pct = Number(row.video_p25_watched_actions?.[0]?.value ?? 0)
       } else if (view === 'etapa1') {
-        // Para VISIT_INSTAGRAM_PROFILE: unique_actions link_click = visitantes únicos ao perfil
-        const profileVisits    = actionVal(row.unique_actions, 'link_click')
+        // Para VISIT_INSTAGRAM_PROFILE: outbound_clicks = cliques que navegam ao perfil
+        const profileVisits    = actionVal(row.outbound_clicks, 'outbound_click')
         adsetRow.results       = profileVisits
         adsetRow.costPerResult = profileVisits > 0 ? spend / profileVisits : 0
       } else {
@@ -364,12 +364,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         for (const action of (row.actions ?? []) as { action_type: string; value: string }[]) {
           actionTypeSummary[action.action_type] = (actionTypeSummary[action.action_type] ?? 0) + Number(action.value)
         }
-      }      // unique_actions link_click por campanha (para validar métrica etapa1)
+      }      // Compara métricas candidatas por campanha para etapa1
       const uniqueClicksPerCampaign: Record<string, number> = {}
+      const outboundClicksPerCampaign: Record<string, number> = {}
       for (const row of adsetInsightsData) {
         if (!matchesFilter(row.campaign_name as string, filter)) continue
         const c = row.campaign_name as string
-        uniqueClicksPerCampaign[c] = (uniqueClicksPerCampaign[c] ?? 0) + actionVal(row.unique_actions, 'link_click')
+        uniqueClicksPerCampaign[c]   = (uniqueClicksPerCampaign[c] ?? 0)   + actionVal(row.unique_actions, 'link_click')
+        outboundClicksPerCampaign[c] = (outboundClicksPerCampaign[c] ?? 0) + actionVal(row.outbound_clicks, 'outbound_click')
       }      // Mostra promoted_object e resultTypes por adset para diagnóstico
       const adsetDebug: Record<string, unknown> = {}
       for (const s of adsetsData) {
@@ -388,6 +390,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         debug: true,
         actionTypes: actionTypeSummary,
         uniqueClicksPerCampaign,
+        outboundClicksPerCampaign,
         adsets: adsetDebug,
         customConversions: customConvsData.map((cc: any) => ({
           id: cc.id, name: cc.name, rule: cc.rule,
