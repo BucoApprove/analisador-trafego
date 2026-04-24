@@ -185,7 +185,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     rawUrl.searchParams.set('fields', [
       'spend', 'actions', 'unique_actions', 'outbound_clicks',
       'unique_outbound_clicks', 'clicks', 'unique_clicks', 'inline_link_clicks',
-      'inline_post_engagement', 'post_engagement', 'post_clicks',
+      'inline_post_engagement', 'post_engagement',
       'cost_per_action_type', 'cost_per_unique_action_type',
       'website_ctr', 'video_thruplay_watched_actions',
     ].join(','))
