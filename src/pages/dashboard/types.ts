@@ -235,7 +235,7 @@ export interface SalesUtmData {
   byContent:    UtmSalesAttribution[]
   daysToConvert: { label: string; count: number }[]
   tagCountDist:  { label: string; count: number }[]
-  drilldown:     { campaign: string; medium: string; content: string; count: number }[]
+  drilldown:     { source: string; campaign: string; medium: string; content: string; count: number }[]
 }
 
 // ─── Perfil dos compradores BA25 (UTM + receita + fase) ──────────────────────
