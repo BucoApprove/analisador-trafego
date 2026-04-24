@@ -1,8 +1,8 @@
-import { useState, useEffect, useRef, Fragment } from 'react'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { useState, useEffect, useRef } from 'react'
+import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Loader2, RefreshCw } from 'lucide-react'
+import { Loader2, RefreshCw, ChevronDown, Trophy } from 'lucide-react'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -99,13 +99,31 @@ function isLancamento(name: string): boolean {
   return LANCAMENTO_KEYWORDS.some(kw => lower.includes(kw))
 }
 
-// ─── Table ────────────────────────────────────────────────────────────────────
+// ─── Sales drilldown types (from launch-sales-utms API) ──────────────────────
 
-function CampaignTable({
+interface SalesDrilldownItem {
+  source: string
+  campaign: string
+  medium: string
+  content: string
+  count: number
+}
+
+interface SalesData {
+  totalBuyers: number
+  since: string
+  until: string
+  drilldown: SalesDrilldownItem[]
+}
+
+// ─── CampaignCard — accordion visual ─────────────────────────────────────────
+
+function CampaignCard({
   campaign,
   isVideo,
   isLead,
   isRmkt,
+  isFollower,
   onlyActive,
   resultLabel,
   cprLabel,
@@ -114,105 +132,270 @@ function CampaignTable({
   isVideo: boolean
   isLead: boolean
   isRmkt: boolean
+  isFollower: boolean
   onlyActive: boolean
   resultLabel: string
   cprLabel: string
 }) {
+  const [open, setOpen] = useState(false)
+  const [openAdsets, setOpenAdsets] = useState<Set<string>>(new Set())
+
   const visibleAdsets = onlyActive
     ? campaign.adsets.filter(a => a.adsetStatus === 'ACTIVE')
     : campaign.adsets
 
   if (visibleAdsets.length === 0) return null
 
+  // Totais da campanha
+  const totSpend   = visibleAdsets.reduce((s, a) => s + a.spend, 0)
+  const totResults = visibleAdsets.reduce((s, a) => s + (isVideo ? (a.videoViews3s ?? 0) : (a.results ?? 0)), 0)
+  const cpr        = totResults > 0 ? totSpend / totResults : 0
+  const hasActive  = visibleAdsets.some(a => a.adsetStatus === 'ACTIVE')
+
+  function toggleAdset(id: string) {
+    setOpenAdsets(prev => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
+  }
+
   return (
-    <Card>
-      <CardHeader className="pb-3">
-        <CardTitle className="text-sm font-semibold">{campaign.campaignName}</CardTitle>
-      </CardHeader>
-      <CardContent className="pt-0">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b text-muted-foreground text-xs">
-                <th className="pb-2 font-medium text-left pr-6">{isRmkt ? 'Público / Anúncio' : 'Conjunto / Anúncio'}</th>
-                <th className="pb-2 font-medium text-right pr-6">Orçamento</th>
-                <th className="pb-2 font-medium text-right pr-6">Investido</th>
-                {isVideo ? (
-                  <>
-                    <th className="pb-2 font-medium text-right pr-6">Views ≥3s</th>
-                    <th className="pb-2 font-medium text-right">Views 25%</th>
-                  </>
-                ) : (
-                  <>
-                    <th className="pb-2 font-medium text-right pr-6">{resultLabel}</th>
-                    <th className="pb-2 font-medium text-right pr-6">{cprLabel}</th>
-                    {isLead && <th className="pb-2 font-medium text-right">Conv. Página</th>}
-                  </>
-                )}
-              </tr>
-            </thead>
-            <tbody>
-              {visibleAdsets.map(adset => {
-                const displayName = isRmkt && adset.audienceName ? adset.audienceName : adset.adsetName
-                const isPaused = adset.adsetStatus !== 'ACTIVE'
-                return (
-                  <Fragment key={adset.adsetId}>
-                    {/* Adset row */}
-                    <tr className={`border-b bg-muted/30 ${isPaused ? 'opacity-50' : ''}`}>
-                      <td className="py-2 pr-6 font-medium">
-                        {displayName}
-                        {isPaused && (
-                          <span className="ml-2 text-xs font-normal text-muted-foreground">(pausado)</span>
-                        )}
-                      </td>
-                      <td className="py-2 pr-6 text-right">
-                        <BudgetCell daily={adset.dailyBudget} lifetime={adset.lifetimeBudget} />
-                      </td>
-                      <td className="py-2 pr-6 text-right">{brl(adset.spend)}</td>
-                      {isVideo ? (
-                        <>
-                          <td className="py-2 pr-6 text-right">{fmt(adset.videoViews3s ?? 0)}</td>
-                          <td className="py-2 text-right">{fmt(adset.videoViews25pct ?? 0)}</td>
-                        </>
-                      ) : (
-                        <>
-                          <td className="py-2 pr-6 text-right">{fmt(adset.results ?? 0)}</td>
-                          <td className="py-2 pr-6 text-right">
-                            {(adset.results ?? 0) > 0 ? brl(adset.costPerResult ?? 0) : '—'}
-                          </td>
-                          {isLead && (
-                            <td className="py-2 text-right">
-                              {(adset.landingPageViews ?? 0) > 0 ? pct(adset.conversionRate ?? 0) : '—'}
-                            </td>
-                          )}
-                        </>
-                      )}
-                    </tr>
-                    {/* Ad rows — skip for video view */}
-                    {!isVideo && adset.ads.map(ad => (
-                      <tr key={ad.adId} className={`border-b hover:bg-muted/20 ${isPaused ? 'opacity-50' : ''}`}>
-                        <td className="py-1.5 pr-6 pl-6 text-muted-foreground">
-                          <span className="mr-1 opacity-50">↳</span>{ad.adName}
-                        </td>
-                        <td className="py-1.5 pr-6 text-right text-muted-foreground">—</td>
-                        <td className="py-1.5 pr-6 text-right text-muted-foreground">{brl(ad.spend)}</td>
-                        <td className="py-1.5 pr-6 text-right text-muted-foreground">{fmt(ad.results)}</td>
-                        <td className="py-1.5 pr-6 text-right text-muted-foreground">
-                          {ad.results > 0 ? brl(ad.costPerResult) : '—'}
-                        </td>
-                        {isLead && <td className="py-1.5 text-right text-muted-foreground">—</td>}
-                      </tr>
-                    ))}
-                  </Fragment>
-                )
-              })}
-            </tbody>
-          </table>
+    <div className="rounded-2xl border border-border bg-card overflow-hidden shadow-sm">
+      {/* ── Campaign header ── */}
+      <button
+        onClick={() => setOpen(v => !v)}
+        className="w-full flex items-center gap-3 px-5 py-4 hover:bg-muted/40 transition-colors text-left"
+      >
+        <span className={`h-2.5 w-2.5 rounded-full shrink-0 ${hasActive ? 'bg-emerald-500 shadow-[0_0_0_3px_#d1fae5]' : 'bg-muted-foreground/40'}`} />
+        <span className="flex-1 font-semibold text-sm truncate">{campaign.campaignName}</span>
+        <div className="hidden sm:flex items-center gap-6 shrink-0">
+          <div className="text-right">
+            <p className="text-[10px] text-muted-foreground uppercase tracking-wide font-semibold">Investido</p>
+            <p className="text-sm font-bold">{brl(totSpend)}</p>
+          </div>
+          {!isVideo && (
+            <>
+              <div className="text-right">
+                <p className="text-[10px] text-muted-foreground uppercase tracking-wide font-semibold">{resultLabel}</p>
+                <p className="text-sm font-bold">{fmt(totResults)}</p>
+              </div>
+              <div className="text-right">
+                <p className="text-[10px] text-muted-foreground uppercase tracking-wide font-semibold">{cprLabel}</p>
+                <p className="text-sm font-bold">{cpr > 0 ? brl(cpr) : '—'}</p>
+              </div>
+            </>
+          )}
+          {isVideo && (
+            <div className="text-right">
+              <p className="text-[10px] text-muted-foreground uppercase tracking-wide font-semibold">Views ≥3s</p>
+              <p className="text-sm font-bold">{fmt(totResults)}</p>
+            </div>
+          )}
         </div>
-      </CardContent>
-    </Card>
+        <ChevronDown className={`h-4 w-4 text-muted-foreground shrink-0 transition-transform duration-200 ${open ? 'rotate-180' : ''}`} />
+      </button>
+
+      {/* ── Adsets (accordion body) ── */}
+      {open && (
+        <div className="bg-muted/30 border-t border-border divide-y divide-border">
+          {visibleAdsets.map(adset => {
+            const isPaused   = adset.adsetStatus !== 'ACTIVE'
+            const displayName = isRmkt && adset.audienceName ? adset.audienceName : adset.adsetName
+            const adsetOpen  = openAdsets.has(adset.adsetId)
+            const hasAds     = !isVideo && adset.ads.length > 0
+            const adsetResults = isVideo ? (adset.videoViews3s ?? 0) : (adset.results ?? 0)
+            const adsetCpr     = adsetResults > 0 ? adset.spend / adsetResults : 0
+
+            return (
+              <div key={adset.adsetId} className={isPaused ? 'opacity-40' : ''}>
+                {/* adset row */}
+                <div
+                  className={`flex items-center gap-3 px-5 py-3 ${hasAds ? 'cursor-pointer hover:bg-muted/50' : ''} transition-colors`}
+                  onClick={() => hasAds && toggleAdset(adset.adsetId)}
+                >
+                  <span className={`h-2 w-2 rounded-full shrink-0 ${isPaused ? 'bg-muted-foreground/30' : 'bg-emerald-400'}`} />
+                  <span className="flex-1 text-sm font-medium truncate">
+                    {displayName}
+                    {isPaused && <span className="ml-2 text-xs font-normal text-muted-foreground">(pausado)</span>}
+                  </span>
+                  <div className="hidden sm:flex items-center gap-5 text-right shrink-0">
+                    <div>
+                      <p className="text-[10px] text-muted-foreground">Orçamento</p>
+                      <p className="text-xs font-semibold"><BudgetCell daily={adset.dailyBudget} lifetime={adset.lifetimeBudget} /></p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] text-muted-foreground">Investido</p>
+                      <p className="text-xs font-semibold">{brl(adset.spend)}</p>
+                    </div>
+                    {!isVideo && (
+                      <>
+                        <div>
+                          <p className="text-[10px] text-muted-foreground">{resultLabel}</p>
+                          <p className="text-xs font-semibold">{fmt(adsetResults)}</p>
+                        </div>
+                        <div>
+                          <p className="text-[10px] text-muted-foreground">{cprLabel}</p>
+                          <p className="text-xs font-semibold">{adsetCpr > 0 ? brl(adsetCpr) : '—'}</p>
+                        </div>
+                        {isLead && (
+                          <div>
+                            <p className="text-[10px] text-muted-foreground">Conv. Pág.</p>
+                            <p className="text-xs font-semibold">{(adset.landingPageViews ?? 0) > 0 ? pct(adset.conversionRate ?? 0) : '—'}</p>
+                          </div>
+                        )}
+                      </>
+                    )}
+                    {isVideo && (
+                      <div>
+                        <p className="text-[10px] text-muted-foreground">Views 25%</p>
+                        <p className="text-xs font-semibold">{fmt(adset.videoViews25pct ?? 0)}</p>
+                      </div>
+                    )}
+                  </div>
+                  {hasAds && (
+                    <ChevronDown className={`h-3.5 w-3.5 text-muted-foreground shrink-0 transition-transform duration-200 ${adsetOpen ? 'rotate-180' : ''}`} />
+                  )}
+                </div>
+
+                {/* ad rows */}
+                {hasAds && adsetOpen && (
+                  <div className="bg-background/60 border-t border-border divide-y divide-border/60">
+                    {adset.ads.map((ad, i) => {
+                      const isTop = i === 0 && ad.results > 0
+                      const maxRes = adset.ads[0]?.results ?? 1
+                      const barPct = maxRes > 0 ? (ad.results / maxRes) * 100 : 0
+                      return (
+                        <div key={ad.adId} className={`flex items-center gap-3 px-7 py-2.5 ${ad.results === 0 ? 'opacity-40' : ''}`}>
+                          <span className="w-5 shrink-0 text-sm">
+                            {isTop ? <Trophy className="h-3.5 w-3.5 text-amber-500" /> : <span className="opacity-0"><Trophy className="h-3.5 w-3.5" /></span>}
+                          </span>
+                          <span className="w-40 shrink-0 text-xs text-muted-foreground truncate">{ad.adName}</span>
+                          <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden max-w-40">
+                            <div
+                              className={`h-full rounded-full ${isTop ? 'bg-amber-400' : 'bg-primary/60'}`}
+                              style={{ width: `${barPct}%` }}
+                            />
+                          </div>
+                          <span className="text-xs font-semibold w-20 text-right shrink-0">{fmt(ad.results)} {isFollower ? 'seg.' : 'leads'}</span>
+                          <span className="text-xs text-muted-foreground w-16 text-right shrink-0">
+                            {ad.results > 0 ? brl(ad.costPerResult) : '—'}
+                          </span>
+                          <span className="text-xs text-muted-foreground w-16 text-right shrink-0">{brl(ad.spend)}</span>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
   )
 }
+
+// ─── Top Criativos por Vendas ─────────────────────────────────────────────────
+
+function TopCreativesByConversion({ token, since, until }: { token: string; since: string; until: string }) {
+  const [data, setData]       = useState<SalesData | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError]     = useState<string | null>(null)
+  const [open, setOpen]       = useState(false)
+
+  async function load() {
+    setLoading(true)
+    setError(null)
+    try {
+      const params = new URLSearchParams({ since, until })
+      const res  = await fetch(`/api/launch-sales-utms?${params}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      const json = await res.json()
+      if (!res.ok) throw new Error(json.error ?? 'Erro ao carregar vendas')
+      setData(json)
+    } catch (e: any) {
+      setError(e.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // top 15 por utm_content (criativo)
+  const topCreatives = data?.drilldown
+    .reduce<{ content: string; campaign: string; count: number }[]>((acc, d) => {
+      const key = d.content || '(sem utm_content)'
+      const existing = acc.find(x => x.content === key)
+      if (existing) {
+        existing.count += d.count
+        if (!existing.campaign && d.campaign) existing.campaign = d.campaign
+      } else {
+        acc.push({ content: key, campaign: d.campaign || '', count: d.count })
+      }
+      return acc
+    }, [])
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 15)
+
+  const maxCount = topCreatives?.[0]?.count ?? 1
+
+  return (
+    <div className="rounded-2xl border border-border bg-card overflow-hidden shadow-sm">
+      <button
+        onClick={() => { setOpen(v => !v); if (!open && !data && !loading) load() }}
+        className="w-full flex items-center gap-3 px-5 py-4 hover:bg-muted/40 transition-colors text-left"
+      >
+        <Trophy className="h-4 w-4 text-amber-500 shrink-0" />
+        <span className="flex-1 font-semibold text-sm">Top Criativos por Vendas</span>
+        <span className="text-xs text-muted-foreground">Cruzamento UTM × Vendas</span>
+        <ChevronDown className={`h-4 w-4 text-muted-foreground shrink-0 transition-transform duration-200 ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open && (
+        <div className="border-t border-border px-5 py-4">
+          {loading && <div className="flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>}
+          {error && <p className="text-sm text-destructive">{error}</p>}
+          {data && topCreatives && (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-xs text-muted-foreground">
+                  Total de compradores no período: <strong className="text-foreground">{fmt(data.totalBuyers)}</strong>
+                </p>
+                <Button variant="ghost" size="sm" onClick={load} disabled={loading}>
+                  <RefreshCw className="h-3.5 w-3.5 mr-1" /> Atualizar
+                </Button>
+              </div>
+              {topCreatives.length === 0 && (
+                <p className="text-sm text-muted-foreground text-center py-6">Sem dados de UTM para o período.</p>
+              )}
+              {topCreatives.map((c, i) => {
+                const barPct = (c.count / maxCount) * 100
+                const isTop  = i === 0
+                return (
+                  <div key={c.content} className={`flex items-center gap-3 rounded-xl px-3 py-2.5 ${isTop ? 'bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800' : 'bg-muted/30'}`}>
+                    <span className="w-5 shrink-0 text-sm font-bold text-muted-foreground">{isTop ? '🏆' : `${i + 1}`}</span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold truncate">{c.content}</p>
+                      {c.campaign && <p className="text-[10px] text-muted-foreground truncate">{c.campaign}</p>}
+                    </div>
+                    <div className="w-32 h-2 bg-muted rounded-full overflow-hidden shrink-0">
+                      <div
+                        className={`h-full rounded-full ${isTop ? 'bg-amber-400' : 'bg-primary/70'}`}
+                        style={{ width: `${barPct}%` }}
+                      />
+                    </div>
+                    <span className="text-sm font-bold w-16 text-right shrink-0">{c.count} venda{c.count !== 1 ? 's' : ''}</span>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 
 // ─── Tab principal ────────────────────────────────────────────────────────────
 
@@ -432,15 +615,20 @@ export default function TabPerpetuo({ token, enabled }: TabPerpetuoProps) {
         </div>
       )}
 
-      {/* ── Tabelas por campanha ── */}
+      {/* ── Campanhas ── */}
       {!loading && data && (() => {
         const campaigns = data.campaigns
         const isCaptura = view === 'etapa2'
         const isRmkt    = view === 'etapa5'
+        const sharedProps = { isVideo, isLead, isFollower, onlyActive, resultLabel, cprLabel }
         if (!isCaptura) {
-          return campaigns.map(c => (
-            <CampaignTable key={c.campaignId} campaign={c} isVideo={isVideo} isLead={isLead} isRmkt={isRmkt} onlyActive={onlyActive} resultLabel={resultLabel} cprLabel={cprLabel} />
-          ))
+          return (
+            <div className="space-y-3">
+              {campaigns.map(c => (
+                <CampaignCard key={c.campaignId} campaign={c} isRmkt={isRmkt} {...sharedProps} />
+              ))}
+            </div>
+          )
         }
         const perpetuo   = campaigns.filter(c => !isLancamento(c.campaignName))
         const lancamento = campaigns.filter(c =>  isLancamento(c.campaignName))
@@ -449,28 +637,40 @@ export default function TabPerpetuo({ token, enabled }: TabPerpetuoProps) {
             {perpetuo.length > 0 && (
               <div className="space-y-3">
                 <div className="flex items-center gap-3">
-                  <span className="text-[10px] font-bold tracking-widest uppercase text-emerald-700 bg-emerald-100 rounded-full px-3 py-1">Perpétuo</span>
+                  <span className="text-[10px] font-bold tracking-widest uppercase text-emerald-700 bg-emerald-100 dark:text-emerald-300 dark:bg-emerald-900/40 rounded-full px-3 py-1">Perpétuo</span>
                   <div className="flex-1 h-px bg-border" />
                 </div>
                 {perpetuo.map(c => (
-                  <CampaignTable key={c.campaignId} campaign={c} isVideo={isVideo} isLead={isLead} isRmkt={false} onlyActive={onlyActive} resultLabel={resultLabel} cprLabel={cprLabel} />
+                  <CampaignCard key={c.campaignId} campaign={c} isRmkt={false} {...sharedProps} />
                 ))}
               </div>
             )}
             {lancamento.length > 0 && (
               <div className="space-y-3">
                 <div className="flex items-center gap-3">
-                  <span className="text-[10px] font-bold tracking-widest uppercase text-blue-700 bg-blue-100 rounded-full px-3 py-1">Lançamento</span>
+                  <span className="text-[10px] font-bold tracking-widest uppercase text-blue-700 bg-blue-100 dark:text-blue-300 dark:bg-blue-900/40 rounded-full px-3 py-1">Lançamento</span>
                   <div className="flex-1 h-px bg-border" />
                 </div>
                 {lancamento.map(c => (
-                  <CampaignTable key={c.campaignId} campaign={c} isVideo={isVideo} isLead={isLead} isRmkt={false} onlyActive={onlyActive} resultLabel={resultLabel} cprLabel={cprLabel} />
+                  <CampaignCard key={c.campaignId} campaign={c} isRmkt={false} {...sharedProps} />
                 ))}
               </div>
             )}
           </div>
         )
       })()}
+
+      {/* ── Top Criativos por Vendas (apenas conta1, não-video) ── */}
+      {!loading && account === 'conta1' && !isVideo && (
+        <div className="pt-2">
+          <div className="flex items-center gap-3 mb-3">
+            <div className="flex-1 h-px bg-border" />
+            <span className="text-[10px] font-bold tracking-widest uppercase text-muted-foreground">Análise de Vendas</span>
+            <div className="flex-1 h-px bg-border" />
+          </div>
+          <TopCreativesByConversion token={token} since={since} until={until} />
+        </div>
+      )}
 
       {/* ── Vazio ── */}
       {!loading && data && data.campaigns.length === 0 && (
