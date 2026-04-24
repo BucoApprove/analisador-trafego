@@ -201,6 +201,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
   }
 
+  const adsetInsightFields = [
     'campaign_id', 'campaign_name', 'adset_id', 'adset_name',
     'spend', 'actions', 'unique_actions', 'outbound_clicks',
     'video_thruplay_watched_actions', 'video_p25_watched_actions',

@@ -15,6 +15,7 @@
     "api/meta-spend.ts": { "maxDuration": 30 },
     "api/dashboard-data.ts": { "maxDuration": 60 },
     "api/meta-ads-data.ts": { "maxDuration": 60 },
+    "api/perpetuo-data.ts": { "maxDuration": 60 },
     "api/send-daily-report.ts": { "maxDuration": 30 }
   },
   "crons": [
