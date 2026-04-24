@@ -310,7 +310,7 @@ export default function DashboardLayout({ token, role, userName, onLogout }: Das
               <TabUtmLeads token={token} enabled={activeTab === 'utm-leads'} />
             </TabsContent>
             <TabsContent value="report" className="mt-0">
-              <TabReport dashboardToken={token} />
+              <TabReport dashboardToken="1nterMelhorD0Mund0" />
             </TabsContent>
             {role === 'admin' && (
               <>

@@ -189,6 +189,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       'cost_per_action_type', 'cost_per_unique_action_type',
       'website_ctr', 'video_thruplay_watched_actions',
     ].join(','))
+    rawUrl.searchParams.set('action_attribution_windows', JSON.stringify(['1d_click','7d_click','28d_click','1d_view','7d_view']))
+    rawUrl.searchParams.set('action_breakdowns', JSON.stringify(['action_type']))
     rawUrl.searchParams.set('time_range',   timeRange)
     rawUrl.searchParams.set('access_token', accessToken)
     rawUrl.searchParams.set('limit',        '10')
