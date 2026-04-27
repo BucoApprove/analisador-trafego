@@ -181,37 +181,56 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // ── Modo rawdebug: retorna resposta crua de um único adset para identificar fields ──
   if (typeof req.query.rawdebug === 'string') {
     const adsetId = req.query.rawdebug
-    // Tenta cada "versão" de API para ver qual expõe profile visits
-    const apiVersions = typeof req.query.apiversion === 'string'
-      ? [req.query.apiversion]
-      : ['v19.0', 'v21.0']
+    // Tenta variações para expor instagram_profile_visit
+    const baseFields = [
+      'spend', 'actions', 'unique_actions',
+      'outbound_clicks', 'unique_outbound_clicks',
+      'clicks', 'unique_clicks', 'inline_link_clicks',
+      'inline_post_engagement', 'reach', 'impressions',
+    ].join(',')
+
+    const variants: Array<{ key: string; url: URL }> = []
+
+    // Variante 1: padrão sem janelas (comportamento atual)
+    const urlDefault = new URL(`${META_BASE}/${adsetId}/insights`)
+    urlDefault.searchParams.set('fields',       baseFields)
+    urlDefault.searchParams.set('time_range',   timeRange)
+    urlDefault.searchParams.set('access_token', accessToken)
+    urlDefault.searchParams.set('limit',        '10')
+    variants.push({ key: 'default_no_windows', url: urlDefault })
+
+    // Variante 2: todas as janelas de atribuição explícitas
+    const urlAllWindows = new URL(`${META_BASE}/${adsetId}/insights`)
+    urlAllWindows.searchParams.set('fields',                     baseFields)
+    urlAllWindows.searchParams.set('action_attribution_windows', '1d_click,7d_click,1d_view,28d_click,28d_view')
+    urlAllWindows.searchParams.set('time_range',                 timeRange)
+    urlAllWindows.searchParams.set('access_token',               accessToken)
+    urlAllWindows.searchParams.set('limit',                      '10')
+    variants.push({ key: 'all_windows', url: urlAllWindows })
+
+    // Variante 3: action_report_time=impression (em vez de conversion)
+    const urlImpression = new URL(`${META_BASE}/${adsetId}/insights`)
+    urlImpression.searchParams.set('fields',             baseFields)
+    urlImpression.searchParams.set('action_report_time', 'impression')
+    urlImpression.searchParams.set('time_range',         timeRange)
+    urlImpression.searchParams.set('access_token',       accessToken)
+    urlImpression.searchParams.set('limit',              '10')
+    variants.push({ key: 'report_time_impression', url: urlImpression })
+
     const results: Record<string, unknown> = {}
-    for (const ver of apiVersions) {
-      const rawUrl = new URL(`https://graph.facebook.com/${ver}/${adsetId}/insights`)
-      rawUrl.searchParams.set('fields', [
-        // Campos array de actions
-        'spend', 'actions', 'unique_actions',
-        'outbound_clicks', 'unique_outbound_clicks',
-        'clicks', 'unique_clicks', 'inline_link_clicks',
-        'inline_post_engagement',
-        // Campos standalone numéricos válidos
-        'reach',
-        'impressions',
-        'video_thruplay_watched_actions',
-        'video_p25_watched_actions',
-        'video_p50_watched_actions',
-        'video_p75_watched_actions',
-        'video_p100_watched_actions',
-      ].join(','))
-      rawUrl.searchParams.set('time_range',   timeRange)
-      rawUrl.searchParams.set('access_token', accessToken)
-      rawUrl.searchParams.set('limit',        '10')
+    for (const { key, url } of variants) {
       try {
-        const rawRes  = await fetch(rawUrl.toString())
-        const rawJson = await rawRes.json()
-        results[ver]  = rawJson
+        const rawRes  = await fetch(url.toString())
+        const rawJson = await rawRes.json() as any
+        // Extrai só os action_types do primeiro registro para facilitar leitura
+        const row = rawJson?.data?.[0]
+        results[key] = {
+          raw:              rawJson,
+          actionTypes:      Object.fromEntries((row?.actions        ?? []).map((a: any) => [a.action_type, a.value])),
+          uniqueActionTypes: Object.fromEntries((row?.unique_actions ?? []).map((a: any) => [a.action_type, a.value])),
+        }
       } catch (e: any) {
-        results[ver] = { error: e.message }
+        results[key] = { error: e.message }
       }
     }
     return res.json({ rawdebug: true, adsetId, dateRange: { since, until }, results })
