@@ -224,36 +224,50 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     url.searchParams.set('fields', [
       'campaign_name', 'adset_id', 'adset_name', 'spend',
       'reach', 'impressions',
-      'inline_post_engagement',   // campo standalone numérico válido
-      'actions',                  // inclui follow, instagram_profile_visit, page_engagement…
-      'unique_actions',
-      'outbound_clicks',
+      'inline_post_engagement',
+      'actions', 'unique_actions', 'outbound_clicks',
       'video_thruplay_watched_actions',
     ].join(','))
     url.searchParams.set('time_range',   timeRange)
     url.searchParams.set('access_token', accessToken)
     url.searchParams.set('limit',        '200')
+
+    // Também busca optimization_goal + promoted_object de cada adset
+    const adsetMetaUrl = new URL(`${META_BASE}/${acctId}/adsets`)
+    adsetMetaUrl.searchParams.set('fields',       'id,optimization_goal,promoted_object,campaign_id')
+    adsetMetaUrl.searchParams.set('access_token', accessToken)
+    adsetMetaUrl.searchParams.set('limit',        '500')
+
     try {
-      const rows = await metaGetAll(url)
+      const [rows, adsetMeta] = await Promise.all([metaGetAll(url), metaGetAll(adsetMetaUrl)])
+      const adsetGoalMap = new Map(adsetMeta.map((a: any) => [
+        a.id as string,
+        { optimization_goal: a.optimization_goal, promoted_object: a.promoted_object },
+      ]))
+
       const etapa1Rows = rows.filter((r: any) => matchesFilter(r.campaign_name as string, NAME_FILTERS['etapa1']))
       return res.json({
         etapa1debug: true,
         dateRange: { since, until },
         adsets: etapa1Rows.map((r: any) => ({
-          adsetId:               r.adset_id,
-          adsetName:             r.adset_name,
-          campaignName:          r.campaign_name,
-          spend:                 r.spend,
-          reach:                 r.reach,
-          impressions:           r.impressions,
+          adsetId:           r.adset_id,
+          adsetName:         r.adset_name,
+          campaignName:      r.campaign_name,
+          spend:             r.spend,
+          // Objetivo do conjunto — chave para descobrir qual métrica o Meta usa como "Resultado"
+          optimization_goal: adsetGoalMap.get(r.adset_id as string)?.optimization_goal ?? null,
+          promoted_object:   adsetGoalMap.get(r.adset_id as string)?.promoted_object ?? null,
+          // Campos standalone
+          reach:                  r.reach,
+          impressions:            r.impressions,
           inline_post_engagement: r.inline_post_engagement,
-          outbound_clicks:       r.outbound_clicks,
-          // Extrai action_types relevantes do array actions[]
+          outbound_clicks:        r.outbound_clicks,
+          // Todos os action_types como objeto chave/valor
           actionTypes: Object.fromEntries(
-            (r.actions ?? []).map((a: any) => [a.action_type, a.value])
+            (r.actions ?? []).map((a: any) => [a.action_type, Number(a.value)])
           ),
           uniqueActionTypes: Object.fromEntries(
-            (r.unique_actions ?? []).map((a: any) => [a.action_type, a.value])
+            (r.unique_actions ?? []).map((a: any) => [a.action_type, Number(a.value)])
           ),
         })),
       })
