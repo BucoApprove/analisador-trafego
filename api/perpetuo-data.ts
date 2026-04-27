@@ -181,23 +181,82 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // ── Modo rawdebug: retorna resposta crua de um único adset para identificar fields ──
   if (typeof req.query.rawdebug === 'string') {
     const adsetId = req.query.rawdebug
-    const rawUrl = new URL(`${META_BASE}/${adsetId}/insights`)
-    rawUrl.searchParams.set('fields', [
-      'spend', 'actions', 'unique_actions', 'outbound_clicks',
-      'unique_outbound_clicks', 'clicks', 'unique_clicks', 'inline_link_clicks',
+    // Tenta cada "versão" de API para ver qual expõe profile visits
+    const apiVersions = typeof req.query.apiversion === 'string'
+      ? [req.query.apiversion]
+      : ['v19.0', 'v21.0']
+    const results: Record<string, unknown> = {}
+    for (const ver of apiVersions) {
+      const rawUrl = new URL(`https://graph.facebook.com/${ver}/${adsetId}/insights`)
+      rawUrl.searchParams.set('fields', [
+        // Campos que já testamos
+        'spend', 'actions', 'unique_actions',
+        'outbound_clicks', 'unique_outbound_clicks',
+        'clicks', 'unique_clicks', 'inline_link_clicks',
+        'inline_post_engagement', 'post_engagement',
+        // Campos ainda não testados — standalone (não são arrays)
+        'reach',
+        'impressions',
+        'post_engagements',       // plural — métricas de engajamento de post
+        'profile_visits',         // visitas ao perfil Instagram (standalone)
+        'unique_video_view_10_sec',
+        'cost_per_inline_post_engagement',
+        'video_thruplay_watched_actions',
+        'video_p25_watched_actions',
+        'video_p50_watched_actions',
+        'video_p75_watched_actions',
+        'video_p100_watched_actions',
+      ].join(','))
+      rawUrl.searchParams.set('time_range',   timeRange)
+      rawUrl.searchParams.set('access_token', accessToken)
+      rawUrl.searchParams.set('limit',        '10')
+      try {
+        const rawRes  = await fetch(rawUrl.toString())
+        const rawJson = await rawRes.json()
+        results[ver]  = rawJson
+      } catch (e: any) {
+        results[ver] = { error: e.message }
+      }
+    }
+    return res.json({ rawdebug: true, adsetId, dateRange: { since, until }, results })
+  }
+
+  // ── Modo etapa1debug: busca todos os adsets de etapa1 com campos candidatos ──
+  if (req.query.etapa1debug === 'true') {
+    const url = new URL(`${META_BASE}/${acctId}/insights`)
+    url.searchParams.set('level',  'adset')
+    url.searchParams.set('fields', [
+      'campaign_name', 'adset_id', 'adset_name', 'spend',
+      'reach', 'impressions', 'post_engagements',
+      'actions', 'unique_actions', 'outbound_clicks',
       'inline_post_engagement', 'post_engagement',
-      'cost_per_action_type', 'cost_per_unique_action_type',
-      'website_ctr', 'video_thruplay_watched_actions',
+      'video_thruplay_watched_actions',
     ].join(','))
-    rawUrl.searchParams.set('action_attribution_windows', JSON.stringify(['1d_click','7d_click','28d_click','1d_view','7d_view']))
-    rawUrl.searchParams.set('action_breakdowns', JSON.stringify(['action_type']))
-    rawUrl.searchParams.set('time_range',   timeRange)
-    rawUrl.searchParams.set('access_token', accessToken)
-    rawUrl.searchParams.set('limit',        '10')
+    url.searchParams.set('time_range',   timeRange)
+    url.searchParams.set('access_token', accessToken)
+    url.searchParams.set('limit',        '200')
     try {
-      const rawRes = await fetch(rawUrl.toString())
-      const rawJson = await rawRes.json()
-      return res.json({ rawdebug: true, adsetId, dateRange: { since, until }, response: rawJson })
+      const rows = await metaGetAll(url)
+      const etapa1Rows = rows.filter((r: any) => matchesFilter(r.campaign_name as string, NAME_FILTERS['etapa1']))
+      return res.json({
+        etapa1debug: true,
+        dateRange: { since, until },
+        adsets: etapa1Rows.map((r: any) => ({
+          adsetId:          r.adset_id,
+          adsetName:        r.adset_name,
+          campaignName:     r.campaign_name,
+          spend:            r.spend,
+          reach:            r.reach,
+          impressions:      r.impressions,
+          post_engagements: r.post_engagements,
+          inline_post_engagement: r.inline_post_engagement,
+          post_engagement:  r.post_engagement,
+          outbound_clicks:  r.outbound_clicks,
+          actions:          r.actions,
+          unique_actions:   r.unique_actions,
+          videoViews:       r.video_thruplay_watched_actions,
+        })),
+      })
     } catch (e: any) {
       return res.status(500).json({ error: e.message })
     }
@@ -317,7 +376,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (!matchesFilter(row.campaign_name as string, filter)) continue
 
       const spend  = Number(row.spend ?? 0)
-      const budget = budgetMap.get(row.adset_id as string) ?? { daily: null, lifetime: null }
+      const budget = budgetMap.get(row.adset_id as string) ?? { daily: null, lifetime: null, status: 'UNKNOWN', audienceName: null }
 
       const adsetRow: AdsetRow = {
         adsetId:        row.adset_id,
