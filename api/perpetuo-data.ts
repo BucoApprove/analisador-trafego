@@ -189,18 +189,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     for (const ver of apiVersions) {
       const rawUrl = new URL(`https://graph.facebook.com/${ver}/${adsetId}/insights`)
       rawUrl.searchParams.set('fields', [
-        // Campos que já testamos
+        // Campos array de actions
         'spend', 'actions', 'unique_actions',
         'outbound_clicks', 'unique_outbound_clicks',
         'clicks', 'unique_clicks', 'inline_link_clicks',
-        'inline_post_engagement', 'post_engagement',
-        // Campos ainda não testados — standalone (não são arrays)
+        'inline_post_engagement',
+        // Campos standalone numéricos válidos
         'reach',
         'impressions',
-        'post_engagements',       // plural — métricas de engajamento de post
-        'profile_visits',         // visitas ao perfil Instagram (standalone)
-        'unique_video_view_10_sec',
-        'cost_per_inline_post_engagement',
         'video_thruplay_watched_actions',
         'video_p25_watched_actions',
         'video_p50_watched_actions',
@@ -227,9 +223,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     url.searchParams.set('level',  'adset')
     url.searchParams.set('fields', [
       'campaign_name', 'adset_id', 'adset_name', 'spend',
-      'reach', 'impressions', 'post_engagements',
-      'actions', 'unique_actions', 'outbound_clicks',
-      'inline_post_engagement', 'post_engagement',
+      'reach', 'impressions',
+      'inline_post_engagement',   // campo standalone numérico válido
+      'actions',                  // inclui follow, instagram_profile_visit, page_engagement…
+      'unique_actions',
+      'outbound_clicks',
       'video_thruplay_watched_actions',
     ].join(','))
     url.searchParams.set('time_range',   timeRange)
@@ -242,19 +240,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         etapa1debug: true,
         dateRange: { since, until },
         adsets: etapa1Rows.map((r: any) => ({
-          adsetId:          r.adset_id,
-          adsetName:        r.adset_name,
-          campaignName:     r.campaign_name,
-          spend:            r.spend,
-          reach:            r.reach,
-          impressions:      r.impressions,
-          post_engagements: r.post_engagements,
+          adsetId:               r.adset_id,
+          adsetName:             r.adset_name,
+          campaignName:          r.campaign_name,
+          spend:                 r.spend,
+          reach:                 r.reach,
+          impressions:           r.impressions,
           inline_post_engagement: r.inline_post_engagement,
-          post_engagement:  r.post_engagement,
-          outbound_clicks:  r.outbound_clicks,
-          actions:          r.actions,
-          unique_actions:   r.unique_actions,
-          videoViews:       r.video_thruplay_watched_actions,
+          outbound_clicks:       r.outbound_clicks,
+          // Extrai action_types relevantes do array actions[]
+          actionTypes: Object.fromEntries(
+            (r.actions ?? []).map((a: any) => [a.action_type, a.value])
+          ),
+          uniqueActionTypes: Object.fromEntries(
+            (r.unique_actions ?? []).map((a: any) => [a.action_type, a.value])
+          ),
         })),
       })
     } catch (e: any) {
