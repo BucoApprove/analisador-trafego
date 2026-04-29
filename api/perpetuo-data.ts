@@ -284,14 +284,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const insBody = await (await fetch(insUrl.toString())).json() as any
       const adIds: string[] = (insBody.data ?? []).map((d: any) => d.ad_id as string)
 
-      // Passo 2: Para cada ad_id, busca creative diretamente (funciona para ads deletados)
+// Passo 2: Para cada ad_id, busca creative em dois passos (contorna restrição de ad deletado)
       const steps: any[] = []
       for (const adId of adIds) {
+        // 2a: pega o creative.id do ad
         const adUrl2 = new URL(`${META_BASE}/${adId}`)
-        adUrl2.searchParams.set('fields',       'id,name,effective_status,creative{id,source_instagram_media_id,instagram_post_id,instagram_permalink_url,object_story_id,effective_object_story_id}')
+        adUrl2.searchParams.set('fields',       'id,name,effective_status,creative')
         adUrl2.searchParams.set('access_token', accessToken)
         const adBody = await (await fetch(adUrl2.toString())).json() as any
-        const creative = (adBody.creative as any) ?? {}
+        const creativeId = adBody?.creative?.id as string | undefined
+
+        // 2b: busca fields no creative diretamente
+        let creative: any = {}
+        let creativeRaw: any = null
+        if (creativeId) {
+          const creativeUrl2 = new URL(`${META_BASE}/${creativeId}`)
+          creativeUrl2.searchParams.set('fields',       'source_instagram_media_id,instagram_post_id,instagram_permalink_url,object_story_id,effective_object_story_id')
+          creativeUrl2.searchParams.set('access_token', accessToken)
+          creativeRaw = await (await fetch(creativeUrl2.toString())).json() as any
+          creative = creativeRaw ?? {}
+        }
 
         // Determina igMediaId usando a mesma lógica do pipeline principal
         let igMediaId: string | undefined
@@ -338,7 +350,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           followsResult = await (await fetch(iUrl.toString())).json()
         }
 
-        steps.push({ adId, adStatus: adBody.effective_status, creative, igMediaId, igMediaIdSource, followsResult })
+        steps.push({ adId, adStatus: adBody.effective_status, adBodyRaw: adBody, creativeId, creativeRaw, igMediaId, igMediaIdSource, followsResult })
       }
 
       return res.json({ followsdebug: true, adsetId, adIdsFromInsights: adIds, insightsRaw: insBody, steps })
@@ -541,11 +553,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               const adIds = adsetToAdIds.get(adsetId) ?? []
               for (const adId of adIds) {
                 try {
+                  // Passo 1: pega creative.id do ad (mesmo deletado, retorna o ID do creative)
                   const adUrl = new URL(`${META_BASE}/${adId}`)
-                  adUrl.searchParams.set('fields',       'creative{source_instagram_media_id,instagram_post_id,instagram_permalink_url,object_story_id,effective_object_story_id}')
+                  adUrl.searchParams.set('fields',       'creative')
                   adUrl.searchParams.set('access_token', accessToken)
                   const adBody = await (await fetch(adUrl.toString())).json() as any
-                  const creative = (adBody.creative as any) ?? {}
+                  const creativeId = adBody?.creative?.id as string | undefined
+                  if (!creativeId) continue
+
+                  // Passo 2: busca fields no creative diretamente (creative não é deletado com o ad)
+                  const creativeUrl = new URL(`${META_BASE}/${creativeId}`)
+                  creativeUrl.searchParams.set('fields',       'source_instagram_media_id,instagram_post_id,instagram_permalink_url,object_story_id,effective_object_story_id')
+                  creativeUrl.searchParams.set('access_token', accessToken)
+                  const creativeBody = await (await fetch(creativeUrl.toString())).json() as any
+                  const creative = creativeBody ?? {}
                   let igMediaId: string | undefined
 
                   // a) source_instagram_media_id → campo específico para posts impulsionados via app IG
