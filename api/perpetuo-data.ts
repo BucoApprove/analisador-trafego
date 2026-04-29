@@ -369,16 +369,42 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           } catch (e: any) { shortcodeMatchResult = { error: e.message } }
         }
 
+        // Fallback: se o shortcode não foi encontrado na lista (post arquivado?),
+        // tenta buscar o media diretamente pelo ID calculado matematicamente
+        let computedMediaId: string | undefined
+        let computedMediaFetch: any = null
+        let computedMediaFollows: any = null
+        if (!igMediaId && shortcodeExtracted) {
+          computedMediaId = instagramShortcodeToMediaId(shortcodeExtracted) || undefined
+          if (computedMediaId) {
+            const directUrl = new URL(`https://graph.facebook.com/v22.0/${computedMediaId}`)
+            directUrl.searchParams.set('fields', 'id,permalink,media_type,timestamp,username')
+            directUrl.searchParams.set('access_token', accessToken)
+            computedMediaFetch = await (await fetch(directUrl.toString())).json()
+            if (!computedMediaFetch?.error) {
+              igMediaId = computedMediaId
+              igMediaIdSource = 'shortcode_decode'
+              // Testa follows direto
+              const iUrl2 = new URL(`https://graph.facebook.com/v22.0/${computedMediaId}/insights`)
+              iUrl2.searchParams.set('metric', 'follows')
+              iUrl2.searchParams.set('access_token', accessToken)
+              computedMediaFollows = await (await fetch(iUrl2.toString())).json()
+            }
+          }
+        }
+
         // Passo 3: Testa insights de follows para o igMediaId encontrado
         let followsResult: any = null
-        if (igMediaId) {
+        if (igMediaId && igMediaIdSource !== 'shortcode_decode') {
           const iUrl = new URL(`https://graph.facebook.com/v22.0/${igMediaId}/insights`)
           iUrl.searchParams.set('metric',       'follows')
           iUrl.searchParams.set('access_token', accessToken)
           followsResult = await (await fetch(iUrl.toString())).json()
+        } else if (igMediaIdSource === 'shortcode_decode') {
+          followsResult = computedMediaFollows
         }
 
-        steps.push({ adId, adStatus: adBody.effective_status, creativeId, creativeRaw, oembedResult, shortcodeExtracted, shortcodeMatchResult, igMediaId, igMediaIdSource, followsResult })
+        steps.push({ adId, adStatus: adBody.effective_status, creativeId, creativeRaw, oembedResult, shortcodeExtracted, shortcodeMatchResult, computedMediaId, computedMediaFetch, igMediaId, igMediaIdSource, followsResult })
       }
 
       return res.json({ followsdebug: true, adsetId, connectedIgAccounts: igAccountsBody, adIdsFromInsights: adIds, insightsRaw: insBody, steps })
