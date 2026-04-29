@@ -346,11 +346,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               u.searchParams.set('access_token', accessToken)
               return u.toString()
             })()
-            for (let page = 0; page < 5 && nextUrl; page++) {
+            for (let page = 0; page < 20 && nextUrl; page++) {
               const pageBody = await (await fetch(nextUrl)).json() as any
               igAccountMedia.push(...(pageBody.data ?? []))
               nextUrl = pageBody.paging?.next ?? null
-              // Para de paginar se já encontrou o shortcode
               if (igAccountMedia.some((p: any) => p.permalink?.includes(shortcodeExtracted!))) break
             }
             const matched = igAccountMedia.find((p: any) => {
@@ -616,9 +615,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             })
           )
 
-          // Busca TODOS os posts da conta IG com paginação (max 5 páginas = 500 posts)
-          // Necessário porque posts antigos ficam além do limite de 100
+          // Coleta todos os shortcodes pendentes de resolução
+          const pendingShortcodes = new Set<string>()
+          for (const adsetId of etapa1AdsetIds) {
+            const current = adsetIgIdMap.get(adsetId)
+            if (current?.startsWith('__shortcode__')) {
+              pendingShortcodes.add(current.slice('__shortcode__'.length))
+            }
+          }
+
+          // Pagina /{ig_account}/media até encontrar todos os shortcodes (max 20 páginas = 2000 posts)
+          // Para de paginar assim que todos os shortcodes forem resolvidos — eficiente para posts recentes
           const igPosts: { id: string; permalink: string; caption?: string }[] = []
+          const shortcodeToIgId = new Map<string, string>()
           let igPageUrl: string | null = (() => {
             const u = new URL(`https://graph.facebook.com/v22.0/${ETAPA1_IG_ACCOUNT}/media`)
             u.searchParams.set('fields', 'id,permalink,caption')
@@ -626,19 +635,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             u.searchParams.set('access_token', accessToken)
             return u.toString()
           })()
-          for (let page = 0; page < 5 && igPageUrl; page++) {
+          for (let page = 0; page < 20 && igPageUrl && pendingShortcodes.size > 0; page++) {
             try {
               const pageBody = await (await fetch(igPageUrl)).json() as any
-              igPosts.push(...(pageBody.data ?? []))
+              const pagePosts: { id: string; permalink: string; caption?: string }[] = pageBody.data ?? []
+              igPosts.push(...pagePosts)
+              for (const p of pagePosts) {
+                const m = p.permalink?.match(/\/(p|reel|tv)\/([A-Za-z0-9_-]+)\/?/)
+                if (m) {
+                  shortcodeToIgId.set(m[2], p.id)
+                  pendingShortcodes.delete(m[2]) // marca como resolvido
+                }
+              }
               igPageUrl = pageBody.paging?.next ?? null
             } catch { igPageUrl = null }
-          }
-
-          // Build shortcode → native IG ID map
-          const shortcodeToIgId = new Map<string, string>()
-          for (const p of igPosts) {
-            const m = p.permalink.match(/\/(p|reel|tv)\/([A-Za-z0-9_-]+)\/?/)
-            if (m) shortcodeToIgId.set(m[2], p.id)
           }
 
           // Resolve adsets: shortcode match → ID nativo; sem shortcode → keyword match na legenda
@@ -650,7 +660,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               if (nativeId) {
                 adsetIgIdMap.set(adsetId, nativeId)
               } else {
-                adsetIgIdMap.delete(adsetId) // shortcode não encontrado na conta IG → tenta caption
+                adsetIgIdMap.delete(adsetId) // não encontrado em 2000 posts → tenta caption
               }
             }
           }
