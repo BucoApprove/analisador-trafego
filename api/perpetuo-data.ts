@@ -311,12 +311,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         let shortcodeExtracted: string | undefined
         let fbInstagramMediaIdResult: any = null
 
-        // Estratégia 1: instagram_media_id no post FB (cross-post) — 1 chamada, sem paginar
+        // Estratégia 1: instagram_media_id via full story ID /{pageId_postId}?fields=instagram_media_id
         const storyId = (creative.object_story_id ?? creative.effective_object_story_id) as string | undefined
         if (storyId?.includes('_')) {
-          const fbPostId = storyId.split('_').slice(1).join('_')
           try {
-            const fbUrl = new URL(`${META_BASE}/${fbPostId}`)
+            const fbUrl = new URL(`${META_BASE}/${storyId}`)
             fbUrl.searchParams.set('fields', 'instagram_media_id')
             fbUrl.searchParams.set('access_token', accessToken)
             fbInstagramMediaIdResult = await (await fetch(fbUrl.toString())).json() as any
@@ -585,14 +584,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                   creativeUrl.searchParams.set('access_token', accessToken)
                   const creative = await (await fetch(creativeUrl.toString())).json() as any
 
-                  // Estratégia 1: busca instagram_media_id no post do FB (cross-post)
-                  // Posts impulsionados do IG têm um FB post correspondente com este campo
-                  // Esta abordagem retorna o ID nativo IG em 1 chamada, sem paginar o perfil
+                  // Estratégia 1: busca instagram_media_id no post do FB usando o full story ID
+                  // O formato correto é /{pageId_postId}?fields=instagram_media_id
                   const storyId = (creative.object_story_id ?? creative.effective_object_story_id) as string | undefined
                   if (storyId?.includes('_')) {
-                    const fbPostId = storyId.split('_').slice(1).join('_')
                     try {
-                      const fbUrl = new URL(`${META_BASE}/${fbPostId}`)
+                      // Usa o storyId completo (ex: 100391712630556_603774435750580) como node ID
+                      const fbUrl = new URL(`${META_BASE}/${storyId}`)
                       fbUrl.searchParams.set('fields',       'instagram_media_id')
                       fbUrl.searchParams.set('access_token', accessToken)
                       const fbBody = await (await fetch(fbUrl.toString())).json() as any
