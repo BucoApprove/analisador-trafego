@@ -529,13 +529,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     if (m) igMediaId = instagramShortcodeToMediaId(m[2]) || undefined
                   }
 
-                  // b/c) object_story_id / effective_object_story_id
-                  //      formato: "{ig_account_id}_{ig_media_id}"
+                  // b) object_story_id → parte depois do primeiro "_" é o media ID
+                  //    Pode começar com o FB Page ID ou com o IG account ID — não importa,
+                  //    tentamos direto no insights; se falhar o catch retorna 0
                   if (!igMediaId) {
-                    const storyId = (creative.object_story_id ?? creative.effective_object_story_id) as string | undefined
-                    if (storyId?.startsWith(ETAPA1_IG_ACCOUNT + '_')) {
-                      igMediaId = storyId.split('_')[1]
-                    }
+                    const storyId = creative.object_story_id as string | undefined
+                    if (storyId?.includes('_')) igMediaId = storyId.split('_').slice(1).join('_') || undefined
+                  }
+
+                  // c) effective_object_story_id → fallback
+                  if (!igMediaId) {
+                    const effId = creative.effective_object_story_id as string | undefined
+                    if (effId?.includes('_')) igMediaId = effId.split('_').slice(1).join('_') || undefined
                   }
 
                   if (igMediaId) { adsetIgIdMap.set(adsetId, igMediaId); break }
