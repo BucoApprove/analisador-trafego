@@ -275,7 +275,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     try {
       // Busca creative com todos os campos de ID disponíveis
       const adsUrl = new URL(`${META_BASE}/${adsetId}/ads`)
-      adsUrl.searchParams.set('fields', 'id,creative{id,object_story_id,effective_object_story_id,instagram_permalink_url,object_type}')
+      adsUrl.searchParams.set('fields', 'id,creative{id,instagram_post_id,object_story_id,effective_object_story_id,instagram_permalink_url,object_type}')
       adsUrl.searchParams.set('access_token', accessToken)
       adsUrl.searchParams.set('limit', '10')
       const adsRes  = await fetch(adsUrl.toString())
@@ -316,12 +316,55 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           insightsFromEffective = await iRes.json()
         }
 
+        // Tenta também: instagram_post_id direto no creative
+        const instagramPostId = creative.instagram_post_id as string | undefined
+        let insightsFromInstagramPostId: any = null
+        if (instagramPostId) {
+          const iUrl = new URL(`https://graph.facebook.com/v22.0/${instagramPostId}/insights`)
+          iUrl.searchParams.set('metric', 'follows')
+          iUrl.searchParams.set('access_token', accessToken)
+          const iRes = await fetch(iUrl.toString())
+          insightsFromInstagramPostId = await iRes.json()
+        }
+
+        // Tenta: buscar instagram_permalink_url do FB post (cross-post)
+        const fbPostId = objectStoryId?.includes('_') ? objectStoryId.split('_').slice(1).join('_') : undefined
+        let fbPostIgPermalink: any = null
+        let insightsFromFbCrossPost: any = null
+        if (fbPostId && !objectStoryId?.startsWith('17841401980622840_')) {
+          try {
+            const fbUrl = new URL(`${META_BASE}/${fbPostId}`)
+            fbUrl.searchParams.set('fields', 'instagram_permalink_url')
+            fbUrl.searchParams.set('access_token', accessToken)
+            const fbBody = await (await fetch(fbUrl.toString())).json() as any
+            fbPostIgPermalink = fbBody.instagram_permalink_url ?? fbBody
+            if (typeof fbBody.instagram_permalink_url === 'string') {
+              const m2 = fbBody.instagram_permalink_url.match(/\/(p|reel|tv)\/([A-Za-z0-9_-]+)\/?/)
+              if (m2) {
+                const derivedId = instagramShortcodeToMediaId(m2[2])
+                if (derivedId) {
+                  const iUrl = new URL(`https://graph.facebook.com/v22.0/${derivedId}/insights`)
+                  iUrl.searchParams.set('metric', 'follows')
+                  iUrl.searchParams.set('access_token', accessToken)
+                  const iRes = await fetch(iUrl.toString())
+                  insightsFromFbCrossPost = await iRes.json()
+                }
+              }
+            }
+          } catch (e: any) { fbPostIgPermalink = { error: e.message } }
+        }
+
         steps.push({
           adId: ad.id,
           objectStoryId,
           effectiveObjectStoryId,
+          instagramPostId,
           igMediaIdFromObjectStory,
           effectivePostId,
+          insightsFromInstagramPostId,
+          fbPostId,
+          fbPostIgPermalink,
+          insightsFromFbCrossPost,
           insightsFromObjectStory,
           insightsFromEffective,
         })
@@ -536,12 +579,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                     }
                   }
 
-                  // c) object_story_id / effective_object_story_id
-                  //    Só usa se começar com o IG account ID (descarta FB Page ID prefix)
+                  // c) Busca instagram_permalink_url do FB post cross-postado
+                  //    Para posts IG impulsionados, o object_story_id tem {fbPageId}_{fbPostId}
+                  //    Chamar /{fbPostId}?fields=instagram_permalink_url retorna a URL do IG
+                  //    sem precisar de pages_read_engagement
                   if (!igMediaId) {
                     const storyId = (creative.object_story_id ?? creative.effective_object_story_id) as string | undefined
-                    if (storyId?.startsWith(ETAPA1_IG_ACCOUNT + '_')) {
-                      igMediaId = storyId.split('_')[1]
+                    if (storyId?.includes('_')) {
+                      const fbPostId = storyId.split('_').slice(1).join('_')
+                      // Se começa com IG account ID, usa direto
+                      if (storyId.startsWith(ETAPA1_IG_ACCOUNT + '_')) {
+                        igMediaId = fbPostId
+                      } else {
+                        // Busca instagram_permalink_url no FB post
+                        try {
+                          const fbUrl = new URL(`${META_BASE}/${fbPostId}`)
+                          fbUrl.searchParams.set('fields',       'instagram_permalink_url')
+                          fbUrl.searchParams.set('access_token', accessToken)
+                          const fbBody = await (await fetch(fbUrl.toString())).json() as any
+                          const igPermalink = fbBody.instagram_permalink_url as string | undefined
+                          if (igPermalink) {
+                            const m2 = igPermalink.match(/\/(p|reel|tv)\/([A-Za-z0-9_-]+)\/?/)
+                            if (m2) igMediaId = instagramShortcodeToMediaId(m2[2]) || undefined
+                          }
+                        } catch { /* skip */ }
+                      }
                     }
                   }
 
