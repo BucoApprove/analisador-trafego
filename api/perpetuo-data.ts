@@ -624,12 +624,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         adsetRow.videoViews3s    = Number(row.video_thruplay_watched_actions?.[0]?.value ?? 0)
         adsetRow.videoViews25pct = Number(row.video_p25_watched_actions?.[0]?.value ?? 0)
       } else if (view === 'etapa1') {
-        // Seguidores: tenta 'follow' action type da Marketing API (não requer permissões extras)
+        // Seguidores: tenta vários action types da Marketing API (sem permissões extras)
+        // 'follow'         → seguidores de página/perfil
+        // 'profile_visit'  → visitas ao perfil do Instagram (Posts Impulsionados via app)
         // Fallback: pipeline Instagram Graph API via adsetFollowsMap
-        const followsFromActions = actionVal(row.actions as any, 'follow')
-        const follows            = followsFromActions > 0 ? followsFromActions : (adsetFollowsMap.get(row.adset_id as string) ?? 0)
+        const followsFromActions = actionVal(row.actions        as any, 'follow', 'profile_visit')
+        const followsFromUnique  = actionVal((row as any).unique_actions, 'follow', 'profile_visit')
+        const followsFromApi     = adsetFollowsMap.get(row.adset_id as string) ?? 0
+        const follows            = followsFromActions > 0 ? followsFromActions
+                                 : followsFromUnique  > 0 ? followsFromUnique
+                                 : followsFromApi
         adsetRow.results       = follows
         adsetRow.costPerResult = follows > 0 ? spend / follows : 0
+        // _dbg: expõe todos os action types brutos para diagnóstico — remover após confirmar o campo correto
+        ;(adsetRow as any)._dbgActions       = Object.fromEntries(((row.actions       ?? []) as any[]).map((a: any) => [a.action_type, Number(a.value)]))
+        ;(adsetRow as any)._dbgUniqueActions = Object.fromEntries(((row as any).unique_actions ?? [] as any[]).map((a: any) => [a.action_type, Number(a.value)]))
       } else {
         const rowResTypes      = adsetResultTypes.get(row.adset_id as string) ?? ['lead']
         const results          = actionVal(row.actions, ...rowResTypes)
