@@ -505,16 +505,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
         if (etapa1AdsetIds.length > 0) {
           // 1. Busca creative fields de cada adset → extrai IG native media ID
-          //    Fontes tentadas em ordem:
-          //    a) instagram_permalink_url  → decodifica shortcode (/p/, /reel/, /tv/)
-          //    b) object_story_id          → "{ig_account_id}_{ig_media_id}" (posts impulsionados)
-          //    c) effective_object_story_id → idem, fallback
+          //    Fontes tentadas em ordem de prioridade:
+          //    a) instagram_post_id        → ID nativo IG direto (posts via "Usar post existente")
+          //    b) instagram_permalink_url  → decodifica shortcode (/p/, /reel/, /tv/)
+          //    c) object_story_id / effective_object_story_id → só se prefixo = IG account ID
           const adsetIgIdMap = new Map<string, string>() // adsetId → ig native media ID
           await Promise.all(
             etapa1AdsetIds.map(async (adsetId) => {
               try {
                 const adsUrl = new URL(`${META_BASE}/${adsetId}/ads`)
-                adsUrl.searchParams.set('fields',       'id,creative{instagram_permalink_url,object_story_id,effective_object_story_id}')
+                adsUrl.searchParams.set('fields',       'id,creative{instagram_post_id,instagram_permalink_url,object_story_id,effective_object_story_id}')
                 adsUrl.searchParams.set('access_token', accessToken)
                 adsUrl.searchParams.set('limit',        '10')
                 const adsBody = await (await fetch(adsUrl.toString())).json() as any
@@ -522,25 +522,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                   const creative = (ad.creative as any) ?? {}
                   let igMediaId: string | undefined
 
-                  // a) permalink → shortcode decode
-                  const plUrl = creative.instagram_permalink_url as string | undefined
-                  if (plUrl) {
-                    const m = plUrl.match(/\/(p|reel|tv)\/([A-Za-z0-9_-]+)\/?/)
-                    if (m) igMediaId = instagramShortcodeToMediaId(m[2]) || undefined
+                  // a) instagram_post_id → ID nativo do IG diretamente
+                  if (creative.instagram_post_id) {
+                    igMediaId = String(creative.instagram_post_id)
                   }
 
-                  // b) object_story_id → parte depois do primeiro "_" é o media ID
-                  //    Pode começar com o FB Page ID ou com o IG account ID — não importa,
-                  //    tentamos direto no insights; se falhar o catch retorna 0
+                  // b) permalink → shortcode decode
                   if (!igMediaId) {
-                    const storyId = creative.object_story_id as string | undefined
-                    if (storyId?.includes('_')) igMediaId = storyId.split('_').slice(1).join('_') || undefined
+                    const plUrl = creative.instagram_permalink_url as string | undefined
+                    if (plUrl) {
+                      const m = plUrl.match(/\/(p|reel|tv)\/([A-Za-z0-9_-]+)\/?/)
+                      if (m) igMediaId = instagramShortcodeToMediaId(m[2]) || undefined
+                    }
                   }
 
-                  // c) effective_object_story_id → fallback
+                  // c) object_story_id / effective_object_story_id
+                  //    Só usa se começar com o IG account ID (descarta FB Page ID prefix)
                   if (!igMediaId) {
-                    const effId = creative.effective_object_story_id as string | undefined
-                    if (effId?.includes('_')) igMediaId = effId.split('_').slice(1).join('_') || undefined
+                    const storyId = (creative.object_story_id ?? creative.effective_object_story_id) as string | undefined
+                    if (storyId?.startsWith(ETAPA1_IG_ACCOUNT + '_')) {
+                      igMediaId = storyId.split('_')[1]
+                    }
                   }
 
                   if (igMediaId) { adsetIgIdMap.set(adsetId, igMediaId); break }
