@@ -243,7 +243,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const adsUrl = new URL(`${META_BASE}/${adsetId}/ads`)
       adsUrl.searchParams.set('fields', [
         'id', 'name', 'status',
-        'creative{id,object_story_id,effective_object_story_id,effective_instagram_story_id,instagram_permalink_url,object_type}',
+        'creative{id,object_story_id,effective_object_story_id,instagram_permalink_url,object_type}',
       ].join(','))
       adsUrl.searchParams.set('access_token', accessToken)
       adsUrl.searchParams.set('limit', '10')
@@ -430,13 +430,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             etapa1AdsetIds.map(async (adsetId) => {
               try {
                 const adsUrl = new URL(`${META_BASE}/${adsetId}/ads`)
-                adsUrl.searchParams.set('fields',       'id,creative{effective_instagram_story_id}')
+                adsUrl.searchParams.set('fields',       'id,creative{effective_object_story_id}')
                 adsUrl.searchParams.set('access_token', accessToken)
                 adsUrl.searchParams.set('limit',        '10')
                 const adsRes  = await fetch(adsUrl.toString())
                 const adsBody = await adsRes.json() as any
                 for (const ad of (adsBody.data ?? [])) {
-                  const igMediaId = (ad.creative as any)?.effective_instagram_story_id as string | undefined
+                  // effective_object_story_id = "{page_id}_{ig_media_id}"
+                  const storyId   = (ad.creative as any)?.effective_object_story_id as string | undefined
+                  const igMediaId = storyId?.split('_')[1]
                   if (igMediaId) {
                     adsetMediaIdMap.set(adsetId, igMediaId)
                     break
