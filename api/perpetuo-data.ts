@@ -275,12 +275,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     try {
       // Busca creative com todos os campos de ID disponíveis
       const adsUrl = new URL(`${META_BASE}/${adsetId}/ads`)
-      adsUrl.searchParams.set('fields', 'id,creative{id,instagram_post_id,object_story_id,effective_object_story_id,instagram_permalink_url,object_type}')
+      adsUrl.searchParams.set('fields', 'id,effective_status,creative{id,source_instagram_media_id,instagram_post_id,object_story_id,effective_object_story_id,instagram_permalink_url,object_type}')
+      adsUrl.searchParams.set('effective_status', JSON.stringify(['ACTIVE','PAUSED','ARCHIVED','DELETED']))
       adsUrl.searchParams.set('access_token', accessToken)
       adsUrl.searchParams.set('limit', '10')
       const adsRes  = await fetch(adsUrl.toString())
       const adsBody = await adsRes.json() as any
       const ads     = adsBody.data ?? []
+      const adsRaw  = adsBody
 
       const steps: any[] = []
       for (const ad of ads) {
@@ -354,13 +356,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           } catch (e: any) { fbPostIgPermalink = { error: e.message } }
         }
 
+        // Tenta source_instagram_media_id (campo específico para posts impulsionados via app IG)
+        const sourceIgMediaId = creative.source_instagram_media_id as string | undefined
+        let insightsFromSourceIgMedia: any = null
+        if (sourceIgMediaId) {
+          const iUrl = new URL(`https://graph.facebook.com/v22.0/${sourceIgMediaId}/insights`)
+          iUrl.searchParams.set('metric', 'follows')
+          iUrl.searchParams.set('access_token', accessToken)
+          const iRes = await fetch(iUrl.toString())
+          insightsFromSourceIgMedia = await iRes.json()
+        }
+
         steps.push({
           adId: ad.id,
+          adStatus: (ad as any).effective_status,
+          sourceIgMediaId,
           objectStoryId,
           effectiveObjectStoryId,
           instagramPostId,
           igMediaIdFromObjectStory,
           effectivePostId,
+          insightsFromSourceIgMedia,
           insightsFromInstagramPostId,
           fbPostId,
           fbPostIgPermalink,
@@ -370,7 +386,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         })
       }
 
-      return res.json({ followsdebug: true, adsetId, steps })
+      return res.json({ followsdebug: true, adsetId, adsRaw, steps })
     } catch (e: any) {
       return res.status(500).json({ error: e.message })
     }
@@ -557,7 +573,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             etapa1AdsetIds.map(async (adsetId) => {
               try {
                 const adsUrl = new URL(`${META_BASE}/${adsetId}/ads`)
-                adsUrl.searchParams.set('fields',       'id,creative{instagram_post_id,instagram_permalink_url,object_story_id,effective_object_story_id}')
+                adsUrl.searchParams.set('fields',       'id,creative{source_instagram_media_id,instagram_post_id,instagram_permalink_url,object_story_id,effective_object_story_id}')
+                adsUrl.searchParams.set('effective_status', JSON.stringify(['ACTIVE','PAUSED','ARCHIVED','DELETED']))
                 adsUrl.searchParams.set('access_token', accessToken)
                 adsUrl.searchParams.set('limit',        '10')
                 const adsBody = await (await fetch(adsUrl.toString())).json() as any
@@ -565,8 +582,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                   const creative = (ad.creative as any) ?? {}
                   let igMediaId: string | undefined
 
-                  // a) instagram_post_id → ID nativo do IG diretamente
-                  if (creative.instagram_post_id) {
+                  // a) source_instagram_media_id → campo específico para posts impulsionados via app IG
+                  if (creative.source_instagram_media_id) {
+                    igMediaId = String(creative.source_instagram_media_id)
+                  }
+
+                  // a2) instagram_post_id → ID nativo do IG diretamente
+                  if (!igMediaId && creative.instagram_post_id) {
                     igMediaId = String(creative.instagram_post_id)
                   }
 
