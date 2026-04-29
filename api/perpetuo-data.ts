@@ -393,6 +393,70 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
 
 
+    // ── Etapa1: busca followers ganhos por post via Instagram Graph API ────────
+    // A Marketing API não expõe instagram_profile_visit nem follow como action_type.
+    // A única forma de obter "Seguidores" por post é via /{ig_media_id}/insights?metric=follows.
+    const adsetFollowsMap = new Map<string, number>()
+    if (view === 'etapa1') {
+      try {
+        const etapa1AdsetIds = adsetInsightsData
+          .filter((r: any) => matchesFilter(r.campaign_name as string, filter))
+          .map((r: any) => r.adset_id as string)
+
+        if (etapa1AdsetIds.length > 0) {
+          // Busca todos os anúncios da conta com o creative.effective_instagram_story_id
+          const adsCreativeUrl = new URL(`${META_BASE}/${acctId}/ads`)
+          adsCreativeUrl.searchParams.set('fields',       'id,adset_id,creative{effective_instagram_story_id}')
+          adsCreativeUrl.searchParams.set('access_token', accessToken)
+          adsCreativeUrl.searchParams.set('limit',        '500')
+
+          const allAds = await metaGetAll(adsCreativeUrl)
+
+          // Mapeia adsetId → igMediaId (primeiro anúncio com ID válido dentro do adset)
+          const adsetMediaIdMap = new Map<string, string>()
+          for (const ad of allAds) {
+            const igMediaId = (ad.creative as any)?.effective_instagram_story_id as string | undefined
+            if (
+              igMediaId &&
+              etapa1AdsetIds.includes(ad.adset_id as string) &&
+              !adsetMediaIdMap.has(ad.adset_id as string)
+            ) {
+              adsetMediaIdMap.set(ad.adset_id as string, igMediaId)
+            }
+          }
+
+          // Busca follows em paralelo para cada IG media ID único
+          const uniqueMediaIds = [...new Set(adsetMediaIdMap.values())]
+          const followsByMedia  = new Map<string, number>()
+
+          await Promise.all(
+            uniqueMediaIds.map(async (mediaId) => {
+              try {
+                const iUrl = new URL(`https://graph.facebook.com/v22.0/${mediaId}/insights`)
+                iUrl.searchParams.set('metric',       'follows')
+                iUrl.searchParams.set('access_token', accessToken)
+                const iRes  = await fetch(iUrl.toString())
+                const iBody = await iRes.json() as any
+                const follows = Number(
+                  iBody.data?.find((d: any) => d.name === 'follows')?.values?.[0]?.value ?? 0
+                )
+                followsByMedia.set(mediaId, follows)
+              } catch {
+                followsByMedia.set(mediaId, 0)
+              }
+            })
+          )
+
+          // Constrói mapa final: adsetId → follows
+          for (const [adsetId, mediaId] of adsetMediaIdMap) {
+            adsetFollowsMap.set(adsetId, followsByMedia.get(mediaId) ?? 0)
+          }
+        }
+      } catch (e) {
+        console.error('etapa1 follows lookup error:', (e as Error).message)
+      }
+    }
+
     // Insights de anúncios agrupados por adsetId
     const adsByAdset = new Map<string, any[]>()
     for (const ad of adInsightsData) {
@@ -425,7 +489,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           if (isVideo) {
             adResults = 0
           } else if (view === 'etapa1') {
-            adResults = actionVal(ad.outbound_clicks, 'outbound_click')
+            // follows é métrica de post, não de anúncio individual
+            adResults = 0
           } else {
             const adResTypes = adsetResultTypes.get(ad.adset_id as string) ?? ['lead']
             adResults = actionVal(ad.actions, ...adResTypes)
@@ -444,10 +509,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         adsetRow.videoViews3s    = Number(row.video_thruplay_watched_actions?.[0]?.value ?? 0)
         adsetRow.videoViews25pct = Number(row.video_p25_watched_actions?.[0]?.value ?? 0)
       } else if (view === 'etapa1') {
-        // Para VISIT_INSTAGRAM_PROFILE: outbound_clicks = cliques que navegam ao perfil
-        const profileVisits    = actionVal(row.outbound_clicks, 'outbound_click')
-        adsetRow.results       = profileVisits
-        adsetRow.costPerResult = profileVisits > 0 ? spend / profileVisits : 0
+        // Seguidores ganhos via Instagram Graph API /{ig_media_id}/insights?metric=follows
+        const follows          = adsetFollowsMap.get(row.adset_id as string) ?? 0
+        adsetRow.results       = follows
+        adsetRow.costPerResult = follows > 0 ? spend / follows : 0
       } else {
         const rowResTypes      = adsetResultTypes.get(row.adset_id as string) ?? ['lead']
         const results          = actionVal(row.actions, ...rowResTypes)
