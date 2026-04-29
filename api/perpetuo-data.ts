@@ -569,17 +569,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           //    b) instagram_permalink_url  → decodifica shortcode (/p/, /reel/, /tv/)
           //    c) object_story_id / effective_object_story_id → só se prefixo = IG account ID
           const adsetIgIdMap = new Map<string, string>() // adsetId → ig native media ID
+
+          // Mapa adsetId → adIds (de adInsightsData, que inclui ads deletados)
+          const adsetToAdIds = new Map<string, string[]>()
+          for (const ad of adInsightsData) {
+            if (!matchesFilter(ad.campaign_name as string, filter)) continue
+            const list = adsetToAdIds.get(ad.adset_id as string) ?? []
+            list.push(ad.ad_id as string)
+            adsetToAdIds.set(ad.adset_id as string, list)
+          }
+
           await Promise.all(
             etapa1AdsetIds.map(async (adsetId) => {
-              try {
-                const adsUrl = new URL(`${META_BASE}/${adsetId}/ads`)
-                adsUrl.searchParams.set('fields',       'id,creative{source_instagram_media_id,instagram_post_id,instagram_permalink_url,object_story_id,effective_object_story_id}')
-                adsUrl.searchParams.set('effective_status', JSON.stringify(['ACTIVE','PAUSED','ARCHIVED','DELETED']))
-                adsUrl.searchParams.set('access_token', accessToken)
-                adsUrl.searchParams.set('limit',        '10')
-                const adsBody = await (await fetch(adsUrl.toString())).json() as any
-                for (const ad of (adsBody.data ?? [])) {
-                  const creative = (ad.creative as any) ?? {}
+              // Busca creatives diretamente pelo ID de cada ad (funciona mesmo para ads deletados)
+              // adInsightsData inclui ads deletados — /{adsetId}/ads não retorna deletados
+              const adIds = adsetToAdIds.get(adsetId) ?? []
+              for (const adId of adIds) {
+                try {
+                  const adUrl = new URL(`${META_BASE}/${adId}`)
+                  adUrl.searchParams.set('fields',       'creative{source_instagram_media_id,instagram_post_id,instagram_permalink_url,object_story_id,effective_object_story_id}')
+                  adUrl.searchParams.set('access_token', accessToken)
+                  const adBody = await (await fetch(adUrl.toString())).json() as any
+                  const creative = (adBody.creative as any) ?? {}
                   let igMediaId: string | undefined
 
                   // a) source_instagram_media_id → campo específico para posts impulsionados via app IG
@@ -630,8 +641,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                   }
 
                   if (igMediaId) { adsetIgIdMap.set(adsetId, igMediaId); break }
-                }
-              } catch { /* skip */ }
+                } catch { /* skip ad */ }
+                if (adsetIgIdMap.has(adsetId)) break // já encontrou, para de tentar outros ads
+              }
             })
           )
 
