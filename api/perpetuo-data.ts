@@ -551,6 +551,44 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             })
           )
 
+          // Fallback: adsets ainda sem IG media ID → match por legenda
+          // Mesmo método do Instagram Gestor: lista posts da conta IG e compara
+          // o nome do adset com a legenda do post (funciona para posts de Página FB
+          // impulsionados no IG, onde o creative não tem instagram_post_id)
+          const unmappedIds = etapa1AdsetIds.filter(id => !adsetIgIdMap.has(id))
+          if (unmappedIds.length > 0) {
+            try {
+              const igListUrl = new URL(`https://graph.facebook.com/v22.0/${ETAPA1_IG_ACCOUNT}/media`)
+              igListUrl.searchParams.set('fields',       'id,permalink,caption')
+              igListUrl.searchParams.set('limit',        '100')
+              igListUrl.searchParams.set('access_token', accessToken)
+              const igPosts: { id: string; permalink: string; caption?: string }[] =
+                ((await (await fetch(igListUrl.toString())).json() as any).data ?? [])
+
+              for (const adsetId of unmappedIds) {
+                // Extrai palavras-chave do nome do adset:
+                // "Post: Nervos Cranianos" → ["nervos", "cranianos"]
+                // "Post do Instagram: A Cirurgia Bucomaxilofacial é..." → ["cirurgia", "bucomaxilofacial"]
+                const adsetRow   = adsetInsightsData.find((r: any) => r.adset_id === adsetId)
+                const adsetName  = (adsetRow?.adset_name as string ?? '').toLowerCase()
+                const cleanName  = adsetName
+                  .replace(/^post do instagram:\s*/i, '')
+                  .replace(/^post:\s*/i, '')
+                  .replace(/\[.*?\]/g, '')   // remove [brackets]
+                  .replace(/\.\.\.$/, '')     // remove trailing ...
+                  .trim()
+                const keywords   = cleanName.split(/\s+/).filter(w => w.length > 3)
+                if (keywords.length === 0) continue
+
+                const match = igPosts.find(p => {
+                  const cap = (p.caption ?? '').toLowerCase()
+                  return keywords.every(kw => cap.includes(kw))
+                })
+                if (match) adsetIgIdMap.set(adsetId, match.id)
+              }
+            } catch { /* fallback failed */ }
+          }
+
           // 2. Busca follows para cada IG media ID único
           const uniqueIgIds = new Set<string>(adsetIgIdMap.values())
           const followsByIgId = new Map<string, number>()
