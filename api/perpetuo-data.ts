@@ -308,12 +308,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         // Determina igMediaId usando a mesma lógica do pipeline principal
         let igMediaId: string | undefined
         let igMediaIdSource = 'none'
+        let shortcodeExtracted: string | undefined
 
         if (creative.instagram_permalink_url) {
           const m = (creative.instagram_permalink_url as string).match(/\/(p|reel|tv)\/([A-Za-z0-9_-]+)\/?/)
-          if (m) { igMediaId = instagramShortcodeToMediaId(m[2]) || undefined; igMediaIdSource = 'permalink_shortcode' }
+          if (m) { shortcodeExtracted = m[2]; igMediaIdSource = 'permalink_shortcode' }
         }
-        if (!igMediaId) {
+        if (!shortcodeExtracted) {
           const storyId = (creative.object_story_id ?? creative.effective_object_story_id) as string | undefined
           if (storyId?.includes('_')) {
             const fbPostId = storyId.split('_').slice(1).join('_')
@@ -328,11 +329,30 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 const pl = fbBody2.instagram_permalink_url as string | undefined
                 if (pl) {
                   const m2 = pl.match(/\/(p|reel|tv)\/([A-Za-z0-9_-]+)\/?/)
-                  if (m2) { igMediaId = instagramShortcodeToMediaId(m2[2]) || undefined; igMediaIdSource = 'fb_crosspost_permalink' }
+                  if (m2) { shortcodeExtracted = m2[2]; igMediaIdSource = 'fb_crosspost_permalink' }
                 }
               } catch { /* skip */ }
             }
           }
+        }
+
+        // Busca lista de posts da conta IG para fazer match de shortcode → ID nativo real
+        let igAccountMedia: any[] = []
+        let shortcodeMatchResult: any = null
+        if (shortcodeExtracted) {
+          try {
+            const igListUrl2 = new URL(`https://graph.facebook.com/v22.0/17841401980622840/media`)
+            igListUrl2.searchParams.set('fields', 'id,permalink')
+            igListUrl2.searchParams.set('limit', '100')
+            igListUrl2.searchParams.set('access_token', accessToken)
+            igAccountMedia = ((await (await fetch(igListUrl2.toString())).json() as any).data ?? [])
+            const matched = igAccountMedia.find((p: any) => {
+              const m = p.permalink?.match(/\/(p|reel|tv)\/([A-Za-z0-9_-]+)\/?/)
+              return m?.[2] === shortcodeExtracted
+            })
+            shortcodeMatchResult = matched ?? 'NOT_FOUND_IN_ACCOUNT_MEDIA'
+            if (matched) { igMediaId = matched.id; }
+          } catch (e: any) { shortcodeMatchResult = { error: e.message } }
         }
 
         // Passo 3: Testa insights de follows para o igMediaId encontrado
@@ -344,7 +364,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           followsResult = await (await fetch(iUrl.toString())).json()
         }
 
-        steps.push({ adId, adStatus: adBody.effective_status, adBodyRaw: adBody, creativeId, creativeRaw, igMediaId, igMediaIdSource, followsResult })
+        steps.push({ adId, adStatus: adBody.effective_status, adBodyRaw: adBody, creativeId, creativeRaw, shortcodeExtracted, shortcodeMatchResult, igMediaId, igMediaIdSource, followsResult })
       }
 
       return res.json({ followsdebug: true, adsetId, adIdsFromInsights: adIds, insightsRaw: insBody, steps })
@@ -542,12 +562,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
           await Promise.all(
             etapa1AdsetIds.map(async (adsetId) => {
-              // Busca creatives diretamente pelo ID de cada ad (funciona mesmo para ads deletados)
-              // adInsightsData inclui ads deletados — /{adsetId}/ads não retorna deletados
+              // Extrai o shortcode do permalink do creative para matching posterior
               const adIds = adsetToAdIds.get(adsetId) ?? []
               for (const adId of adIds) {
                 try {
-                  // Passo 1: pega creative.id do ad (mesmo deletado, retorna o ID do creative)
                   const adUrl = new URL(`${META_BASE}/${adId}`)
                   adUrl.searchParams.set('fields',       'creative')
                   adUrl.searchParams.set('access_token', accessToken)
@@ -555,92 +573,97 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                   const creativeId = adBody?.creative?.id as string | undefined
                   if (!creativeId) continue
 
-                  // Passo 2: busca fields no creative diretamente (apenas campos válidos no creative object)
                   const creativeUrl = new URL(`${META_BASE}/${creativeId}`)
                   creativeUrl.searchParams.set('fields',       'instagram_permalink_url,object_story_id,effective_object_story_id')
                   creativeUrl.searchParams.set('access_token', accessToken)
-                  const creativeBody = await (await fetch(creativeUrl.toString())).json() as any
-                  const creative = creativeBody ?? {}
-                  let igMediaId: string | undefined
+                  const creative = await (await fetch(creativeUrl.toString())).json() as any
 
-                  // a) instagram_permalink_url direto no creative → shortcode decode
+                  // Extrai shortcode do permalink direto no creative
+                  let shortcode: string | undefined
                   const plUrl = creative.instagram_permalink_url as string | undefined
                   if (plUrl) {
                     const m = plUrl.match(/\/(p|reel|tv)\/([A-Za-z0-9_-]+)\/?/)
-                    if (m) igMediaId = instagramShortcodeToMediaId(m[2]) || undefined
+                    if (m) shortcode = m[2]
                   }
 
-                  // c) Busca instagram_permalink_url do FB post cross-postado
-                  //    Para posts IG impulsionados, o object_story_id tem {fbPageId}_{fbPostId}
-                  //    Chamar /{fbPostId}?fields=instagram_permalink_url retorna a URL do IG
-                  //    sem precisar de pages_read_engagement
-                  if (!igMediaId) {
+                  // Fallback: busca instagram_permalink_url via FB post cross-post
+                  if (!shortcode) {
                     const storyId = (creative.object_story_id ?? creative.effective_object_story_id) as string | undefined
                     if (storyId?.includes('_')) {
                       const fbPostId = storyId.split('_').slice(1).join('_')
-                      // Se começa com IG account ID, usa direto
-                      if (storyId.startsWith(ETAPA1_IG_ACCOUNT + '_')) {
-                        igMediaId = fbPostId
-                      } else {
-                        // Busca instagram_permalink_url no FB post
-                        try {
-                          const fbUrl = new URL(`${META_BASE}/${fbPostId}`)
-                          fbUrl.searchParams.set('fields',       'instagram_permalink_url')
-                          fbUrl.searchParams.set('access_token', accessToken)
-                          const fbBody = await (await fetch(fbUrl.toString())).json() as any
-                          const igPermalink = fbBody.instagram_permalink_url as string | undefined
-                          if (igPermalink) {
-                            const m2 = igPermalink.match(/\/(p|reel|tv)\/([A-Za-z0-9_-]+)\/?/)
-                            if (m2) igMediaId = instagramShortcodeToMediaId(m2[2]) || undefined
-                          }
-                        } catch { /* skip */ }
-                      }
+                      try {
+                        const fbUrl = new URL(`${META_BASE}/${fbPostId}`)
+                        fbUrl.searchParams.set('fields',       'instagram_permalink_url')
+                        fbUrl.searchParams.set('access_token', accessToken)
+                        const fbBody = await (await fetch(fbUrl.toString())).json() as any
+                        const igPl = fbBody.instagram_permalink_url as string | undefined
+                        if (igPl) {
+                          const m2 = igPl.match(/\/(p|reel|tv)\/([A-Za-z0-9_-]+)\/?/)
+                          if (m2) shortcode = m2[2]
+                        }
+                      } catch { /* skip */ }
                     }
                   }
 
-                  if (igMediaId) { adsetIgIdMap.set(adsetId, igMediaId); break }
+                  // Guarda shortcode temporariamente como sinal de que encontrou permalink
+                  // O match real contra IDs nativos da conta IG é feito abaixo
+                  if (shortcode) { adsetIgIdMap.set(adsetId, `__shortcode__${shortcode}`); break }
                 } catch { /* skip ad */ }
-                if (adsetIgIdMap.has(adsetId)) break // já encontrou, para de tentar outros ads
+                if (adsetIgIdMap.has(adsetId)) break
               }
             })
           )
 
-          // Fallback: adsets ainda sem IG media ID → match por legenda
-          // Mesmo método do Instagram Gestor: lista posts da conta IG e compara
-          // o nome do adset com a legenda do post (funciona para posts de Página FB
-          // impulsionados no IG, onde o creative não tem instagram_post_id)
-          const unmappedIds = etapa1AdsetIds.filter(id => !adsetIgIdMap.has(id))
-          if (unmappedIds.length > 0) {
-            try {
-              const igListUrl = new URL(`https://graph.facebook.com/v22.0/${ETAPA1_IG_ACCOUNT}/media`)
-              igListUrl.searchParams.set('fields',       'id,permalink,caption')
-              igListUrl.searchParams.set('limit',        '100')
-              igListUrl.searchParams.set('access_token', accessToken)
-              const igPosts: { id: string; permalink: string; caption?: string }[] =
-                ((await (await fetch(igListUrl.toString())).json() as any).data ?? [])
+          // Busca lista real de posts da conta IG (mesmo método do Instagram Gestor)
+          // Esses IDs são os únicos que funcionam com /{id}/insights?metric=follows
+          const igListUrl = new URL(`https://graph.facebook.com/v22.0/${ETAPA1_IG_ACCOUNT}/media`)
+          igListUrl.searchParams.set('fields',       'id,permalink,caption')
+          igListUrl.searchParams.set('limit',        '100')
+          igListUrl.searchParams.set('access_token', accessToken)
+          const igPosts: { id: string; permalink: string; caption?: string }[] =
+            ((await (await fetch(igListUrl.toString())).json() as any).data ?? [])
 
-              for (const adsetId of unmappedIds) {
-                // Extrai palavras-chave do nome do adset:
-                // "Post: Nervos Cranianos" → ["nervos", "cranianos"]
-                // "Post do Instagram: A Cirurgia Bucomaxilofacial é..." → ["cirurgia", "bucomaxilofacial"]
-                const adsetRow   = adsetInsightsData.find((r: any) => r.adset_id === adsetId)
-                const adsetName  = (adsetRow?.adset_name as string ?? '').toLowerCase()
-                const cleanName  = adsetName
-                  .replace(/^post do instagram:\s*/i, '')
-                  .replace(/^post:\s*/i, '')
-                  .replace(/\[.*?\]/g, '')   // remove [brackets]
-                  .replace(/\.\.\.$/, '')     // remove trailing ...
-                  .trim()
-                const keywords   = cleanName.split(/\s+/).filter(w => w.length > 3)
-                if (keywords.length === 0) continue
+          // Build shortcode → native IG ID map
+          const shortcodeToIgId = new Map<string, string>()
+          for (const p of igPosts) {
+            const m = p.permalink.match(/\/(p|reel|tv)\/([A-Za-z0-9_-]+)\/?/)
+            if (m) shortcodeToIgId.set(m[2], p.id)
+          }
 
-                const match = igPosts.find(p => {
-                  const cap = (p.caption ?? '').toLowerCase()
-                  return keywords.every(kw => cap.includes(kw))
-                })
-                if (match) adsetIgIdMap.set(adsetId, match.id)
+          // Resolve adsets: shortcode match → ID nativo; sem shortcode → keyword match na legenda
+          for (const adsetId of etapa1AdsetIds) {
+            const current = adsetIgIdMap.get(adsetId)
+            if (current?.startsWith('__shortcode__')) {
+              const sc = current.slice('__shortcode__'.length)
+              const nativeId = shortcodeToIgId.get(sc)
+              if (nativeId) {
+                adsetIgIdMap.set(adsetId, nativeId)
+              } else {
+                adsetIgIdMap.delete(adsetId) // shortcode não encontrado na conta IG → tenta caption
               }
-            } catch { /* fallback failed */ }
+            }
+          }
+
+          // Caption keyword match para adsets sem ID ainda
+          const unmappedIds = etapa1AdsetIds.filter(id => !adsetIgIdMap.has(id))
+
+          for (const adsetId of unmappedIds) {
+            const adsetRow   = adsetInsightsData.find((r: any) => r.adset_id === adsetId)
+            const adsetName  = (adsetRow?.adset_name as string ?? '').toLowerCase()
+            const cleanName  = adsetName
+              .replace(/^post do instagram:\s*/i, '')
+              .replace(/^post:\s*/i, '')
+              .replace(/\[.*?\]/g, '')
+              .replace(/\.\.\.$/, '')
+              .trim()
+            const keywords   = cleanName.split(/\s+/).filter(w => w.length > 3)
+            if (keywords.length === 0) continue
+
+            const match = igPosts.find(p => {
+              const cap = (p.caption ?? '').toLowerCase()
+              return keywords.every(kw => cap.includes(kw))
+            })
+            if (match) adsetIgIdMap.set(adsetId, match.id)
           }
 
           // 2. Busca follows para cada IG media ID único
