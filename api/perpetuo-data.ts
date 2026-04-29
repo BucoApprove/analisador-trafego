@@ -78,6 +78,20 @@ function actionVal(
   return 0
 }
 
+// Decodifica o shortcode do Instagram para o media ID numérico nativo.
+// Instagram usa base64url com alphabet próprio de 64 chars.
+// Ex: "DE7hLIuM7zQ" → "3547575032298585296"
+function instagramShortcodeToMediaId(shortcode: string): string {
+  const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_'
+  let id = BigInt(0)
+  for (const char of shortcode) {
+    const idx = ALPHABET.indexOf(char)
+    if (idx < 0) return ''
+    id = id * BigInt(64) + BigInt(idx)
+  }
+  return id.toString()
+}
+
 async function metaGet(url: URL): Promise<Record<string, unknown>> {
   const res = await fetch(url.toString())
   if (!res.ok) {
@@ -430,15 +444,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             etapa1AdsetIds.map(async (adsetId) => {
               try {
                 const adsUrl = new URL(`${META_BASE}/${adsetId}/ads`)
-                adsUrl.searchParams.set('fields',       'id,creative{effective_object_story_id}')
+                adsUrl.searchParams.set('fields',       'id,creative{instagram_permalink_url}')
                 adsUrl.searchParams.set('access_token', accessToken)
                 adsUrl.searchParams.set('limit',        '10')
                 const adsRes  = await fetch(adsUrl.toString())
                 const adsBody = await adsRes.json() as any
                 for (const ad of (adsBody.data ?? [])) {
-                  // effective_object_story_id = "{page_id}_{ig_media_id}"
-                  const storyId   = (ad.creative as any)?.effective_object_story_id as string | undefined
-                  const igMediaId = storyId?.split('_')[1]
+                  // Extrai shortcode do permalink: https://www.instagram.com/p/{shortcode}/
+                  const permalink = (ad.creative as any)?.instagram_permalink_url as string | undefined
+                  const shortcode = permalink?.match(/instagram\.com\/(?:p|reel)\/([A-Za-z0-9_-]+)/)?.[1]
+                  const igMediaId = shortcode ? instagramShortcodeToMediaId(shortcode) : ''
                   if (igMediaId) {
                     adsetMediaIdMap.set(adsetId, igMediaId)
                     break
