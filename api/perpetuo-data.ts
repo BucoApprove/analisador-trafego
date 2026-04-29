@@ -299,7 +299,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         let creativeRaw: any = null
         if (creativeId) {
           const creativeUrl2 = new URL(`${META_BASE}/${creativeId}`)
-          creativeUrl2.searchParams.set('fields',       'source_instagram_media_id,instagram_post_id,instagram_permalink_url,object_story_id,effective_object_story_id')
+          creativeUrl2.searchParams.set('fields',       'instagram_permalink_url,object_story_id,effective_object_story_id')
           creativeUrl2.searchParams.set('access_token', accessToken)
           creativeRaw = await (await fetch(creativeUrl2.toString())).json() as any
           creative = creativeRaw ?? {}
@@ -309,13 +309,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         let igMediaId: string | undefined
         let igMediaIdSource = 'none'
 
-        if (creative.source_instagram_media_id) {
-          igMediaId = String(creative.source_instagram_media_id)
-          igMediaIdSource = 'source_instagram_media_id'
-        } else if (creative.instagram_post_id) {
-          igMediaId = String(creative.instagram_post_id)
-          igMediaIdSource = 'instagram_post_id'
-        } else if (creative.instagram_permalink_url) {
+        if (creative.instagram_permalink_url) {
           const m = (creative.instagram_permalink_url as string).match(/\/(p|reel|tv)\/([A-Za-z0-9_-]+)\/?/)
           if (m) { igMediaId = instagramShortcodeToMediaId(m[2]) || undefined; igMediaIdSource = 'permalink_shortcode' }
         }
@@ -561,31 +555,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                   const creativeId = adBody?.creative?.id as string | undefined
                   if (!creativeId) continue
 
-                  // Passo 2: busca fields no creative diretamente (creative não é deletado com o ad)
+                  // Passo 2: busca fields no creative diretamente (apenas campos válidos no creative object)
                   const creativeUrl = new URL(`${META_BASE}/${creativeId}`)
-                  creativeUrl.searchParams.set('fields',       'source_instagram_media_id,instagram_post_id,instagram_permalink_url,object_story_id,effective_object_story_id')
+                  creativeUrl.searchParams.set('fields',       'instagram_permalink_url,object_story_id,effective_object_story_id')
                   creativeUrl.searchParams.set('access_token', accessToken)
                   const creativeBody = await (await fetch(creativeUrl.toString())).json() as any
                   const creative = creativeBody ?? {}
                   let igMediaId: string | undefined
 
-                  // a) source_instagram_media_id → campo específico para posts impulsionados via app IG
-                  if (creative.source_instagram_media_id) {
-                    igMediaId = String(creative.source_instagram_media_id)
-                  }
-
-                  // a2) instagram_post_id → ID nativo do IG diretamente
-                  if (!igMediaId && creative.instagram_post_id) {
-                    igMediaId = String(creative.instagram_post_id)
-                  }
-
-                  // b) permalink → shortcode decode
-                  if (!igMediaId) {
-                    const plUrl = creative.instagram_permalink_url as string | undefined
-                    if (plUrl) {
-                      const m = plUrl.match(/\/(p|reel|tv)\/([A-Za-z0-9_-]+)\/?/)
-                      if (m) igMediaId = instagramShortcodeToMediaId(m[2]) || undefined
-                    }
+                  // a) instagram_permalink_url direto no creative → shortcode decode
+                  const plUrl = creative.instagram_permalink_url as string | undefined
+                  if (plUrl) {
+                    const m = plUrl.match(/\/(p|reel|tv)\/([A-Za-z0-9_-]+)\/?/)
+                    if (m) igMediaId = instagramShortcodeToMediaId(m[2]) || undefined
                   }
 
                   // c) Busca instagram_permalink_url do FB post cross-postado
