@@ -336,21 +336,32 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           }
         }
 
-        // Busca lista de posts da conta IG para fazer match de shortcode → ID nativo real
-        let igAccountMedia: any[] = []
+        // Busca lista de posts da conta IG (paginada, max 500) para match de shortcode
+        let igAccountMedia: { id: string; permalink: string }[] = []
         let shortcodeMatchResult: any = null
         if (shortcodeExtracted) {
           try {
-            const igListUrl2 = new URL(`https://graph.facebook.com/v22.0/17841401980622840/media`)
-            igListUrl2.searchParams.set('fields', 'id,permalink')
-            igListUrl2.searchParams.set('limit', '100')
-            igListUrl2.searchParams.set('access_token', accessToken)
-            igAccountMedia = ((await (await fetch(igListUrl2.toString())).json() as any).data ?? [])
+            let nextUrl: string | null = (() => {
+              const u = new URL(`https://graph.facebook.com/v22.0/17841401980622840/media`)
+              u.searchParams.set('fields', 'id,permalink')
+              u.searchParams.set('limit', '100')
+              u.searchParams.set('access_token', accessToken)
+              return u.toString()
+            })()
+            for (let page = 0; page < 5 && nextUrl; page++) {
+              const pageBody = await (await fetch(nextUrl)).json() as any
+              igAccountMedia.push(...(pageBody.data ?? []))
+              nextUrl = pageBody.paging?.next ?? null
+              // Para de paginar se já encontrou o shortcode
+              if (igAccountMedia.some((p: any) => p.permalink?.includes(shortcodeExtracted!))) break
+            }
             const matched = igAccountMedia.find((p: any) => {
               const m = p.permalink?.match(/\/(p|reel|tv)\/([A-Za-z0-9_-]+)\/?/)
               return m?.[2] === shortcodeExtracted
             })
-            shortcodeMatchResult = matched ?? 'NOT_FOUND_IN_ACCOUNT_MEDIA'
+            shortcodeMatchResult = matched
+              ? { found: true, id: matched.id, permalink: matched.permalink }
+              : { found: false, totalPostsChecked: igAccountMedia.length }
             if (matched) { igMediaId = matched.id; }
           } catch (e: any) { shortcodeMatchResult = { error: e.message } }
         }
@@ -614,14 +625,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             })
           )
 
-          // Busca lista real de posts da conta IG (mesmo método do Instagram Gestor)
-          // Esses IDs são os únicos que funcionam com /{id}/insights?metric=follows
-          const igListUrl = new URL(`https://graph.facebook.com/v22.0/${ETAPA1_IG_ACCOUNT}/media`)
-          igListUrl.searchParams.set('fields',       'id,permalink,caption')
-          igListUrl.searchParams.set('limit',        '100')
-          igListUrl.searchParams.set('access_token', accessToken)
-          const igPosts: { id: string; permalink: string; caption?: string }[] =
-            ((await (await fetch(igListUrl.toString())).json() as any).data ?? [])
+          // Busca TODOS os posts da conta IG com paginação (max 5 páginas = 500 posts)
+          // Necessário porque posts antigos ficam além do limite de 100
+          const igPosts: { id: string; permalink: string; caption?: string }[] = []
+          let igPageUrl: string | null = (() => {
+            const u = new URL(`https://graph.facebook.com/v22.0/${ETAPA1_IG_ACCOUNT}/media`)
+            u.searchParams.set('fields', 'id,permalink,caption')
+            u.searchParams.set('limit', '100')
+            u.searchParams.set('access_token', accessToken)
+            return u.toString()
+          })()
+          for (let page = 0; page < 5 && igPageUrl; page++) {
+            try {
+              const pageBody = await (await fetch(igPageUrl)).json() as any
+              igPosts.push(...(pageBody.data ?? []))
+              igPageUrl = pageBody.paging?.next ?? null
+            } catch { igPageUrl = null }
+          }
 
           // Build shortcode → native IG ID map
           const shortcodeToIgId = new Map<string, string>()
