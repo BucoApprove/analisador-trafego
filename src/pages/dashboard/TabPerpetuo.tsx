@@ -525,11 +525,17 @@ export default function TabPerpetuo({ token, enabled }: TabPerpetuoProps) {
   }, [enabled, account, view]) // eslint-disable-line react-hooks/exhaustive-deps
 
   function handleAccountChange(acc: 'conta1' | 'conta2') {
+    setData(null)
     setAccount(acc)
     setView(acc === 'conta1' ? 'etapa2' : 'anatomia')
   }
 
   function handleViewChange(v: string) {
+    if (v === view) return
+    // Limpa dados da view anterior para evitar flash de dados obsoletos durante o carregamento
+    if (!_cache.has(`${account}|${v}|${since}|${until}`)) {
+      setData(null)
+    }
     setView(v)
   }
 
@@ -726,7 +732,7 @@ export default function TabPerpetuo({ token, enabled }: TabPerpetuoProps) {
       )}
 
       {/* ── Campanhas ── */}
-      {!loading && data && (() => {
+      {!loading && data && data.view === view && (() => {
         const campaigns = data.campaigns
         const isCaptura = view === 'etapa2'
         const isRmkt    = view === 'etapa5'
