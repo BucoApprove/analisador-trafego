@@ -236,6 +236,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.json({ rawdebug: true, adsetId, dateRange: { since, until }, results })
   }
 
+  // ── Modo creativedebug: mostra todos os campos de creative de um adset ──────
+  if (typeof req.query.creativedebug === 'string') {
+    const adsetId = req.query.creativedebug
+    try {
+      const adsUrl = new URL(`${META_BASE}/${adsetId}/ads`)
+      adsUrl.searchParams.set('fields', [
+        'id', 'name', 'status',
+        'creative{id,object_story_id,effective_object_story_id,effective_instagram_story_id,instagram_permalink_url,object_type}',
+      ].join(','))
+      adsUrl.searchParams.set('access_token', accessToken)
+      adsUrl.searchParams.set('limit', '10')
+      const adsRes  = await fetch(adsUrl.toString())
+      const adsBody = await adsRes.json() as any
+      return res.json({ creativedebug: true, adsetId, ads: adsBody.data ?? [], raw: adsBody })
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message })
+    }
+  }
+
   // ── Modo etapa1debug: busca todos os adsets de etapa1 com campos candidatos ──
   if (req.query.etapa1debug === 'true') {
     const url = new URL(`${META_BASE}/${acctId}/insights`)
