@@ -404,26 +404,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           .map((r: any) => r.adset_id as string)
 
         if (etapa1AdsetIds.length > 0) {
-          // Busca todos os anúncios da conta com o creative.effective_instagram_story_id
-          const adsCreativeUrl = new URL(`${META_BASE}/${acctId}/ads`)
-          adsCreativeUrl.searchParams.set('fields',       'id,adset_id,creative{effective_instagram_story_id}')
-          adsCreativeUrl.searchParams.set('access_token', accessToken)
-          adsCreativeUrl.searchParams.set('limit',        '500')
-
-          const allAds = await metaGetAll(adsCreativeUrl)
-
-          // Mapeia adsetId → igMediaId (primeiro anúncio com ID válido dentro do adset)
+          // Busca 1 anúncio por adset em paralelo (limit=10, sem paginação)
+          // Muito mais rápido do que buscar todos os anúncios da conta paginados
           const adsetMediaIdMap = new Map<string, string>()
-          for (const ad of allAds) {
-            const igMediaId = (ad.creative as any)?.effective_instagram_story_id as string | undefined
-            if (
-              igMediaId &&
-              etapa1AdsetIds.includes(ad.adset_id as string) &&
-              !adsetMediaIdMap.has(ad.adset_id as string)
-            ) {
-              adsetMediaIdMap.set(ad.adset_id as string, igMediaId)
-            }
-          }
+          await Promise.all(
+            etapa1AdsetIds.map(async (adsetId) => {
+              try {
+                const adsUrl = new URL(`${META_BASE}/${adsetId}/ads`)
+                adsUrl.searchParams.set('fields',       'id,creative{effective_instagram_story_id}')
+                adsUrl.searchParams.set('access_token', accessToken)
+                adsUrl.searchParams.set('limit',        '10')
+                const adsRes  = await fetch(adsUrl.toString())
+                const adsBody = await adsRes.json() as any
+                for (const ad of (adsBody.data ?? [])) {
+                  const igMediaId = (ad.creative as any)?.effective_instagram_story_id as string | undefined
+                  if (igMediaId) {
+                    adsetMediaIdMap.set(adsetId, igMediaId)
+                    break
+                  }
+                }
+              } catch { /* silently skip */ }
+            })
+          )
 
           // Busca follows em paralelo para cada IG media ID único
           const uniqueMediaIds = [...new Set(adsetMediaIdMap.values())]
