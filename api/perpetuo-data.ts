@@ -311,19 +311,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         let shortcodeExtracted: string | undefined
         let fbInstagramMediaIdResult: any = null
 
-        // Estratégia 1: instagram_media_id via full story ID /{pageId_postId}?fields=instagram_media_id
-        const storyId = (creative.object_story_id ?? creative.effective_object_story_id) as string | undefined
-        if (storyId?.includes('_')) {
+        // Estratégia 1: oEmbed — retorna media_id nativo sem pages_read_engagement
+        let oembedResult: any = null
+        const permalinkUrl = creative.instagram_permalink_url as string | undefined
+        if (permalinkUrl && !igMediaId) {
           try {
-            const fbUrl = new URL(`${META_BASE}/${storyId}`)
-            fbUrl.searchParams.set('fields', 'instagram_media_id')
-            fbUrl.searchParams.set('access_token', accessToken)
-            fbInstagramMediaIdResult = await (await fetch(fbUrl.toString())).json() as any
-            if (fbInstagramMediaIdResult?.instagram_media_id) {
-              igMediaId = String(fbInstagramMediaIdResult.instagram_media_id)
-              igMediaIdSource = 'fb_post_instagram_media_id'
+            const oembedUrl = new URL('https://graph.facebook.com/v22.0/instagram_oembed')
+            oembedUrl.searchParams.set('url',          permalinkUrl)
+            oembedUrl.searchParams.set('fields',       'media_id')
+            oembedUrl.searchParams.set('access_token', accessToken)
+            oembedResult = await (await fetch(oembedUrl.toString())).json() as any
+            if (oembedResult?.media_id) {
+              igMediaId = String(oembedResult.media_id)
+              igMediaIdSource = 'oembed_media_id'
             }
-          } catch (e: any) { fbInstagramMediaIdResult = { error: e.message } }
+          } catch (e: any) { oembedResult = { error: e.message } }
         }
 
         // Estratégia 2: shortcode do permalink para match na lista da conta IG
@@ -371,7 +373,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           followsResult = await (await fetch(iUrl.toString())).json()
         }
 
-        steps.push({ adId, adStatus: adBody.effective_status, adBodyRaw: adBody, creativeId, creativeRaw, fbInstagramMediaIdResult, shortcodeExtracted, shortcodeMatchResult, igMediaId, igMediaIdSource, followsResult })
+        steps.push({ adId, adStatus: adBody.effective_status, creativeId, creativeRaw, oembedResult, shortcodeExtracted, shortcodeMatchResult, igMediaId, igMediaIdSource, followsResult })
       }
 
       return res.json({ followsdebug: true, adsetId, adIdsFromInsights: adIds, insightsRaw: insBody, steps })
@@ -584,18 +586,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                   creativeUrl.searchParams.set('access_token', accessToken)
                   const creative = await (await fetch(creativeUrl.toString())).json() as any
 
-                  // Estratégia 1: busca instagram_media_id no post do FB usando o full story ID
-                  // O formato correto é /{pageId_postId}?fields=instagram_media_id
-                  const storyId = (creative.object_story_id ?? creative.effective_object_story_id) as string | undefined
-                  if (storyId?.includes('_')) {
+                  // Estratégia 1: oEmbed — retorna media_id nativo do IG via URL do post
+                  // Não requer pages_read_engagement, funciona com qualquer user token
+                  const plUrl = creative.instagram_permalink_url as string | undefined
+                  if (plUrl) {
                     try {
-                      // Usa o storyId completo (ex: 100391712630556_603774435750580) como node ID
-                      const fbUrl = new URL(`${META_BASE}/${storyId}`)
-                      fbUrl.searchParams.set('fields',       'instagram_media_id')
-                      fbUrl.searchParams.set('access_token', accessToken)
-                      const fbBody = await (await fetch(fbUrl.toString())).json() as any
-                      if (fbBody.instagram_media_id) {
-                        adsetIgIdMap.set(adsetId, String(fbBody.instagram_media_id))
+                      const oembedUrl = new URL('https://graph.facebook.com/v22.0/instagram_oembed')
+                      oembedUrl.searchParams.set('url',          plUrl)
+                      oembedUrl.searchParams.set('fields',       'media_id')
+                      oembedUrl.searchParams.set('access_token', accessToken)
+                      const oembedBody = await (await fetch(oembedUrl.toString())).json() as any
+                      if (oembedBody.media_id) {
+                        adsetIgIdMap.set(adsetId, String(oembedBody.media_id))
                         break
                       }
                     } catch { /* estratégia 2 */ }
@@ -603,7 +605,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
                   // Estratégia 2: guarda shortcode do permalink para match na lista da conta IG
                   let shortcode: string | undefined
-                  const plUrl = creative.instagram_permalink_url as string | undefined
                   if (plUrl) {
                     const m = plUrl.match(/\/(p|reel|tv)\/([A-Za-z0-9_-]+)\/?/)
                     if (m) shortcode = m[2]
