@@ -504,37 +504,47 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           .map((r: any) => r.adset_id as string)
 
         if (etapa1AdsetIds.length > 0) {
-          // 1. Busca instagram_permalink_url do creative de cada adset (em paralelo)
-          const adsetPermalinkMap = new Map<string, string>()
+          // 1. Busca creative fields de cada adset → extrai IG native media ID
+          //    Fontes tentadas em ordem:
+          //    a) instagram_permalink_url  → decodifica shortcode (/p/, /reel/, /tv/)
+          //    b) object_story_id          → "{ig_account_id}_{ig_media_id}" (posts impulsionados)
+          //    c) effective_object_story_id → idem, fallback
+          const adsetIgIdMap = new Map<string, string>() // adsetId → ig native media ID
           await Promise.all(
             etapa1AdsetIds.map(async (adsetId) => {
               try {
                 const adsUrl = new URL(`${META_BASE}/${adsetId}/ads`)
-                adsUrl.searchParams.set('fields',       'id,creative{instagram_permalink_url}')
+                adsUrl.searchParams.set('fields',       'id,creative{instagram_permalink_url,object_story_id,effective_object_story_id}')
                 adsUrl.searchParams.set('access_token', accessToken)
                 adsUrl.searchParams.set('limit',        '10')
                 const adsBody = await (await fetch(adsUrl.toString())).json() as any
                 for (const ad of (adsBody.data ?? [])) {
-                  const permalink = (ad.creative as any)?.instagram_permalink_url as string | undefined
-                  if (permalink) { adsetPermalinkMap.set(adsetId, permalink); break }
+                  const creative = (ad.creative as any) ?? {}
+                  let igMediaId: string | undefined
+
+                  // a) permalink → shortcode decode
+                  const plUrl = creative.instagram_permalink_url as string | undefined
+                  if (plUrl) {
+                    const m = plUrl.match(/\/(p|reel|tv)\/([A-Za-z0-9_-]+)\/?/)
+                    if (m) igMediaId = instagramShortcodeToMediaId(m[2]) || undefined
+                  }
+
+                  // b/c) object_story_id / effective_object_story_id
+                  //      formato: "{ig_account_id}_{ig_media_id}"
+                  if (!igMediaId) {
+                    const storyId = (creative.object_story_id ?? creative.effective_object_story_id) as string | undefined
+                    if (storyId?.startsWith(ETAPA1_IG_ACCOUNT + '_')) {
+                      igMediaId = storyId.split('_')[1]
+                    }
+                  }
+
+                  if (igMediaId) { adsetIgIdMap.set(adsetId, igMediaId); break }
                 }
               } catch { /* skip */ }
             })
           )
 
-          // 2. Decodifica shortcode do instagram_permalink_url → IG native media ID
-          // Funciona com /p/, /reel/ e /tv/ — não precisa do media list
-          // Ex: "https://www.instagram.com/reel/ABC123/" → shortcode "ABC123" → ID nativo
-          const adsetIgIdMap = new Map<string, string>() // adsetId → ig native media ID
-          for (const [adsetId, permalink] of adsetPermalinkMap) {
-            const match = permalink.match(/\/(p|reel|tv)\/([A-Za-z0-9_-]+)\/?/)
-            if (match) {
-              const igMediaId = instagramShortcodeToMediaId(match[2])
-              if (igMediaId) adsetIgIdMap.set(adsetId, igMediaId)
-            }
-          }
-
-          // 3. Busca follows para cada IG media ID único
+          // 2. Busca follows para cada IG media ID único
           const uniqueIgIds = new Set<string>(adsetIgIdMap.values())
           const followsByIgId = new Map<string, number>()
           await Promise.all(
@@ -549,7 +559,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             })
           )
 
-          // 4. Mapa final: adsetId → follows
+          // 3. Mapa final: adsetId → follows
           for (const [adsetId, igId] of adsetIgIdMap) {
             adsetFollowsMap.set(adsetId, followsByIgId.get(igId) ?? 0)
           }
