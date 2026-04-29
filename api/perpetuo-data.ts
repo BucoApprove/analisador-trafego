@@ -269,6 +269,44 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
   }
 
+  // ── Modo followsdebug: testa o pipeline completo de follows para 1 adset ────
+  if (typeof req.query.followsdebug === 'string') {
+    const adsetId = req.query.followsdebug
+    try {
+      // 1. Busca creative com permalink
+      const adsUrl = new URL(`${META_BASE}/${adsetId}/ads`)
+      adsUrl.searchParams.set('fields', 'id,creative{instagram_permalink_url}')
+      adsUrl.searchParams.set('access_token', accessToken)
+      adsUrl.searchParams.set('limit', '10')
+      const adsRes  = await fetch(adsUrl.toString())
+      const adsBody = await adsRes.json() as any
+      const ads     = adsBody.data ?? []
+
+      const steps: any[] = []
+      for (const ad of ads) {
+        const permalink = (ad.creative as any)?.instagram_permalink_url as string | undefined
+        const shortcode = permalink?.match(/instagram\.com\/(?:p|reel)\/([A-Za-z0-9_-]+)/)?.[1]
+        const igMediaId = shortcode ? instagramShortcodeToMediaId(shortcode) : ''
+
+        // 2. Chama insights com o ID decodificado
+        let insightsRaw: any = null
+        if (igMediaId) {
+          const iUrl = new URL(`https://graph.facebook.com/v22.0/${igMediaId}/insights`)
+          iUrl.searchParams.set('metric', 'follows')
+          iUrl.searchParams.set('access_token', accessToken)
+          const iRes  = await fetch(iUrl.toString())
+          insightsRaw = await iRes.json()
+        }
+
+        steps.push({ adId: ad.id, permalink, shortcode, igMediaId, insightsRaw })
+      }
+
+      return res.json({ followsdebug: true, adsetId, steps, adsRaw: adsBody })
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message })
+    }
+  }
+
   // ── Modo etapa1debug: busca todos os adsets de etapa1 com campos candidatos ──
   if (req.query.etapa1debug === 'true') {
     const url = new URL(`${META_BASE}/${acctId}/insights`)
