@@ -273,6 +273,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (typeof req.query.followsdebug === 'string') {
     const adsetId = req.query.followsdebug
     try {
+      // Passo 0: lista todas as contas IG conectadas ao ad account
+      const igAccountsUrl = new URL(`${META_BASE}/${acctId}/instagram_accounts`)
+      igAccountsUrl.searchParams.set('fields',       'id,username,name')
+      igAccountsUrl.searchParams.set('access_token', accessToken)
+      const igAccountsBody = await (await fetch(igAccountsUrl.toString())).json() as any
+
       // Passo 1: Busca ad IDs deste adset via insights (funciona mesmo com ads deletados)
       const insUrl = new URL(`${META_BASE}/${acctId}/insights`)
       insUrl.searchParams.set('level',        'ad')
@@ -375,7 +381,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         steps.push({ adId, adStatus: adBody.effective_status, creativeId, creativeRaw, oembedResult, shortcodeExtracted, shortcodeMatchResult, igMediaId, igMediaIdSource, followsResult })
       }
 
-      return res.json({ followsdebug: true, adsetId, adIdsFromInsights: adIds, insightsRaw: insBody, steps })
+      return res.json({ followsdebug: true, adsetId, connectedIgAccounts: igAccountsBody, adIdsFromInsights: adIds, insightsRaw: insBody, steps })
     } catch (e: any) {
       return res.status(500).json({ error: e.message })
     }
