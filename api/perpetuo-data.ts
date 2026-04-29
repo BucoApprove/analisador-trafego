@@ -273,7 +273,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (typeof req.query.followsdebug === 'string') {
     const adsetId = req.query.followsdebug
     try {
-      // 1. Busca creative com permalink
+      // 1. Busca todos os posts da conta IG
+      const igAcctId   = process.env.INSTAGRAM_ACCOUNT_ID ?? '17841401980622840'
+      const igMediaUrl = new URL(`https://graph.facebook.com/v22.0/${igAcctId}/media`)
+      igMediaUrl.searchParams.set('fields',       'id,permalink')
+      igMediaUrl.searchParams.set('limit',        '100')
+      igMediaUrl.searchParams.set('access_token', accessToken)
+      const igMediaAll = await metaGetAll(igMediaUrl)
+
+      const permalinkToIgId = new Map<string, string>()
+      for (const m of igMediaAll) {
+        const key = (m.permalink as string)?.replace(/\/$/, '').toLowerCase()
+        if (key) permalinkToIgId.set(key, m.id as string)
+      }
+
+      // 2. Busca creative do adset
       const adsUrl = new URL(`${META_BASE}/${adsetId}/ads`)
       adsUrl.searchParams.set('fields', 'id,creative{instagram_permalink_url}')
       adsUrl.searchParams.set('access_token', accessToken)
@@ -285,23 +299,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const steps: any[] = []
       for (const ad of ads) {
         const permalink = (ad.creative as any)?.instagram_permalink_url as string | undefined
-        const shortcode = permalink?.match(/instagram\.com\/(?:p|reel)\/([A-Za-z0-9_-]+)/)?.[1]
-        const igMediaId = shortcode ? instagramShortcodeToMediaId(shortcode) : ''
+        const key       = permalink?.replace(/\/$/, '').toLowerCase()
+        const nativeId  = key ? permalinkToIgId.get(key) : undefined
 
-        // 2. Chama insights com o ID decodificado
         let insightsRaw: any = null
-        if (igMediaId) {
-          const iUrl = new URL(`https://graph.facebook.com/v22.0/${igMediaId}/insights`)
+        if (nativeId) {
+          const iUrl = new URL(`https://graph.facebook.com/v22.0/${nativeId}/insights`)
           iUrl.searchParams.set('metric', 'follows')
           iUrl.searchParams.set('access_token', accessToken)
           const iRes  = await fetch(iUrl.toString())
           insightsRaw = await iRes.json()
         }
 
-        steps.push({ adId: ad.id, permalink, shortcode, igMediaId, insightsRaw })
+        steps.push({ adId: ad.id, permalink, lookupKey: key, nativeIgId: nativeId, insightsRaw })
       }
 
-      return res.json({ followsdebug: true, adsetId, steps, adsRaw: adsBody })
+      return res.json({
+        followsdebug: true, adsetId,
+        igMediaCount: igMediaAll.length,
+        steps,
+      })
     } catch (e: any) {
       return res.status(500).json({ error: e.message })
     }
@@ -465,8 +482,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
 
     // ── Etapa1: busca followers ganhos por post via Instagram Graph API ────────
-    // A Marketing API não expõe instagram_profile_visit nem follow como action_type.
-    // A única forma de obter "Seguidores" por post é via /{ig_media_id}/insights?metric=follows.
+    // Abordagem: busca todos os posts da conta IG com seus permalinks,
+    // cruza com o instagram_permalink_url do creative do anúncio,
+    // e usa o ID nativo do IG (o mesmo que instagram-analytics.ts usa).
     const adsetFollowsMap = new Map<string, number>()
     if (view === 'etapa1') {
       try {
@@ -475,8 +493,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           .map((r: any) => r.adset_id as string)
 
         if (etapa1AdsetIds.length > 0) {
-          // Busca 1 anúncio por adset em paralelo (limit=10, sem paginação)
-          // Muito mais rápido do que buscar todos os anúncios da conta paginados
+          // 1. Busca todos os posts da conta IG com id + permalink
+          const igAcctId  = process.env.INSTAGRAM_ACCOUNT_ID ?? '17841401980622840'
+          const igMediaUrl = new URL(`https://graph.facebook.com/v22.0/${igAcctId}/media`)
+          igMediaUrl.searchParams.set('fields',       'id,permalink')
+          igMediaUrl.searchParams.set('limit',        '100')
+          igMediaUrl.searchParams.set('access_token', accessToken)
+          const igMediaAll = await metaGetAll(igMediaUrl)
+
+          // Normaliza: permalink sem barra final → nativeIgId
+          const permalinkToIgId = new Map<string, string>()
+          for (const m of igMediaAll) {
+            const key = (m.permalink as string)?.replace(/\/$/, '').toLowerCase()
+            if (key) permalinkToIgId.set(key, m.id as string)
+          }
+
+          // 2. Busca o permalink do creative de cada adset em paralelo
           const adsetMediaIdMap = new Map<string, string>()
           await Promise.all(
             etapa1AdsetIds.map(async (adsetId) => {
@@ -488,12 +520,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 const adsRes  = await fetch(adsUrl.toString())
                 const adsBody = await adsRes.json() as any
                 for (const ad of (adsBody.data ?? [])) {
-                  // Extrai shortcode do permalink: https://www.instagram.com/p/{shortcode}/
                   const permalink = (ad.creative as any)?.instagram_permalink_url as string | undefined
-                  const shortcode = permalink?.match(/instagram\.com\/(?:p|reel)\/([A-Za-z0-9_-]+)/)?.[1]
-                  const igMediaId = shortcode ? instagramShortcodeToMediaId(shortcode) : ''
-                  if (igMediaId) {
-                    adsetMediaIdMap.set(adsetId, igMediaId)
+                  const key       = permalink?.replace(/\/$/, '').toLowerCase()
+                  const nativeId  = key ? permalinkToIgId.get(key) : undefined
+                  if (nativeId) {
+                    adsetMediaIdMap.set(adsetId, nativeId)
                     break
                   }
                 }
@@ -501,7 +532,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             })
           )
 
-          // Busca follows em paralelo para cada IG media ID único
+          // 3. Busca follows em paralelo para cada ID nativo único
           const uniqueMediaIds = [...new Set(adsetMediaIdMap.values())]
           const followsByMedia  = new Map<string, number>()
 
@@ -523,7 +554,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             })
           )
 
-          // Constrói mapa final: adsetId → follows
+          // 4. Mapa final: adsetId → follows
           for (const [adsetId, mediaId] of adsetMediaIdMap) {
             adsetFollowsMap.set(adsetId, followsByMedia.get(mediaId) ?? 0)
           }
