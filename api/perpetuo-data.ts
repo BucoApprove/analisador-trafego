@@ -273,120 +273,75 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (typeof req.query.followsdebug === 'string') {
     const adsetId = req.query.followsdebug
     try {
-      // Busca creative com todos os campos de ID disponíveis
-      const adsUrl = new URL(`${META_BASE}/${adsetId}/ads`)
-      adsUrl.searchParams.set('fields', 'id,effective_status,creative{id,source_instagram_media_id,instagram_post_id,object_story_id,effective_object_story_id,instagram_permalink_url,object_type}')
-      adsUrl.searchParams.set('effective_status', JSON.stringify(['ACTIVE','PAUSED','ARCHIVED','DELETED']))
-      adsUrl.searchParams.set('access_token', accessToken)
-      adsUrl.searchParams.set('limit', '10')
-      const adsRes  = await fetch(adsUrl.toString())
-      const adsBody = await adsRes.json() as any
-      const ads     = adsBody.data ?? []
-      const adsRaw  = adsBody
+      // Passo 1: Busca ad IDs deste adset via insights (funciona mesmo com ads deletados)
+      const insUrl = new URL(`${META_BASE}/${acctId}/insights`)
+      insUrl.searchParams.set('level',        'ad')
+      insUrl.searchParams.set('fields',       'ad_id,adset_id,ad_name,campaign_name')
+      insUrl.searchParams.set('time_range',   JSON.stringify({ since: '2024-01-01', until: new Date().toISOString().slice(0, 10) }))
+      insUrl.searchParams.set('filtering',    JSON.stringify([{ field: 'adset.id', operator: 'EQUAL', value: adsetId }]))
+      insUrl.searchParams.set('access_token', accessToken)
+      insUrl.searchParams.set('limit',        '50')
+      const insBody = await (await fetch(insUrl.toString())).json() as any
+      const adIds: string[] = (insBody.data ?? []).map((d: any) => d.ad_id as string)
 
+      // Passo 2: Para cada ad_id, busca creative diretamente (funciona para ads deletados)
       const steps: any[] = []
-      for (const ad of ads) {
-        const creative              = (ad.creative as any) ?? {}
-        const objectStoryId         = creative.object_story_id         as string | undefined
-        const effectiveObjectStoryId = creative.effective_object_story_id as string | undefined
+      for (const adId of adIds) {
+        const adUrl2 = new URL(`${META_BASE}/${adId}`)
+        adUrl2.searchParams.set('fields',       'id,name,effective_status,creative{id,source_instagram_media_id,instagram_post_id,instagram_permalink_url,object_story_id,effective_object_story_id}')
+        adUrl2.searchParams.set('access_token', accessToken)
+        const adBody = await (await fetch(adUrl2.toString())).json() as any
+        const creative = (adBody.creative as any) ?? {}
 
-        // object_story_id para posts IG nativos = "{ig_user_id}_{ig_media_id}"
-        // Se começa com o IG account ID, a parte depois do _ é o IG media ID nativo
-        const igAccountId  = '17841401980622840'
-        const igMediaIdFromObjectStory = objectStoryId?.startsWith(igAccountId + '_')
-          ? objectStoryId.split('_')[1]
-          : undefined
+        // Determina igMediaId usando a mesma lógica do pipeline principal
+        let igMediaId: string | undefined
+        let igMediaIdSource = 'none'
 
-        // Tenta insights com o ID extraído de object_story_id
-        let insightsFromObjectStory: any = null
-        if (igMediaIdFromObjectStory) {
-          const iUrl = new URL(`https://graph.facebook.com/v22.0/${igMediaIdFromObjectStory}/insights`)
-          iUrl.searchParams.set('metric', 'follows')
-          iUrl.searchParams.set('access_token', accessToken)
-          const iRes = await fetch(iUrl.toString())
-          insightsFromObjectStory = await iRes.json()
+        if (creative.source_instagram_media_id) {
+          igMediaId = String(creative.source_instagram_media_id)
+          igMediaIdSource = 'source_instagram_media_id'
+        } else if (creative.instagram_post_id) {
+          igMediaId = String(creative.instagram_post_id)
+          igMediaIdSource = 'instagram_post_id'
+        } else if (creative.instagram_permalink_url) {
+          const m = (creative.instagram_permalink_url as string).match(/\/(p|reel|tv)\/([A-Za-z0-9_-]+)\/?/)
+          if (m) { igMediaId = instagramShortcodeToMediaId(m[2]) || undefined; igMediaIdSource = 'permalink_shortcode' }
         }
-
-        // Tenta insights com a parte depois do _ do effective_object_story_id
-        const effectivePostId = effectiveObjectStoryId?.split('_')[1]
-        let insightsFromEffective: any = null
-        if (effectivePostId) {
-          const iUrl = new URL(`https://graph.facebook.com/v22.0/${effectivePostId}/insights`)
-          iUrl.searchParams.set('metric', 'follows')
-          iUrl.searchParams.set('access_token', accessToken)
-          const iRes = await fetch(iUrl.toString())
-          insightsFromEffective = await iRes.json()
-        }
-
-        // Tenta também: instagram_post_id direto no creative
-        const instagramPostId = creative.instagram_post_id as string | undefined
-        let insightsFromInstagramPostId: any = null
-        if (instagramPostId) {
-          const iUrl = new URL(`https://graph.facebook.com/v22.0/${instagramPostId}/insights`)
-          iUrl.searchParams.set('metric', 'follows')
-          iUrl.searchParams.set('access_token', accessToken)
-          const iRes = await fetch(iUrl.toString())
-          insightsFromInstagramPostId = await iRes.json()
-        }
-
-        // Tenta: buscar instagram_permalink_url do FB post (cross-post)
-        const fbPostId = objectStoryId?.includes('_') ? objectStoryId.split('_').slice(1).join('_') : undefined
-        let fbPostIgPermalink: any = null
-        let insightsFromFbCrossPost: any = null
-        if (fbPostId && !objectStoryId?.startsWith('17841401980622840_')) {
-          try {
-            const fbUrl = new URL(`${META_BASE}/${fbPostId}`)
-            fbUrl.searchParams.set('fields', 'instagram_permalink_url')
-            fbUrl.searchParams.set('access_token', accessToken)
-            const fbBody = await (await fetch(fbUrl.toString())).json() as any
-            fbPostIgPermalink = fbBody.instagram_permalink_url ?? fbBody
-            if (typeof fbBody.instagram_permalink_url === 'string') {
-              const m2 = fbBody.instagram_permalink_url.match(/\/(p|reel|tv)\/([A-Za-z0-9_-]+)\/?/)
-              if (m2) {
-                const derivedId = instagramShortcodeToMediaId(m2[2])
-                if (derivedId) {
-                  const iUrl = new URL(`https://graph.facebook.com/v22.0/${derivedId}/insights`)
-                  iUrl.searchParams.set('metric', 'follows')
-                  iUrl.searchParams.set('access_token', accessToken)
-                  const iRes = await fetch(iUrl.toString())
-                  insightsFromFbCrossPost = await iRes.json()
+        if (!igMediaId) {
+          const storyId = (creative.object_story_id ?? creative.effective_object_story_id) as string | undefined
+          if (storyId?.includes('_')) {
+            const fbPostId = storyId.split('_').slice(1).join('_')
+            if (storyId.startsWith('17841401980622840_')) {
+              igMediaId = fbPostId; igMediaIdSource = 'object_story_id_ig_prefix'
+            } else {
+              try {
+                const fbUrl = new URL(`${META_BASE}/${fbPostId}`)
+                fbUrl.searchParams.set('fields', 'instagram_permalink_url')
+                fbUrl.searchParams.set('access_token', accessToken)
+                const fbBody2 = await (await fetch(fbUrl.toString())).json() as any
+                const pl = fbBody2.instagram_permalink_url as string | undefined
+                if (pl) {
+                  const m2 = pl.match(/\/(p|reel|tv)\/([A-Za-z0-9_-]+)\/?/)
+                  if (m2) { igMediaId = instagramShortcodeToMediaId(m2[2]) || undefined; igMediaIdSource = 'fb_crosspost_permalink' }
                 }
-              }
+              } catch { /* skip */ }
             }
-          } catch (e: any) { fbPostIgPermalink = { error: e.message } }
+          }
         }
 
-        // Tenta source_instagram_media_id (campo específico para posts impulsionados via app IG)
-        const sourceIgMediaId = creative.source_instagram_media_id as string | undefined
-        let insightsFromSourceIgMedia: any = null
-        if (sourceIgMediaId) {
-          const iUrl = new URL(`https://graph.facebook.com/v22.0/${sourceIgMediaId}/insights`)
-          iUrl.searchParams.set('metric', 'follows')
+        // Passo 3: Testa insights de follows para o igMediaId encontrado
+        let followsResult: any = null
+        if (igMediaId) {
+          const iUrl = new URL(`https://graph.facebook.com/v22.0/${igMediaId}/insights`)
+          iUrl.searchParams.set('metric',       'follows')
           iUrl.searchParams.set('access_token', accessToken)
-          const iRes = await fetch(iUrl.toString())
-          insightsFromSourceIgMedia = await iRes.json()
+          followsResult = await (await fetch(iUrl.toString())).json()
         }
 
-        steps.push({
-          adId: ad.id,
-          adStatus: (ad as any).effective_status,
-          sourceIgMediaId,
-          objectStoryId,
-          effectiveObjectStoryId,
-          instagramPostId,
-          igMediaIdFromObjectStory,
-          effectivePostId,
-          insightsFromSourceIgMedia,
-          insightsFromInstagramPostId,
-          fbPostId,
-          fbPostIgPermalink,
-          insightsFromFbCrossPost,
-          insightsFromObjectStory,
-          insightsFromEffective,
-        })
+        steps.push({ adId, adStatus: adBody.effective_status, creative, igMediaId, igMediaIdSource, followsResult })
       }
 
-      return res.json({ followsdebug: true, adsetId, adsRaw, steps })
+      return res.json({ followsdebug: true, adsetId, adIdsFromInsights: adIds, insightsRaw: insBody, steps })
     } catch (e: any) {
       return res.status(500).json({ error: e.message })
     }
