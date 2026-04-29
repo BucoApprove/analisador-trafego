@@ -705,8 +705,8 @@ export default function TabPerpetuo({ token, enabled }: TabPerpetuoProps) {
         </div>
       )}
 
-      {/* ── Sumário rápido (apenas conta2 — conta1 usa stage cards) ── */}
-      {!loading && data && totals && !isVideo && account === 'conta2' && (
+      {/* ── Sumário rápido ── */}
+      {!loading && data && totals && !isVideo && (
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
           <Card>
             <CardContent className="pt-5 pb-4">

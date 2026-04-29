@@ -273,9 +273,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (typeof req.query.followsdebug === 'string') {
     const adsetId = req.query.followsdebug
     try {
-      // 1. Busca creative com effective_object_story_id
+      // Busca creative com todos os campos de ID disponíveis
       const adsUrl = new URL(`${META_BASE}/${adsetId}/ads`)
-      adsUrl.searchParams.set('fields', 'id,creative{effective_object_story_id}')
+      adsUrl.searchParams.set('fields', 'id,creative{id,object_story_id,effective_object_story_id,instagram_permalink_url,object_type}')
       adsUrl.searchParams.set('access_token', accessToken)
       adsUrl.searchParams.set('limit', '10')
       const adsRes  = await fetch(adsUrl.toString())
@@ -284,31 +284,47 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       const steps: any[] = []
       for (const ad of ads) {
-        // effective_object_story_id = "{page_id}_{fb_post_id}"
-        const storyId   = (ad.creative as any)?.effective_object_story_id as string | undefined
+        const creative              = (ad.creative as any) ?? {}
+        const objectStoryId         = creative.object_story_id         as string | undefined
+        const effectiveObjectStoryId = creative.effective_object_story_id as string | undefined
 
-        // 2. Busca instagram_media_id a partir do FB post ID
-        let igMediaIdRaw: any = null
-        let insightsRaw: any  = null
-        if (storyId) {
-          const postUrl = new URL(`https://graph.facebook.com/v22.0/${storyId}`)
-          postUrl.searchParams.set('fields',       'instagram_media_id')
-          postUrl.searchParams.set('access_token', accessToken)
-          const postRes = await fetch(postUrl.toString())
-          igMediaIdRaw  = await postRes.json()
-          const igMediaId = igMediaIdRaw?.instagram_media_id as string | undefined
+        // object_story_id para posts IG nativos = "{ig_user_id}_{ig_media_id}"
+        // Se começa com o IG account ID, a parte depois do _ é o IG media ID nativo
+        const igAccountId  = '17841401980622840'
+        const igMediaIdFromObjectStory = objectStoryId?.startsWith(igAccountId + '_')
+          ? objectStoryId.split('_')[1]
+          : undefined
 
-          // 3. Busca follows
-          if (igMediaId) {
-            const iUrl = new URL(`https://graph.facebook.com/v22.0/${igMediaId}/insights`)
-            iUrl.searchParams.set('metric',       'follows')
-            iUrl.searchParams.set('access_token', accessToken)
-            const iRes  = await fetch(iUrl.toString())
-            insightsRaw = await iRes.json()
-          }
+        // Tenta insights com o ID extraído de object_story_id
+        let insightsFromObjectStory: any = null
+        if (igMediaIdFromObjectStory) {
+          const iUrl = new URL(`https://graph.facebook.com/v22.0/${igMediaIdFromObjectStory}/insights`)
+          iUrl.searchParams.set('metric', 'follows')
+          iUrl.searchParams.set('access_token', accessToken)
+          const iRes = await fetch(iUrl.toString())
+          insightsFromObjectStory = await iRes.json()
         }
 
-        steps.push({ adId: ad.id, storyId, igMediaIdRaw, insightsRaw })
+        // Tenta insights com a parte depois do _ do effective_object_story_id
+        const effectivePostId = effectiveObjectStoryId?.split('_')[1]
+        let insightsFromEffective: any = null
+        if (effectivePostId) {
+          const iUrl = new URL(`https://graph.facebook.com/v22.0/${effectivePostId}/insights`)
+          iUrl.searchParams.set('metric', 'follows')
+          iUrl.searchParams.set('access_token', accessToken)
+          const iRes = await fetch(iUrl.toString())
+          insightsFromEffective = await iRes.json()
+        }
+
+        steps.push({
+          adId: ad.id,
+          objectStoryId,
+          effectiveObjectStoryId,
+          igMediaIdFromObjectStory,
+          effectivePostId,
+          insightsFromObjectStory,
+          insightsFromEffective,
+        })
       }
 
       return res.json({ followsdebug: true, adsetId, steps })
@@ -608,8 +624,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         adsetRow.videoViews3s    = Number(row.video_thruplay_watched_actions?.[0]?.value ?? 0)
         adsetRow.videoViews25pct = Number(row.video_p25_watched_actions?.[0]?.value ?? 0)
       } else if (view === 'etapa1') {
-        // Seguidores ganhos via Instagram Graph API /{ig_media_id}/insights?metric=follows
-        const follows          = adsetFollowsMap.get(row.adset_id as string) ?? 0
+        // Seguidores: tenta 'follow' action type da Marketing API (não requer permissões extras)
+        // Fallback: pipeline Instagram Graph API via adsetFollowsMap
+        const followsFromActions = actionVal(row.actions as any, 'follow')
+        const follows            = followsFromActions > 0 ? followsFromActions : (adsetFollowsMap.get(row.adset_id as string) ?? 0)
         adsetRow.results       = follows
         adsetRow.costPerResult = follows > 0 ? spend / follows : 0
       } else {
