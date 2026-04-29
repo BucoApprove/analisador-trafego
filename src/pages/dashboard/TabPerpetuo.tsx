@@ -617,7 +617,6 @@ export default function TabPerpetuo({ token, enabled }: TabPerpetuoProps) {
                 }
               }
             }
-            const cpr = results > 0 ? spend / results : 0
             return (
               <button
                 key={stage.id}
@@ -639,9 +638,7 @@ export default function TabPerpetuo({ token, enabled }: TabPerpetuoProps) {
                     <div className="text-xs font-bold text-foreground">
                       {stage.isVideo
                         ? `${fmt(video25)} views 25%`
-                        : cpr > 0
-                          ? `${stage.subLabel} ${brl(cpr)}`
-                          : stage.metricLabel(results)
+                        : stage.metricLabel(results)
                       }
                     </div>
                   </>
