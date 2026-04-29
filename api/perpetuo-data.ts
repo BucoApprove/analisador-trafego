@@ -273,8 +273,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (typeof req.query.followsdebug === 'string') {
     const adsetId = req.query.followsdebug
     try {
-      // 1. Busca todos os posts da conta IG
-      const igAcctId   = process.env.INSTAGRAM_ACCOUNT_ID ?? '17841401980622840'
+      // 1. Busca todos os posts da conta IG (mesmo ID de instagram-analytics.ts)
+      const igAcctId   = '17841401980622840'
       const igMediaUrl = new URL(`https://graph.facebook.com/v22.0/${igAcctId}/media`)
       igMediaUrl.searchParams.set('fields',       'id,permalink')
       igMediaUrl.searchParams.set('limit',        '100')
@@ -494,7 +494,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
         if (etapa1AdsetIds.length > 0) {
           // 1. Busca todos os posts da conta IG com id + permalink
-          const igAcctId  = process.env.INSTAGRAM_ACCOUNT_ID ?? '17841401980622840'
+          // Mesmo ID usado em instagram-analytics.ts
+          const igAcctId   = '17841401980622840'
           const igMediaUrl = new URL(`https://graph.facebook.com/v22.0/${igAcctId}/media`)
           igMediaUrl.searchParams.set('fields',       'id,permalink')
           igMediaUrl.searchParams.set('limit',        '100')
