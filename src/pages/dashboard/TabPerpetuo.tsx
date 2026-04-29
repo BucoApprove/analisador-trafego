@@ -647,6 +647,11 @@ export default function TabPerpetuo({ token, enabled }: TabPerpetuoProps) {
                         : stage.metricLabel(results)
                       }
                     </div>
+                    {!stage.isVideo && (
+                      <div className="text-[10px] text-muted-foreground mt-0.5">
+                        {stage.subLabel}: {results > 0 ? brl(spend / results) : '—'}
+                      </div>
+                    )}
                   </>
                 ) : (
                   <>

@@ -492,7 +492,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // ── Etapa1: busca followers ganhos via Instagram Graph API ────────────────
     // Pipeline (mesmo do Instagram Gestor):
     //   adset → creative.instagram_permalink_url
-    //   → match com /{ig_account}/media (lista posts com IDs nativos IG)
+    //   → extrai shortcode → decodifica para IG native media ID (sem media list)
     //   → /{ig_post_id}/insights?metric=follows
     // Não requer pages_read_engagement — funciona com instagram_manage_insights
     const ETAPA1_IG_ACCOUNT = '17841401980622840'
@@ -522,25 +522,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             })
           )
 
-          // 2. Lista posts da conta IG com seus IDs nativos e permalinks
-          const igMediaUrl = new URL(`https://graph.facebook.com/v22.0/${ETAPA1_IG_ACCOUNT}/media`)
-          igMediaUrl.searchParams.set('fields',       'id,permalink')
-          igMediaUrl.searchParams.set('limit',        '100')
-          igMediaUrl.searchParams.set('access_token', accessToken)
-          const igPosts = (await (await fetch(igMediaUrl.toString())).json() as any).data ?? [] as { id: string; permalink: string }[]
-
-          // Normaliza permalink para comparação (remove trailing slash, lowercase)
-          const norm = (url: string) => url.replace(/\/$/, '').toLowerCase()
-          const permalinkToIgId = new Map<string, string>()
-          for (const post of igPosts) permalinkToIgId.set(norm(post.permalink), post.id)
-
-          // 3. Busca follows para cada IG post ID único
-          const uniqueIgIds = new Set<string>()
-          for (const permalink of adsetPermalinkMap.values()) {
-            const igId = permalinkToIgId.get(norm(permalink))
-            if (igId) uniqueIgIds.add(igId)
+          // 2. Decodifica shortcode do instagram_permalink_url → IG native media ID
+          // Funciona com /p/, /reel/ e /tv/ — não precisa do media list
+          // Ex: "https://www.instagram.com/reel/ABC123/" → shortcode "ABC123" → ID nativo
+          const adsetIgIdMap = new Map<string, string>() // adsetId → ig native media ID
+          for (const [adsetId, permalink] of adsetPermalinkMap) {
+            const match = permalink.match(/\/(p|reel|tv)\/([A-Za-z0-9_-]+)\/?/)
+            if (match) {
+              const igMediaId = instagramShortcodeToMediaId(match[2])
+              if (igMediaId) adsetIgIdMap.set(adsetId, igMediaId)
+            }
           }
 
+          // 3. Busca follows para cada IG media ID único
+          const uniqueIgIds = new Set<string>(adsetIgIdMap.values())
           const followsByIgId = new Map<string, number>()
           await Promise.all(
             [...uniqueIgIds].map(async (igId) => {
@@ -555,9 +550,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           )
 
           // 4. Mapa final: adsetId → follows
-          for (const [adsetId, permalink] of adsetPermalinkMap) {
-            const igId = permalinkToIgId.get(norm(permalink))
-            adsetFollowsMap.set(adsetId, igId ? (followsByIgId.get(igId) ?? 0) : 0)
+          for (const [adsetId, igId] of adsetIgIdMap) {
+            adsetFollowsMap.set(adsetId, followsByIgId.get(igId) ?? 0)
           }
         }
       } catch (e) {
