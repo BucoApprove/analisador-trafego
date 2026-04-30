@@ -102,10 +102,12 @@ async function metaGet(url: URL): Promise<Record<string, unknown>> {
 }
 
 // Busca todas as páginas de uma API do Meta (segue paging.next automaticamente)
-async function metaGetAll(url: URL): Promise<any[]> {
+// maxPages evita rate limit em ranges longos (padrão: 20 páginas = até 10.000 itens com limit=500)
+async function metaGetAll(url: URL, maxPages = 20): Promise<any[]> {
   const allData: any[] = []
   let nextUrl: string | null = url.toString()
-  while (nextUrl) {
+  let page = 0
+  while (nextUrl && page < maxPages) {
     const res = await fetch(nextUrl)
     if (!res.ok) {
       const txt = await res.text()
@@ -116,6 +118,7 @@ async function metaGetAll(url: URL): Promise<any[]> {
     allData.push(...pageData)
     const paging = json.paging as any
     nextUrl = paging?.next ?? null
+    page++
   }
   return allData
 }
@@ -526,9 +529,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     customConvUrl.searchParams.set('access_token', accessToken)
     customConvUrl.searchParams.set('limit',        '200')
 
+    // Insights de adsets: max 5 páginas (5×200=1000 linhas — mais do que suficiente para qualquer conta)
+    // Insights de ads: max 5 páginas (5×500=2500 linhas) — usado só para breakdown por ad
     const [adsetInsightsData, adInsightsData, adsetsData, campaignsData, customConvsData] = await Promise.all([
-      metaGetAll(adsetUrl),
-      metaGetAll(adUrl),
+      metaGetAll(adsetUrl, 5),
+      metaGetAll(adUrl, 5),
       metaGetAll(budgetUrl),
       metaGetAll(campaignUrl),
       metaGetAll(customConvUrl),
@@ -599,17 +604,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           //    c) object_story_id / effective_object_story_id → só se prefixo = IG account ID
           const adsetIgIdMap = new Map<string, string>() // adsetId → ig native media ID
 
-          // Mapa adsetId → adIds (de adInsightsData, que inclui ads deletados)
-          // Limitado a 1 ad por adset: todos os ads de um adset de followers usam o mesmo post.
-          // Usar apenas 1 evita N×2 chamadas quando o range é longo (ex: 2 anos).
+          // Para o creative lookup, busca 1 ad por adset direto do adset (independente do range)
+          // Isso evita depender do adInsightsData que pode ter muitas páginas em ranges longos
           const adsetToAdIds = new Map<string, string[]>()
-          for (const ad of adInsightsData) {
-            if (!matchesFilter(ad.campaign_name as string, filter)) continue
-            if (!adsetToAdIds.has(ad.adset_id as string)) {
-              // Guarda apenas o primeiro ad_id por adset
-              adsetToAdIds.set(ad.adset_id as string, [ad.ad_id as string])
-            }
-          }
+          await Promise.all(
+            etapa1AdsetIds.map(async (adsetId) => {
+              try {
+                const adsUrl = new URL(`${META_BASE}/${adsetId}/ads`)
+                adsUrl.searchParams.set('fields', 'id')
+                adsUrl.searchParams.set('limit', '1')
+                adsUrl.searchParams.set('access_token', accessToken)
+                const adsBody = await (await fetch(adsUrl.toString())).json() as any
+                const firstAd = adsBody.data?.[0]?.id as string | undefined
+                if (firstAd) adsetToAdIds.set(adsetId, [firstAd])
+              } catch { /* skip */ }
+            })
+          )
 
           // Processa adsets em série (não em paralelo) para não disparar burst de chamadas
           for (const adsetId of etapa1AdsetIds) {
