@@ -46,3 +46,25 @@ create index if not exists idx_comments_activity on activity_comments(activity_i
 alter table activities        disable row level security;
 alter table activity_links    disable row level security;
 alter table activity_comments disable row level security;
+
+-- ─────────────────────────────────────────────────────────────────────────────
+
+-- Cache genérico de relatórios (ManyChat, metas mensais, etc.)
+-- Chave ex: "manychat-monthly", "goals-2025-05"
+create table if not exists report_cache (
+  key        text primary key,
+  value      jsonb not null,
+  updated_at timestamptz not null default now()
+);
+alter table report_cache disable row level security;
+
+-- ─────────────────────────────────────────────────────────────────────────────
+
+-- Cache de dados do Perpetuo (Meta Ads Insights)
+-- Chave ex: "conta1_etapa1_2024-01-01_2026-04-30"
+create table if not exists perpetuo_cache (
+  cache_key  text primary key,
+  data       jsonb not null,
+  updated_at timestamptz not null default now()
+);
+alter table perpetuo_cache disable row level security;

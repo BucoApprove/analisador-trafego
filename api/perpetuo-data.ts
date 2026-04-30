@@ -1,7 +1,19 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
+import { createClient } from '@supabase/supabase-js'
 import { authUser } from './_supabase-auth.js'
 
 const META_BASE = 'https://graph.facebook.com/v19.0'
+
+// Cache TTL em minutos — dados de Meta Ads não mudam a cada minuto
+const CACHE_TTL_MIN = 60
+
+function getSupabase() {
+  return createClient(
+    process.env.SUPABASE_URL ?? '',
+    process.env.SUPABASE_SERVICE_KEY ?? '',
+    { auth: { persistSession: false } },
+  )
+}
 
 const ACCOUNT_IDS: Record<string, string> = {
   conta1: 'act_1082683452063319',
@@ -159,8 +171,15 @@ interface CampaignRow {
 // ─── Handler ──────────────────────────────────────────────────────────────────
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  const _user = await authUser(req, res)
-  if (!_user) return
+  // Chamadas do cron interno (refresh-perpetuo-cache) não precisam de JWT do usuário
+  const isCronCall = req.query._cron === '1'
+    && req.headers['x-cron-secret'] === (process.env.CRON_SECRET ?? '')
+    && !!process.env.CRON_SECRET
+
+  if (!isCronCall) {
+    const _user = await authUser(req, res)
+    if (!_user) return
+  }
 
   // Cache padrão — sobrescrito abaixo para debug modes e etapa1
   res.setHeader('Cache-Control', 's-maxage=300, stale-while-revalidate=120')
@@ -197,10 +216,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const isLead  = view === 'etapa2' || view === 'anatomia' || view === 'patologia'
 
   // Debug modes nunca cacheados; etapa1 tem pipeline pesado, cache maior
-  if (typeof req.query.followsdebug === 'string' || typeof req.query.rawdebug === 'string' || typeof req.query.etapa1debug === 'string') {
+  const isDebugMode = typeof req.query.followsdebug === 'string' || typeof req.query.rawdebug === 'string' || typeof req.query.etapa1debug === 'string'
+  if (isDebugMode) {
     res.setHeader('Cache-Control', 'no-store')
   } else if (view === 'etapa1') {
     res.setHeader('Cache-Control', 's-maxage=600, stale-while-revalidate=120')
+  }
+
+  // ── Cache Supabase: lê antes de ir à Meta API (não se aplica a debug modes) ──
+  const nocache = req.query.nocache === '1'
+  const cacheKey = `${account}_${view}_${since}_${until}`
+  if (!isDebugMode && !nocache) {
+    try {
+      const sb = getSupabase()
+      const { data: cached } = await sb
+        .from('perpetuo_cache')
+        .select('data, updated_at')
+        .eq('cache_key', cacheKey)
+        .single()
+      if (cached) {
+        const ageMin = (Date.now() - new Date(cached.updated_at).getTime()) / 60_000
+        if (ageMin < CACHE_TTL_MIN) {
+          return res.json({ ...cached.data, _cached: true, _cachedAt: cached.updated_at })
+        }
+      }
+    } catch { /* ignora falha de cache — continua com fetch da Meta */ }
   }
 
   // ── Modo rawdebug: retorna resposta crua de um único adset para identificar fields ──
@@ -896,11 +936,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       })
     }
 
-    return res.json({
+    const responsePayload = {
       view,
       campaigns: [...campaignMap.values()],
       dateRange:  { since, until },
-    })
+    }
+
+    // Salva no cache Supabase (silenciosamente, não bloqueia a resposta)
+    if (!isDebugMode && !nocache) {
+      void getSupabase()
+        .from('perpetuo_cache')
+        .upsert({ cache_key: cacheKey, data: responsePayload, updated_at: new Date().toISOString() })
+    }
+
+    return res.json(responsePayload)
   } catch (err: any) {
     console.error('perpetuo-data error:', err)
     return res.status(500).json({ error: err.message ?? 'Erro interno' })

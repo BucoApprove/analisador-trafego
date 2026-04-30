@@ -16,6 +16,7 @@
     "api/dashboard-data.ts": { "maxDuration": 60 },
     "api/meta-ads-data.ts": { "maxDuration": 60 },
     "api/perpetuo-data.ts": { "maxDuration": 60 },
+    "api/refresh-perpetuo-cache.ts": { "maxDuration": 300 },
     "api/send-daily-report.ts": { "maxDuration": 30 }
   },
   "crons": [
@@ -34,6 +35,10 @@
     {
       "path": "/api/instagram-publish-scheduled",
       "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/refresh-perpetuo-cache",
+      "schedule": "0 * * * *"
     }
   ],
   "rewrites": [

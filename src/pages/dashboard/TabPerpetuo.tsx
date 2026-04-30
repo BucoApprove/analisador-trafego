@@ -45,9 +45,6 @@ interface PerpetuoResponse {
 
 // ─── Nav config ───────────────────────────────────────────────────────────────
 
-// CONTA1_VIEWS preserved for reference — navigation is now handled by STAGE_CONFIG
-// const CONTA1_VIEWS = [ ... ]
-
 const CONTA2_VIEWS = [
   { id: 'anatomia',           label: 'Pós-Grad. Anatomia'  },
   { id: 'patologia',          label: 'Pós-Grad. Patologia' },
@@ -461,8 +458,19 @@ const _cache: Map<string, CacheEntry> = new Map()
 export default function TabPerpetuo({ token, enabled }: TabPerpetuoProps) {
   const [account, setAccount] = useState<'conta1' | 'conta2'>('conta1')
   const [view, setView]       = useState('etapa2')
-  const [since, setSince]     = useState(firstOfMonthIso)
-  const [until, setUntil]     = useState(todayIso)
+  // Datas por view: etapa1 é sempre fixo desde 2024-01-01
+  const ETAPA1_SINCE = '2024-01-01'
+  const [datesByView, setDatesByView] = useState<Record<string, { since: string; until: string }>>({})
+
+  const since = view === 'etapa1' ? ETAPA1_SINCE : (datesByView[view]?.since ?? firstOfMonthIso())
+  const until = datesByView[view]?.until ?? todayIso()
+
+  function updateSince(val: string) {
+    setDatesByView(p => ({ ...p, [view]: { since: val, until: p[view]?.until ?? todayIso() } }))
+  }
+  function updateUntil(val: string) {
+    setDatesByView(p => ({ ...p, [view]: { since: p[view]?.since ?? since, until: val } }))
+  }
   const [data, setData]       = useState<PerpetuoResponse | null>(null)
   const [fetchedAt, setFetchedAt] = useState<Date | null>(null)
   const [loading, setLoading] = useState(false)
@@ -532,8 +540,10 @@ export default function TabPerpetuo({ token, enabled }: TabPerpetuoProps) {
 
   function handleViewChange(v: string) {
     if (v === view) return
-    // Limpa dados da view anterior para evitar flash de dados obsoletos durante o carregamento
-    if (!_cache.has(`${account}|${v}|${since}|${until}`)) {
+    // Usa as datas da view de destino para verificar o cache (cada view tem datas próprias)
+    const targetSince = v === 'etapa1' ? ETAPA1_SINCE : (datesByView[v]?.since ?? firstOfMonthIso())
+    const targetUntil = datesByView[v]?.until ?? todayIso()
+    if (!_cache.has(`${account}|${v}|${targetSince}|${targetUntil}`)) {
       setData(null)
     }
     setView(v)
@@ -585,14 +595,15 @@ export default function TabPerpetuo({ token, enabled }: TabPerpetuoProps) {
           <Input
             type="date"
             value={since}
-            onChange={e => setSince(e.target.value)}
-            className="w-36 h-8 text-sm"
+            disabled={view === 'etapa1'}
+            onChange={e => updateSince(e.target.value)}
+            className="w-36 h-8 text-sm disabled:opacity-60 disabled:cursor-not-allowed"
           />
           <span className="text-muted-foreground text-sm">até</span>
           <Input
             type="date"
             value={until}
-            onChange={e => setUntil(e.target.value)}
+            onChange={e => updateUntil(e.target.value)}
             className="w-36 h-8 text-sm"
           />
           <Button onClick={() => loadData(true)} disabled={loading} size="sm">
@@ -609,7 +620,10 @@ export default function TabPerpetuo({ token, enabled }: TabPerpetuoProps) {
       {account === 'conta1' ? (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3 pb-2">
           {STAGE_CONFIG.map(stage => {
-            const cacheKey = `conta1|${stage.id}|${since}|${until}`
+            const stageDates = stage.id === 'etapa1'
+              ? { since: ETAPA1_SINCE, until: datesByView[stage.id]?.until ?? todayIso() }
+              : (datesByView[stage.id] ?? { since: firstOfMonthIso(), until: todayIso() })
+            const cacheKey = `conta1|${stage.id}|${stageDates.since}|${stageDates.until}`
             const cached   = _cache.get(cacheKey)
             const isActive = view === stage.id
             let spend = 0; let results = 0; let video25 = 0; let hasData = false
