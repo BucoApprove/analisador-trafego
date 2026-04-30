@@ -159,7 +159,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const _user = await authUser(req, res)
   if (!_user) return
 
-  res.setHeader('Cache-Control', 's-maxage=300, stale-while-revalidate=60')
+  // Cache padrão — sobrescrito abaixo para debug modes e etapa1
+  res.setHeader('Cache-Control', 's-maxage=300, stale-while-revalidate=120')
 
   const account = typeof req.query.account === 'string' ? req.query.account : ''
 
@@ -191,6 +192,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const isVideo = view === 'etapa3'
   const isLead  = view === 'etapa2' || view === 'anatomia' || view === 'patologia'
+
+  // Debug modes nunca cacheados; etapa1 tem pipeline pesado, cache maior
+  if (typeof req.query.followsdebug === 'string' || typeof req.query.rawdebug === 'string' || typeof req.query.etapa1debug === 'string') {
+    res.setHeader('Cache-Control', 'no-store')
+  } else if (view === 'etapa1') {
+    res.setHeader('Cache-Control', 's-maxage=600, stale-while-revalidate=120')
+  }
 
   // ── Modo rawdebug: retorna resposta crua de um único adset para identificar fields ──
   if (typeof req.query.rawdebug === 'string') {
