@@ -282,7 +282,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // Passo 1: Busca ad IDs deste adset via insights (funciona mesmo com ads deletados)
       const insUrl = new URL(`${META_BASE}/${acctId}/insights`)
       insUrl.searchParams.set('level',        'ad')
-      insUrl.searchParams.set('fields',       'ad_id,adset_id,ad_name,campaign_name')
+      insUrl.searchParams.set('fields',       'ad_id,adset_id,ad_name,campaign_name,spend,actions,unique_actions')
       insUrl.searchParams.set('time_range',   JSON.stringify({ since: '2024-01-01', until: new Date().toISOString().slice(0, 10) }))
       insUrl.searchParams.set('filtering',    JSON.stringify([{ field: 'adset.id', operator: 'EQUAL', value: adsetId }]))
       insUrl.searchParams.set('access_token', accessToken)
@@ -592,16 +592,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           const adsetIgIdMap = new Map<string, string>() // adsetId → ig native media ID
 
           // Mapa adsetId → adIds (de adInsightsData, que inclui ads deletados)
+          // Limitado a 1 ad por adset: todos os ads de um adset de followers usam o mesmo post.
+          // Usar apenas 1 evita N×2 chamadas quando o range é longo (ex: 2 anos).
           const adsetToAdIds = new Map<string, string[]>()
           for (const ad of adInsightsData) {
             if (!matchesFilter(ad.campaign_name as string, filter)) continue
-            const list = adsetToAdIds.get(ad.adset_id as string) ?? []
-            list.push(ad.ad_id as string)
-            adsetToAdIds.set(ad.adset_id as string, list)
+            if (!adsetToAdIds.has(ad.adset_id as string)) {
+              // Guarda apenas o primeiro ad_id por adset
+              adsetToAdIds.set(ad.adset_id as string, [ad.ad_id as string])
+            }
           }
 
-          await Promise.all(
-            etapa1AdsetIds.map(async (adsetId) => {
+          // Processa adsets em série (não em paralelo) para não disparar burst de chamadas
+          for (const adsetId of etapa1AdsetIds) {
               const adIds = adsetToAdIds.get(adsetId) ?? []
               for (const adId of adIds) {
                 try {
@@ -644,8 +647,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 } catch { /* skip ad */ }
                 if (adsetIgIdMap.has(adsetId)) break
               }
-            })
-          )
+          }
 
           // Coleta todos os shortcodes pendentes de resolução
           const pendingShortcodes = new Set<string>()
