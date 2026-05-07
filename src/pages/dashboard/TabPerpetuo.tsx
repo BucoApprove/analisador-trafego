@@ -233,18 +233,26 @@ function CampaignCard({
                 <p className="text-[10px] text-muted-foreground uppercase tracking-wide font-semibold">{resultLabel}</p>
                 <p className="text-sm font-bold">{fmt(totResults)}</p>
               </div>
-              {validLeadsCount !== undefined && (
-                <div className="text-right">
-                  <p className="text-[10px] text-muted-foreground uppercase tracking-wide font-semibold">Leads Válidos</p>
-                  <p className="text-sm font-bold text-emerald-600 dark:text-emerald-400">
-                    {validLeadsCount === null ? '…' : fmt(validLeadsCount)}
-                  </p>
-                </div>
-              )}
               <div className="text-right">
                 <p className="text-[10px] text-muted-foreground uppercase tracking-wide font-semibold">{cprLabel}</p>
                 <p className="text-sm font-bold">{cpr > 0 ? brl(cpr) : '—'}</p>
               </div>
+              {validLeadsCount !== undefined && (
+                <>
+                  <div className="text-right">
+                    <p className="text-[10px] text-muted-foreground uppercase tracking-wide font-semibold">Leads Válidos</p>
+                    <p className="text-sm font-bold text-emerald-600 dark:text-emerald-400">
+                      {validLeadsCount === null ? '…' : fmt(validLeadsCount)}
+                    </p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-[10px] text-muted-foreground uppercase tracking-wide font-semibold">CPL</p>
+                    <p className="text-sm font-bold text-emerald-600 dark:text-emerald-400">
+                      {validLeadsCount === null ? '…' : (validLeadsCount > 0 ? brl(totSpend / validLeadsCount) : '—')}
+                    </p>
+                  </div>
+                </>
+              )}
             </>
           )}
           {isVideo && (
@@ -339,16 +347,23 @@ function CampaignCard({
                             />
                           </div>
                           <span className="text-xs font-semibold w-20 text-right shrink-0">{fmt(ad.results)} {isFollower ? 'seg.' : 'leads'}</span>
-                          {validLeadsContent !== undefined && (
-                            <span className="text-xs font-semibold w-20 text-right shrink-0 text-emerald-600 dark:text-emerald-400">
-                              {validLeadsContent === null
-                                ? '…'
-                                : `${fmt(validLeadsContent[ad.adName] ?? 0)} válidos`}
-                            </span>
-                          )}
                           <span className="text-xs text-muted-foreground w-16 text-right shrink-0">
                             {ad.results > 0 ? brl(ad.costPerResult) : '—'}
                           </span>
+                          {validLeadsContent !== undefined && (() => {
+                            const vl = validLeadsContent === null ? null : (validLeadsContent[ad.adName] ?? 0)
+                            const cpl = vl !== null && vl > 0 ? brl(ad.spend / vl) : null
+                            return (
+                              <>
+                                <span className="text-xs font-semibold w-20 text-right shrink-0 text-emerald-600 dark:text-emerald-400">
+                                  {vl === null ? '…' : `${fmt(vl)} válidos`}
+                                </span>
+                                <span className="text-xs font-semibold w-16 text-right shrink-0 text-emerald-600 dark:text-emerald-400">
+                                  {vl === null ? '…' : (cpl ?? '—')}
+                                </span>
+                              </>
+                            )
+                          })()}
                           <span className="text-xs text-muted-foreground w-16 text-right shrink-0">{brl(ad.spend)}</span>
                         </div>
                       )
