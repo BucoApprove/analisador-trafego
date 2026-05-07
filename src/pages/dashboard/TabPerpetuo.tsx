@@ -175,6 +175,7 @@ function CampaignCard({
   resultLabel,
   cprLabel,
   validLeadsCount,
+  validLeadsContent,
 }: {
   campaign: CampaignRow
   isVideo: boolean
