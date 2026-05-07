@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
-import { bqQuery, tableLeads } from './_bq.js'
+import { bqQuery, tableLeads, tableVendas } from './_bq.js'
 import { authUser } from './_supabase-auth.js'
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -14,7 +14,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   res.setHeader('Cache-Control', 's-maxage=300, stale-while-revalidate=60')
 
-  const tLeads = tableLeads()
+  const tLeads  = tableLeads()
+  const tVendas = tableVendas()
 
   const dateParams = [
     { name: 'since', value: since, type: 'DATE' as const },
@@ -23,7 +24,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const baseWhere = `DATE(lead_register) >= @since AND DATE(lead_register) <= @until`
 
   try {
-    const [campaignResult, contentResult] = await Promise.all([
+    const [campaignResult, contentResult, salesResult] = await Promise.all([
       bqQuery(
         `SELECT
            REPLACE(REPLACE(utm_campaign, '%20', ' '), '+', ' ') AS key,
@@ -42,6 +43,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
          GROUP BY 1`,
         dateParams,
       ),
+      // Vendas por campanha: leads que se registraram no período com aquela utm
+      // e que tiveram uma venda (qualquer status) APÓS o registro
+      bqQuery(
+        `SELECT
+           REPLACE(REPLACE(l.utm_campaign, '%20', ' '), '+', ' ') AS key,
+           COUNT(DISTINCT LOWER(TRIM(l.lead_email))) AS cnt
+         FROM ${tLeads} l
+         INNER JOIN ${tVendas} s
+           ON LOWER(TRIM(l.lead_email)) = LOWER(TRIM(s.E_mail_do_Comprador))
+         WHERE
+           l.utm_campaign IS NOT NULL AND l.utm_campaign != ''
+           AND ${baseWhere}
+           AND DATE(s.Data_do_Pedido) >= DATE(l.lead_register)
+         GROUP BY 1`,
+        dateParams,
+      ),
     ])
 
     const counts: Record<string, number> = {}
@@ -54,7 +71,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (row.key) contentCounts[row.key] = parseInt(row.cnt ?? '0')
     }
 
-    res.json({ counts, contentCounts, since, until })
+    const salesCounts: Record<string, number> = {}
+    for (const row of salesResult.rows) {
+      if (row.key) salesCounts[row.key] = parseInt(row.cnt ?? '0')
+    }
+
+    res.json({ counts, contentCounts, salesCounts, since, until })
   } catch (err) {
     console.error('valid-leads-count error:', err)
     res.status(500).json({ error: 'Erro interno ao consultar leads' })
