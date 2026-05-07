@@ -186,6 +186,8 @@ function CampaignCard({
   cprLabel: string
   // undefined = não aplicável; null = carregando; number = valor
   validLeadsCount?: number | null
+  // mapa adName → count; null = carregando; undefined = não aplicável
+  validLeadsContent?: Record<string, number> | null
 }) {
   const [open, setOpen] = useState(false)
   const [openAdsets, setOpenAdsets] = useState<Set<string>>(new Set())
@@ -336,6 +338,13 @@ function CampaignCard({
                             />
                           </div>
                           <span className="text-xs font-semibold w-20 text-right shrink-0">{fmt(ad.results)} {isFollower ? 'seg.' : 'leads'}</span>
+                          {validLeadsContent !== undefined && (
+                            <span className="text-xs font-semibold w-20 text-right shrink-0 text-emerald-600 dark:text-emerald-400">
+                              {validLeadsContent === null
+                                ? '…'
+                                : `${fmt(validLeadsContent[ad.adName] ?? 0)} válidos`}
+                            </span>
+                          )}
                           <span className="text-xs text-muted-foreground w-16 text-right shrink-0">
                             {ad.results > 0 ? brl(ad.costPerResult) : '—'}
                           </span>
@@ -467,7 +476,7 @@ type CacheEntry = { data: PerpetuoResponse; fetchedAt: Date }
 const _cache: Map<string, CacheEntry> = new Map()
 
 // Cache global de leads válidos por período
-type ValidLeadsEntry = { counts: Record<string, number>; fetchedAt: Date }
+type ValidLeadsEntry = { counts: Record<string, number>; contentCounts: Record<string, number>; fetchedAt: Date }
 const _validLeadsCache: Map<string, ValidLeadsEntry> = new Map()
 
 export default function TabPerpetuo({ token, enabled }: TabPerpetuoProps) {
@@ -492,7 +501,8 @@ export default function TabPerpetuo({ token, enabled }: TabPerpetuoProps) {
   const [error, setError]     = useState<string | null>(null)
   const [onlyActive, setOnlyActive] = useState(true)
 
-  const [validLeads, setValidLeads]           = useState<Record<string, number> | null>(null)
+  const [validLeads, setValidLeads]               = useState<Record<string, number> | null>(null)
+  const [validLeadsContent, setValidLeadsContent] = useState<Record<string, number> | null>(null)
   const [validLeadsLoading, setValidLeadsLoading] = useState(false)
 
   // Rastreia quais chaves já foram buscadas nesta sessão
@@ -556,8 +566,9 @@ export default function TabPerpetuo({ token, enabled }: TabPerpetuoProps) {
       })
       const json = await res.json()
       if (!res.ok) throw new Error(json.error ?? 'Erro ao carregar leads válidos')
-      _validLeadsCache.set(key, { counts: json.counts, fetchedAt: new Date() })
+      _validLeadsCache.set(key, { counts: json.counts, contentCounts: json.contentCounts, fetchedAt: new Date() })
       setValidLeads(json.counts)
+      setValidLeadsContent(json.contentCounts)
     } catch (e) {
       console.error('valid-leads-count error:', e)
     } finally {
@@ -578,10 +589,16 @@ export default function TabPerpetuo({ token, enabled }: TabPerpetuoProps) {
     if (view === 'etapa2') {
       const vlKey = validLeadsCacheKey()
       const vlCached = _validLeadsCache.get(vlKey)
-      if (vlCached) setValidLeads(vlCached.counts)
-      else setValidLeads(null)
+      if (vlCached) {
+        setValidLeads(vlCached.counts)
+        setValidLeadsContent(vlCached.contentCounts)
+      } else {
+        setValidLeads(null)
+        setValidLeadsContent(null)
+      }
     } else {
       setValidLeads(null)
+      setValidLeadsContent(null)
     }
   }, [enabled, account, view]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -827,12 +844,15 @@ export default function TabPerpetuo({ token, enabled }: TabPerpetuoProps) {
         }
         const perpetuo   = campaigns.filter(c => !isLancamento(c.campaignName))
         const lancamento = campaigns.filter(c =>  isLancamento(c.campaignName))
-        // null = carregando; number = valor (0 se campanha não encontrada)
+        // null = carregando; number = valor (0 se não encontrado); undefined = não aplicável
+        const isVlLoading = !validLeads && validLeadsLoading
         function vlCount(name: string): number | null | undefined {
-          if (!validLeads && validLeadsLoading) return null
+          if (isVlLoading) return null
           if (!validLeads) return undefined
           return validLeads[name] ?? 0
         }
+        const vlContent: Record<string, number> | null | undefined =
+          isVlLoading ? null : (validLeadsContent ?? undefined)
         return (
           <div className="space-y-6">
             {perpetuo.length > 0 && (
@@ -842,7 +862,7 @@ export default function TabPerpetuo({ token, enabled }: TabPerpetuoProps) {
                   <div className="flex-1 h-px bg-border" />
                 </div>
                 {perpetuo.map(c => (
-                  <CampaignCard key={c.campaignId} campaign={c} isRmkt={false} {...sharedProps} validLeadsCount={vlCount(c.campaignName)} />
+                  <CampaignCard key={c.campaignId} campaign={c} isRmkt={false} {...sharedProps} validLeadsCount={vlCount(c.campaignName)} validLeadsContent={vlContent} />
                 ))}
               </div>
             )}
@@ -853,7 +873,7 @@ export default function TabPerpetuo({ token, enabled }: TabPerpetuoProps) {
                   <div className="flex-1 h-px bg-border" />
                 </div>
                 {lancamento.map(c => (
-                  <CampaignCard key={c.campaignId} campaign={c} isRmkt={false} {...sharedProps} validLeadsCount={vlCount(c.campaignName)} />
+                  <CampaignCard key={c.campaignId} campaign={c} isRmkt={false} {...sharedProps} validLeadsCount={vlCount(c.campaignName)} validLeadsContent={vlContent} />
                 ))}
               </div>
             )}
