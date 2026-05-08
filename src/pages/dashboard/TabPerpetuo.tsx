@@ -554,6 +554,7 @@ export default function TabPerpetuo({ token, enabled }: TabPerpetuoProps) {
   // ── Filtros configuráveis por etapa ───────────────────────────────────────
   const [filterOpen, setFilterOpen]         = useState(false)
   const [filterSaving, setFilterSaving]     = useState(false)
+  const [filterError, setFilterError]       = useState<string | null>(null)
   const [filterIsCustom, setFilterIsCustom] = useState(false)
   const [editInclude, setEditInclude]       = useState<string[]>([])
   const [editExclude, setEditExclude]       = useState<string[]>([])
@@ -659,14 +660,19 @@ export default function TabPerpetuo({ token, enabled }: TabPerpetuoProps) {
 
   async function saveFilter() {
     setFilterSaving(true)
+    setFilterError(null)
     try {
-      await fetch('/api/etapa-filters', {
+      const res  = await fetch('/api/etapa-filters', {
         method:  'POST',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
         body:    JSON.stringify({ account, view, include: editInclude, exclude: editExclude }),
       })
+      const json = await res.json()
+      if (!res.ok) throw new Error(json.error ?? `Erro ${res.status}`)
       setFilterOpen(false)
-      loadData(true) // força reload com novo filtro
+      loadData(true)
+    } catch (e: any) {
+      setFilterError(e.message)
     } finally {
       setFilterSaving(false)
     }
@@ -674,13 +680,18 @@ export default function TabPerpetuo({ token, enabled }: TabPerpetuoProps) {
 
   async function resetFilter() {
     setFilterSaving(true)
+    setFilterError(null)
     try {
-      await fetch(`/api/etapa-filters?account=${account}&view=${view}`, {
+      const res  = await fetch(`/api/etapa-filters?account=${account}&view=${view}`, {
         method:  'DELETE',
         headers: { Authorization: `Bearer ${token}` },
       })
+      const json = await res.json()
+      if (!res.ok) throw new Error(json.error ?? `Erro ${res.status}`)
       setFilterOpen(false)
       loadData(true)
+    } catch (e: any) {
+      setFilterError(e.message)
     } finally {
       setFilterSaving(false)
     }
@@ -882,6 +893,9 @@ export default function TabPerpetuo({ token, enabled }: TabPerpetuoProps) {
             </div>
           </div>
 
+          {filterError && (
+            <p className="text-xs text-destructive bg-destructive/10 rounded-lg px-3 py-2">{filterError}</p>
+          )}
           <div className="flex items-center justify-between pt-1 border-t border-border">
             <Button variant="ghost" size="sm" onClick={resetFilter} disabled={filterSaving} className="text-muted-foreground text-xs">
               Restaurar padrão
