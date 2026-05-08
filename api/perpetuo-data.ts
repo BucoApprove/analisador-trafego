@@ -210,7 +210,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const acctId    = ACCOUNT_IDS[account]
   const timeRange = JSON.stringify({ since, until })
-  const filter    = NAME_FILTERS[view]
+
+  // Lê filtro customizado do Supabase (sobrescreve NAME_FILTERS se existir)
+  let filter: NameFilter = NAME_FILTERS[view]
+  let hasCustomFilter = false
+  try {
+    const sb = getSupabase()
+    const { data: customFilter } = await sb
+      .from('etapa_filters')
+      .select('include, exclude')
+      .eq('account', account)
+      .eq('view', view)
+      .maybeSingle()
+    if (customFilter) {
+      filter = { include: customFilter.include ?? [], exclude: customFilter.exclude ?? [] }
+      hasCustomFilter = true
+    }
+  } catch { /* usa filtro padrão */ }
 
   const isVideo = view === 'etapa3'
   const isLead  = view === 'etapa2' || view === 'anatomia' || view === 'patologia'
@@ -226,7 +242,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // ── Cache Supabase: lê antes de ir à Meta API (não se aplica a debug modes) ──
   const nocache = req.query.nocache === '1'
   const cacheKey = `${account}_${view}_${since}_${until}`
-  if (!isDebugMode && !nocache) {
+  // Filtro customizado → ignora cache Supabase (regra antiga poderia ter filtrado diferente)
+  if (!isDebugMode && !nocache && !hasCustomFilter) {
     try {
       const sb = getSupabase()
       const { data: cached } = await sb

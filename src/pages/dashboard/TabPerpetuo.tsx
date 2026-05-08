@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Loader2, RefreshCw, ChevronDown, Trophy } from 'lucide-react'
+import { Loader2, RefreshCw, ChevronDown, Trophy, SlidersHorizontal, X, Plus } from 'lucide-react'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -51,6 +51,19 @@ const CONTA2_VIEWS = [
   { id: 'lowticket-brasil',   label: 'Low Ticket Brasil'   },
   { id: 'lowticket-latam',    label: 'Low Ticket Latam'    },
 ]
+
+// Espelha NAME_FILTERS do perpetuo-data.ts — usado como ponto de partida no editor
+const STAGE_DEFAULT_FILTERS: Record<string, { include: string[]; exclude: string[] }> = {
+  etapa1:             { include: ['impulsi', 'boost', 'seguidor', '[instagram] - post'], exclude: [] },
+  etapa2:             { include: ['captura', 'aula'], exclude: [] },
+  etapa3:             { include: ['relacionamento', 'engajamento'], exclude: ['ba25', 'ba 25'] },
+  etapa4:             { include: ['convers', 'venda'], exclude: ['ba25', 'ba 25'] },
+  etapa5:             { include: ['remarketing', 'retarget', 'rmkt'], exclude: [] },
+  anatomia:           { include: ['anatomia', 'anato'], exclude: ['[low]', 'low_'] },
+  patologia:          { include: ['patologia', '[pato', 'pós pato'], exclude: ['[low]', 'low_'] },
+  'lowticket-brasil': { include: ['[low', 'low_'], exclude: ['latam', 'mexico', 'colombia'] },
+  'lowticket-latam':  { include: ['latam', 'mexico', 'colombia'], exclude: [] },
+}
 
 // ─── Stage card config (conta1 only) ─────────────────────────────────────────
 
@@ -538,6 +551,15 @@ export default function TabPerpetuo({ token, enabled }: TabPerpetuoProps) {
   const [validLeadsSales, setValidLeadsSales]     = useState<Record<string, number> | null>(null)
   const [validLeadsLoading, setValidLeadsLoading] = useState(false)
 
+  // ── Filtros configuráveis por etapa ───────────────────────────────────────
+  const [filterOpen, setFilterOpen]         = useState(false)
+  const [filterSaving, setFilterSaving]     = useState(false)
+  const [filterIsCustom, setFilterIsCustom] = useState(false)
+  const [editInclude, setEditInclude]       = useState<string[]>([])
+  const [editExclude, setEditExclude]       = useState<string[]>([])
+  const [addInclude, setAddInclude]         = useState('')
+  const [addExclude, setAddExclude]         = useState('')
+
   // Rastreia quais chaves já foram buscadas nesta sessão
   const fetchedKeys = useRef<Set<string>>(new Set())
 
@@ -608,6 +630,72 @@ export default function TabPerpetuo({ token, enabled }: TabPerpetuoProps) {
     } finally {
       setValidLeadsLoading(false)
     }
+  }
+
+  async function openFilterEditor() {
+    const params = new URLSearchParams({ account, view })
+    try {
+      const res  = await fetch(`/api/etapa-filters?${params}`, { headers: { Authorization: `Bearer ${token}` } })
+      const json = await res.json()
+      if (json.filter) {
+        setEditInclude(json.filter.include ?? [])
+        setEditExclude(json.filter.exclude ?? [])
+        setFilterIsCustom(true)
+      } else {
+        // Sem filtro salvo → mostra os padrões como ponto de partida
+        const defaults = STAGE_DEFAULT_FILTERS[view]
+        setEditInclude(defaults?.include ?? [])
+        setEditExclude(defaults?.exclude ?? [])
+        setFilterIsCustom(false)
+      }
+    } catch {
+      const defaults = STAGE_DEFAULT_FILTERS[view]
+      setEditInclude(defaults?.include ?? [])
+      setEditExclude(defaults?.exclude ?? [])
+      setFilterIsCustom(false)
+    }
+    setFilterOpen(true)
+  }
+
+  async function saveFilter() {
+    setFilterSaving(true)
+    try {
+      await fetch('/api/etapa-filters', {
+        method:  'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ account, view, include: editInclude, exclude: editExclude }),
+      })
+      setFilterOpen(false)
+      loadData(true) // força reload com novo filtro
+    } finally {
+      setFilterSaving(false)
+    }
+  }
+
+  async function resetFilter() {
+    setFilterSaving(true)
+    try {
+      await fetch(`/api/etapa-filters?account=${account}&view=${view}`, {
+        method:  'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      setFilterOpen(false)
+      loadData(true)
+    } finally {
+      setFilterSaving(false)
+    }
+  }
+
+  function addKeyword(type: 'include' | 'exclude') {
+    const val = (type === 'include' ? addInclude : addExclude).trim().toLowerCase()
+    if (!val) return
+    if (type === 'include') { setEditInclude(p => [...new Set([...p, val])]); setAddInclude('') }
+    else                    { setEditExclude(p => [...new Set([...p, val])]); setAddExclude('') }
+  }
+
+  function removeKeyword(type: 'include' | 'exclude', kw: string) {
+    if (type === 'include') setEditInclude(p => p.filter(k => k !== kw))
+    else                    setEditExclude(p => p.filter(k => k !== kw))
   }
 
   // Restaura do cache ao ativar a aba ou trocar view/conta.
@@ -720,8 +808,91 @@ export default function TabPerpetuo({ token, enabled }: TabPerpetuoProps) {
             }
             <span className="ml-1.5">Atualizar</span>
           </Button>
+          <Button
+            variant={filterOpen ? 'default' : 'outline'}
+            size="sm"
+            onClick={() => filterOpen ? setFilterOpen(false) : openFilterEditor()}
+            title="Configurar filtros de campanha"
+          >
+            <SlidersHorizontal className="h-4 w-4" />
+          </Button>
         </div>
       </div>
+
+      {/* ── Painel de filtros ── */}
+      {filterOpen && (
+        <div className="rounded-2xl border border-border bg-card p-5 space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-semibold">
+              Filtros de campanha — <span className="text-muted-foreground font-normal">{view}</span>
+              {filterIsCustom && <span className="ml-2 text-[10px] font-bold uppercase tracking-wide text-amber-600 dark:text-amber-400">customizado</span>}
+            </h3>
+            <button onClick={() => setFilterOpen(false)} className="text-muted-foreground hover:text-foreground">
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+
+          {/* Incluir */}
+          <div className="space-y-2">
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Incluir campanhas que contenham</p>
+            <div className="flex flex-wrap gap-2">
+              {editInclude.map(kw => (
+                <span key={kw} className="inline-flex items-center gap-1 rounded-full bg-emerald-100 dark:bg-emerald-900/40 text-emerald-800 dark:text-emerald-300 text-xs px-2.5 py-1 font-medium">
+                  {kw}
+                  <button onClick={() => removeKeyword('include', kw)} className="hover:text-red-500"><X className="h-3 w-3" /></button>
+                </span>
+              ))}
+              <div className="flex gap-1">
+                <Input
+                  value={addInclude}
+                  onChange={e => setAddInclude(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && addKeyword('include')}
+                  placeholder="adicionar..."
+                  className="h-7 w-32 text-xs"
+                />
+                <Button size="sm" variant="outline" className="h-7 w-7 p-0" onClick={() => addKeyword('include')}>
+                  <Plus className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+            </div>
+          </div>
+
+          {/* Excluir */}
+          <div className="space-y-2">
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Excluir campanhas que contenham</p>
+            <div className="flex flex-wrap gap-2">
+              {editExclude.map(kw => (
+                <span key={kw} className="inline-flex items-center gap-1 rounded-full bg-red-100 dark:bg-red-900/40 text-red-800 dark:text-red-300 text-xs px-2.5 py-1 font-medium">
+                  {kw}
+                  <button onClick={() => removeKeyword('exclude', kw)} className="hover:text-red-500"><X className="h-3 w-3" /></button>
+                </span>
+              ))}
+              <div className="flex gap-1">
+                <Input
+                  value={addExclude}
+                  onChange={e => setAddExclude(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && addKeyword('exclude')}
+                  placeholder="adicionar..."
+                  className="h-7 w-32 text-xs"
+                />
+                <Button size="sm" variant="outline" className="h-7 w-7 p-0" onClick={() => addKeyword('exclude')}>
+                  <Plus className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between pt-1 border-t border-border">
+            <Button variant="ghost" size="sm" onClick={resetFilter} disabled={filterSaving} className="text-muted-foreground text-xs">
+              Restaurar padrão
+            </Button>
+            <Button size="sm" onClick={saveFilter} disabled={filterSaving}>
+              {filterSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : null}
+              Salvar e recarregar
+            </Button>
+          </div>
+        </div>
+      )}
 
       {/* ── Stage cards (conta1) / botões produto (conta2) ── */}
       {account === 'conta1' ? (

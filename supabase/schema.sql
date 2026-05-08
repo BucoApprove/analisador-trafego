@@ -68,3 +68,17 @@ create table if not exists perpetuo_cache (
   updated_at timestamptz not null default now()
 );
 alter table perpetuo_cache disable row level security;
+
+-- ─────────────────────────────────────────────────────────────────────────────
+
+-- Filtros customizados por etapa (substitui os keywords hardcoded em perpetuo-data.ts)
+-- Chave: (account, view) ex: ('conta1', 'etapa4')
+create table if not exists etapa_filters (
+  account    text not null,
+  view       text not null,
+  include    text[] not null default '{}',
+  exclude    text[] not null default '{}',
+  updated_at timestamptz not null default now(),
+  primary key (account, view)
+);
+alter table etapa_filters disable row level security;
