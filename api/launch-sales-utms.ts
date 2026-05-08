@@ -75,6 +75,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Cache-Control', 's-maxage=120, stale-while-revalidate=60')
 
   try {
+    // DEBUG TEMPORÁRIO — remove depois de diagnosticar discrepância de vendas
+    const debugSql = `
+      SELECT
+        Status,
+        LOWER(TRIM(Nome_do_Produto)) AS produto,
+        COUNT(*) AS total
+      FROM ${tVendas}
+      WHERE \`${emailCol}\` IS NOT NULL
+        AND TRIM(\`${emailCol}\`) <> ''
+        AND \`${dateCol}\` >= @since
+        AND \`${dateCol}\` <= @until
+      GROUP BY Status, produto
+      ORDER BY total DESC
+    `
+    const debugResult = await bqQuery(debugSql, [
+      { name: 'since', value: since },
+      { name: 'until', value: until },
+    ])
+    console.log('[DEBUG launch-sales-utms] breakdown por status/produto:', JSON.stringify(debugResult.rows, null, 2))
+    // FIM DEBUG
+
     const sql = `
       WITH buyers AS (
         SELECT
