@@ -62,9 +62,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const since = typeof req.query.since === 'string' ? req.query.since : firstOfMonthStr()
   const until = typeof req.query.until === 'string' ? req.query.until : todayStr()
-  const productFilter = typeof req.query.productFilter === 'string'
-    ? `%${req.query.productFilter.toLowerCase()}%`
-    : '%buco%approve%'
 
   const emailCol = process.env.BQ_VENDAS_EMAIL_COL ?? 'E_mail_do_Comprador'
   const dateCol  = process.env.BQ_VENDAS_DATE_COL  ?? 'Data_de_Aprova____o'
@@ -75,27 +72,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Cache-Control', 's-maxage=120, stale-while-revalidate=60')
 
   try {
-    // DEBUG TEMPORÁRIO — remove depois de diagnosticar discrepância de vendas
-    const debugSql = `
-      SELECT
-        Status,
-        LOWER(TRIM(Nome_do_Produto)) AS produto,
-        COUNT(*) AS total
-      FROM ${tVendas}
-      WHERE \`${emailCol}\` IS NOT NULL
-        AND TRIM(\`${emailCol}\`) <> ''
-        AND \`${dateCol}\` >= @since
-        AND \`${dateCol}\` <= @until
-      GROUP BY Status, produto
-      ORDER BY total DESC
-    `
-    const debugResult = await bqQuery(debugSql, [
-      { name: 'since', value: since },
-      { name: 'until', value: until },
-    ])
-    console.log('[DEBUG launch-sales-utms] breakdown por status/produto:', JSON.stringify(debugResult.rows, null, 2))
-    // FIM DEBUG
-
     const sql = `
       WITH buyers AS (
         SELECT
@@ -103,7 +79,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           MIN(\`${dateCol}\`)          AS purchase_date
         FROM ${tVendas}
         WHERE Status IN ('COMPLETO', 'APROVADO')
-          AND LOWER(TRIM(Nome_do_Produto)) LIKE @productFilter
+          AND LOWER(TRIM(Nome_do_Produto)) = 'bucoapprove'
           AND \`${emailCol}\` IS NOT NULL
           AND TRIM(\`${emailCol}\`) <> ''
           AND \`${dateCol}\` >= @since
@@ -152,9 +128,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     `
 
     const result = await bqQuery(sql, [
-      { name: 'productFilter', value: productFilter },
-      { name: 'since',         value: since },
-      { name: 'until',         value: until },
+      { name: 'since', value: since },
+      { name: 'until', value: until },
     ])
 
     // ── Agrupa por comprador ──────────────────────────────────────────────────

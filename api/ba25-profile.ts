@@ -88,7 +88,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           ) / 100.0 AS total_revenue
         FROM ${tVendas}
         WHERE Status IN ('COMPLETO', 'APROVADO')
-          AND LOWER(TRIM(Nome_do_Produto)) LIKE '%buco%approve%'
+          AND LOWER(TRIM(Nome_do_Produto)) = 'bucoapprove'
           AND \`${emailCol}\` IS NOT NULL
           AND TRIM(\`${emailCol}\`) <> ''
           AND \`${dateCol}\` >= @since
@@ -103,7 +103,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                  MIN(\`${dateCol}\`)          AS purchase_date
           FROM ${tVendas}
           WHERE Status IN ('COMPLETO', 'APROVADO')
-            AND LOWER(TRIM(Nome_do_Produto)) LIKE '%buco%approve%'
+            AND LOWER(TRIM(Nome_do_Produto)) = 'bucoapprove'
             AND \`${emailCol}\` IS NOT NULL
             AND TRIM(\`${emailCol}\`) <> ''
             AND \`${dateCol}\` >= @since
