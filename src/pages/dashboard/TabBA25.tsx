@@ -1758,6 +1758,29 @@ export default function TabBA25({ token, enabled }: Props) {
         </>
 
       )}
+
+      {/* Tabela diagnóstico de emails de compradores */}
+      {salesUtmData?.buyerSaleCounts && salesUtmData.buyerSaleCounts.length > 0 && (
+        <div className="rounded-lg border bg-card overflow-hidden">
+          <div className="px-4 py-2.5 border-b bg-muted/40">
+            <p className="text-sm font-semibold">Emails de Compradores — BucoApprove</p>
+            <p className="text-xs text-muted-foreground">
+              {salesUtmData.buyerSaleCounts.length} emails únicos · {salesUtmData.totalSales ?? salesUtmData.buyerSaleCounts.reduce((s, r) => s + r.count, 0)} transações · emails com <code>(Nx)</code> aparecem mais de uma vez
+            </p>
+          </div>
+          <div className="p-4">
+            <textarea
+              readOnly
+              className="w-full rounded-md border bg-muted/30 px-3 py-2 text-xs font-mono h-48 resize-y focus:outline-none"
+              value={[...salesUtmData.buyerSaleCounts]
+                .sort((a, b) => b.count - a.count || a.email.localeCompare(b.email))
+                .map(r => r.count > 1 ? `${r.email}  (${r.count}x)` : r.email)
+                .join('\n')}
+            />
+          </div>
+        </div>
+      )}
+
     </div>
   )
 }
