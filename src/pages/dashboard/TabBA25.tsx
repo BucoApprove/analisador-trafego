@@ -885,9 +885,13 @@ export default function TabBA25({ token, enabled }: Props) {
       if (salesRes.ok) {
         const salesData: SalesUtmData = await salesRes.json()
         finalSalesData = salesData
-        const buyerSet = new Set((salesData.buyerEmails ?? []).map((e: string) => e.toLowerCase()))
-        const withCount = [...buyerSet].filter(e => periodInteractionEmails.has(e)).length
-        finalInteractionStats = { with: withCount, without: buyerSet.size - withCount }
+        // Conta por transações (não por comprador único) para bater com total de vendas
+        const saleCounts = salesData.buyerSaleCounts ?? []
+        const totalSales = salesData.totalSales ?? saleCounts.reduce((s, r) => s + r.count, 0)
+        const withCount = saleCounts
+          .filter(r => periodInteractionEmails.has(r.email))
+          .reduce((s, r) => s + r.count, 0)
+        finalInteractionStats = { with: withCount, without: totalSales - withCount }
       } else {
         console.warn(`[BA25] Sales UTMs falhou ${salesRes.status}`)
       }

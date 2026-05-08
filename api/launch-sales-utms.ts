@@ -127,9 +127,30 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       ORDER BY u.lead_email, u.utm_date
     `
 
-    const result = await bqQuery(sql, [
-      { name: 'since', value: since },
-      { name: 'until', value: until },
+    // Query paralela: conta transações por email (sem dedup) para KPIs de interação
+    const saleCountSql = `
+      SELECT
+        LOWER(TRIM(\`${emailCol}\`)) AS lead_email,
+        COUNT(*) AS sale_count
+      FROM ${tVendas}
+      WHERE Status IN ('COMPLETO', 'APROVADO')
+        AND LOWER(TRIM(Nome_do_Produto)) = 'bucoapprove'
+        AND \`${emailCol}\` IS NOT NULL
+        AND TRIM(\`${emailCol}\`) <> ''
+        AND \`${dateCol}\` >= @since
+        AND \`${dateCol}\` <= @until
+      GROUP BY LOWER(TRIM(\`${emailCol}\`))
+    `
+
+    const [result, saleCountResult] = await Promise.all([
+      bqQuery(sql, [
+        { name: 'since', value: since },
+        { name: 'until', value: until },
+      ]),
+      bqQuery(saleCountSql, [
+        { name: 'since', value: since },
+        { name: 'until', value: until },
+      ]),
     ])
 
     // ── Agrupa por comprador ──────────────────────────────────────────────────
@@ -282,8 +303,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       .map(([key, count]) => ({ ...drilldownKeys.get(key)!, count }))
       .sort((a, b) => b.count - a.count)
 
+    const buyerSaleCounts = saleCountResult.rows.map(row => ({
+      email:  row.lead_email as string,
+      count:  parseInt(row.sale_count ?? '1'),
+    }))
+    const totalSales = buyerSaleCounts.reduce((s, r) => s + r.count, 0)
+
     res.json({
       totalBuyers: buyers.size,
+      totalSales,
+      buyerSaleCounts,
       buyerEmails: [...buyers.keys()],
       since,
       until,
