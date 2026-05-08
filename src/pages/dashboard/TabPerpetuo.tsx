@@ -375,7 +375,8 @@ function CampaignCard({
                             {ad.results > 0 ? brl(ad.costPerResult) : '—'}
                           </span>
                           {validLeadsContent !== undefined && (() => {
-                            const vl = validLeadsContent === null ? null : (validLeadsContent[ad.adName] ?? 0)
+                            const contentKey = `${campaign.campaignName}|||${adset.adsetName}|||${ad.adName}`
+                            const vl = validLeadsContent === null ? null : (validLeadsContent[contentKey] ?? 0)
                             const cpl = vl !== null && vl > 0 ? brl(ad.spend / vl) : null
                             return (
                               <>

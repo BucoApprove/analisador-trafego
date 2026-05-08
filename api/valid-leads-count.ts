@@ -36,11 +36,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       ),
       bqQuery(
         `SELECT
-           REPLACE(REPLACE(utm_content, '%20', ' '), '+', ' ') AS key,
+           REPLACE(REPLACE(utm_campaign, '%20', ' '), '+', ' ') AS campaign,
+           REPLACE(REPLACE(utm_medium,   '%20', ' '), '+', ' ') AS medium,
+           REPLACE(REPLACE(utm_content,  '%20', ' '), '+', ' ') AS content,
            COUNT(*) AS cnt
          FROM ${tLeads}
-         WHERE utm_content IS NOT NULL AND utm_content != '' AND ${baseWhere}
-         GROUP BY 1`,
+         WHERE utm_campaign IS NOT NULL AND utm_campaign != ''
+           AND utm_content  IS NOT NULL AND utm_content  != ''
+           AND ${baseWhere}
+         GROUP BY 1, 2, 3`,
         dateParams,
       ),
       // Vendas por campanha: leads que se registraram no período com aquela utm
@@ -66,9 +70,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (row.key) counts[row.key] = parseInt(row.cnt ?? '0')
     }
 
+    // Chave composta campaign|||medium|||content para filtrar corretamente por campanha+conjunto+criativo
     const contentCounts: Record<string, number> = {}
     for (const row of contentResult.rows) {
-      if (row.key) contentCounts[row.key] = parseInt(row.cnt ?? '0')
+      if (row.content) {
+        const key = `${row.campaign ?? ''}|||${row.medium ?? ''}|||${row.content}`
+        contentCounts[key] = parseInt(row.cnt ?? '0')
+      }
     }
 
     const salesCounts: Record<string, number> = {}
