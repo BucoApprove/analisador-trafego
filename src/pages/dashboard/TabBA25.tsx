@@ -590,7 +590,18 @@ function TopAdsBlock({
       spend: getSpend(r.name),
     }))
 
-  function Table({ title, rows }: { title: string; rows: TopAdRow[] }) {
+  const top5AnyTouch: TopAdRow[] = [...(salesByContent ?? [])]
+    .filter(r => r.anyTime > 0)
+    .sort((a, b) => b.anyTime - a.anyTime)
+    .slice(0, 5)
+    .map(r => ({
+      name: r.name,
+      leads: leadsMap.get(r.name.toLowerCase()) ?? null,
+      sales: r.anyTime,
+      spend: getSpend(r.name),
+    }))
+
+  function Table({ title, rows, salesLabel = 'Vendas' }: { title: string; rows: TopAdRow[]; salesLabel?: string }) {
     return (
       <div>
         <p className="text-[11px] font-semibold mb-2 text-muted-foreground uppercase tracking-wide">{title}</p>
@@ -604,7 +615,7 @@ function TopAdsBlock({
                   <th className="px-2 py-1.5 text-left text-[10px] font-medium w-6">#</th>
                   <th className="px-2 py-1.5 text-left text-[10px] font-medium">Anúncio</th>
                   <th className="px-2 py-1.5 text-right text-[10px] font-medium">Leads</th>
-                  <th className="px-2 py-1.5 text-right text-[10px] font-medium">Vendas</th>
+                  <th className="px-2 py-1.5 text-right text-[10px] font-medium">{salesLabel}</th>
                   <th className="px-2 py-1.5 text-right text-[10px] font-medium">Invest.</th>
                   <th className="px-2 py-1.5 text-right text-[10px] font-medium">CPL</th>
                   <th className="px-2 py-1.5 text-right text-[10px] font-medium">CPA</th>
@@ -652,10 +663,11 @@ function TopAdsBlock({
           Leads: registros com tag BA25-Captura · Vendas: compradores BA25 por criativo (last-touch na coluna de leads) · Invest.: Meta Ads spend
         </p>
       </div>
-      <div className="p-4 grid gap-6 lg:grid-cols-3">
-        <Table title="Por Leads Capturados" rows={top5Leads} />
-        <Table title="Por Vendas (First-Touch)" rows={top5First} />
-        <Table title="Por Vendas (Last-Touch)" rows={top5Last} />
+      <div className="p-4 grid gap-6 lg:grid-cols-2 xl:grid-cols-4">
+        <Table title="Por Leads Capturados" rows={top5Leads} salesLabel="Vendas (last)" />
+        <Table title="Por Vendas (First-Touch)" rows={top5First} salesLabel="Vendas" />
+        <Table title="Por Vendas (Last-Touch)" rows={top5Last} salesLabel="Vendas" />
+        <Table title="Por Participação (Any Touch)" rows={top5AnyTouch} salesLabel="Vendas" />
       </div>
     </div>
   )
