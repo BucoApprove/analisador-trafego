@@ -542,6 +542,7 @@ interface TopAdRow {
   name: string
   leads: number | null
   sales: number | null
+  anyTouch: number | null
   spend: number | null
 }
 
@@ -565,6 +566,7 @@ function TopAdsBlock({
     name: r.name,
     leads: r.leads,
     sales: salesLower.get(r.name.toLowerCase())?.lastBefore ?? null,
+    anyTouch: salesLower.get(r.name.toLowerCase())?.anyTime ?? null,
     spend: getSpend(r.name),
   }))
 
@@ -576,6 +578,7 @@ function TopAdsBlock({
       name: r.name,
       leads: leadsMap.get(r.name.toLowerCase()) ?? null,
       sales: r.origin,
+      anyTouch: null,
       spend: getSpend(r.name),
     }))
 
@@ -587,6 +590,7 @@ function TopAdsBlock({
       name: r.name,
       leads: leadsMap.get(r.name.toLowerCase()) ?? null,
       sales: r.lastBefore,
+      anyTouch: null,
       spend: getSpend(r.name),
     }))
 
@@ -598,10 +602,12 @@ function TopAdsBlock({
       name: r.name,
       leads: leadsMap.get(r.name.toLowerCase()) ?? null,
       sales: r.anyTime,
+      anyTouch: null,
       spend: getSpend(r.name),
     }))
 
   function Table({ title, rows, salesLabel = 'Vendas' }: { title: string; rows: TopAdRow[]; salesLabel?: string }) {
+    const hasAnyTouch = rows.some(r => r.anyTouch != null)
     return (
       <div>
         <p className="text-[11px] font-semibold mb-2 text-muted-foreground uppercase tracking-wide">{title}</p>
@@ -616,6 +622,7 @@ function TopAdsBlock({
                   <th className="px-2 py-1.5 text-left text-[10px] font-medium">Anúncio</th>
                   <th className="px-2 py-1.5 text-right text-[10px] font-medium">Leads</th>
                   <th className="px-2 py-1.5 text-right text-[10px] font-medium">{salesLabel}</th>
+                  {hasAnyTouch && <th className="px-2 py-1.5 text-right text-[10px] font-medium">Any</th>}
                   <th className="px-2 py-1.5 text-right text-[10px] font-medium">Invest.</th>
                   <th className="px-2 py-1.5 text-right text-[10px] font-medium">CPL</th>
                   <th className="px-2 py-1.5 text-right text-[10px] font-medium">CPA</th>
@@ -635,6 +642,11 @@ function TopAdsBlock({
                       <td className="px-2 py-1.5 text-right tabular-nums font-semibold" style={{ color: CHART_COLORS[0] }}>
                         {r.sales != null ? r.sales.toLocaleString('pt-BR') : '—'}
                       </td>
+                      {hasAnyTouch && (
+                        <td className="px-2 py-1.5 text-right tabular-nums text-muted-foreground">
+                          {r.anyTouch != null ? r.anyTouch.toLocaleString('pt-BR') : '—'}
+                        </td>
+                      )}
                       <td className="px-2 py-1.5 text-right tabular-nums text-muted-foreground">
                         {r.spend != null ? `R$ ${brl(r.spend)}` : '—'}
                       </td>
@@ -663,7 +675,7 @@ function TopAdsBlock({
           Leads: registros com tag BA25-Captura · Vendas: compradores BA25 por criativo (last-touch na coluna de leads) · Invest.: Meta Ads spend
         </p>
       </div>
-      <div className="p-4 grid gap-6 lg:grid-cols-2 xl:grid-cols-4">
+      <div className="p-4 grid gap-6 grid-cols-1 md:grid-cols-2">
         <Table title="Por Leads Capturados" rows={top5Leads} salesLabel="Vendas (last)" />
         <Table title="Por Vendas (First-Touch)" rows={top5First} salesLabel="Vendas" />
         <Table title="Por Vendas (Last-Touch)" rows={top5Last} salesLabel="Vendas" />
