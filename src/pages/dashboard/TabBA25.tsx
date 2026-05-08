@@ -561,7 +561,7 @@ function TopAdsBlock({
   const salesLower = new Map((salesByContent ?? []).map(r => [r.name.toLowerCase(), r]))
   const getSpend = (name: string) => spendByContent?.[name] ?? null
 
-  const top5Leads: TopAdRow[] = byLeads.slice(0, 5).map(r => ({
+  const top5Leads: TopAdRow[] = byLeads.slice(0, 10).map(r => ({
     name: r.name,
     leads: r.leads,
     sales: salesLower.get(r.name.toLowerCase())?.lastBefore ?? null,
@@ -571,7 +571,7 @@ function TopAdsBlock({
   const top5First: TopAdRow[] = [...(salesByContent ?? [])]
     .filter(r => r.origin > 0)
     .sort((a, b) => b.origin - a.origin)
-    .slice(0, 5)
+    .slice(0, 10)
     .map(r => ({
       name: r.name,
       leads: leadsMap.get(r.name.toLowerCase()) ?? null,
@@ -582,7 +582,7 @@ function TopAdsBlock({
   const top5Last: TopAdRow[] = [...(salesByContent ?? [])]
     .filter(r => r.lastBefore > 0)
     .sort((a, b) => b.lastBefore - a.lastBefore)
-    .slice(0, 5)
+    .slice(0, 10)
     .map(r => ({
       name: r.name,
       leads: leadsMap.get(r.name.toLowerCase()) ?? null,
@@ -593,7 +593,7 @@ function TopAdsBlock({
   const top5AnyTouch: TopAdRow[] = [...(salesByContent ?? [])]
     .filter(r => r.anyTime > 0)
     .sort((a, b) => b.anyTime - a.anyTime)
-    .slice(0, 5)
+    .slice(0, 10)
     .map(r => ({
       name: r.name,
       leads: leadsMap.get(r.name.toLowerCase()) ?? null,
@@ -658,7 +658,7 @@ function TopAdsBlock({
   return (
     <div className="rounded-lg border bg-card overflow-hidden">
       <div className="px-4 py-2.5 border-b bg-muted/40">
-        <p className="text-sm font-semibold">Top 5 Anúncios — BA25 Captura</p>
+        <p className="text-sm font-semibold">Top 10 Anúncios — BA25 Captura</p>
         <p className="text-xs text-muted-foreground">
           Leads: registros com tag BA25-Captura · Vendas: compradores BA25 por criativo (last-touch na coluna de leads) · Invest.: Meta Ads spend
         </p>
