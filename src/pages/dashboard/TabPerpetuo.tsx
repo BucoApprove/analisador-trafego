@@ -586,6 +586,7 @@ export default function TabPerpetuo({ token, enabled }: TabPerpetuoProps) {
     setError(null)
     try {
       const params = new URLSearchParams({ account, view, since, until })
+      if (force) params.set('nocache', '1')
       const res = await fetch(`/api/perpetuo-data?${params}`, {
         headers: { Authorization: `Bearer ${token}` },
       })
