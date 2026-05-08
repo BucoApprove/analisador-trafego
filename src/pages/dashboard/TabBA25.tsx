@@ -884,8 +884,9 @@ export default function TabBA25({ token, enabled }: Props) {
       let finalSalesData: SalesUtmData | null = null
       let finalInteractionStats: { with: number; without: number } | null = null
       if (salesRes.ok) {
-        finalSalesData = await salesRes.json()
-        const buyerSet = new Set((finalSalesData.buyerEmails ?? []).map((e: string) => e.toLowerCase()))
+        const salesData: SalesUtmData = await salesRes.json()
+        finalSalesData = salesData
+        const buyerSet = new Set((salesData.buyerEmails ?? []).map((e: string) => e.toLowerCase()))
         const withCount = [...buyerSet].filter(e => periodInteractionEmails.has(e)).length
         finalInteractionStats = { with: withCount, without: buyerSet.size - withCount }
       } else {
