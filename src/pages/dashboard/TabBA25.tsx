@@ -697,6 +697,12 @@ export default function TabBA25({ token, enabled }: Props) {
   const [profileData,  setProfileData]  = useState<BA25ProfileData | null>(null)
   const [captureAdLeads, setCaptureAdLeads] = useState<{ name: string; leads: number }[]>([])
   const [interactionStats, setInteractionStats] = useState<{ with: number; without: number } | null>(null)
+  const [lastFetchedAt, setLastFetchedAt] = useState<number | null>(null)
+  const _cache = useRef(new Map<string, {
+    data: LaunchData; salesUtmData: SalesUtmData | null; surveyData: SurveyBuyersData | null
+    profileData: BA25ProfileData | null; captureAdLeads: { name: string; leads: number }[]
+    interactionStats: { with: number; without: number } | null; fetchedAt: number
+  }>())
 
   const loadGoals = useCallback(async () => {
     try {
@@ -707,17 +713,35 @@ export default function TabBA25({ token, enabled }: Props) {
     }
   }, [token])
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (force = false) => {
+    const cacheKey = `${since}_${until}`
+
+    if (!force) {
+      const cached = _cache.current.get(cacheKey)
+      if (cached) {
+        setData(cached.data)
+        setSalesUtmData(cached.salesUtmData)
+        setSurveyData(cached.surveyData)
+        setProfileData(cached.profileData)
+        setCaptureAdLeads(cached.captureAdLeads)
+        setInteractionStats(cached.interactionStats)
+        setLastFetchedAt(cached.fetchedAt)
+        setStatus('idle')
+        return
+      }
+    }
+
     setStatus('loading')
     setErrorMsg(null)
     try {
       const headers = { Authorization: `Bearer ${token}` }
-      const bqUrl = `/api/launch-data?prefix=${encodeURIComponent(FIXED_PREFIX)}&since=${since}&until=${until}&broadSearch=true`
-      const metaUrl = `/api/meta-spend?since=${since}&until=${until}&spendFilter=${encodeURIComponent(FIXED_SPEND_FILTER)}&orFilter=${encodeURIComponent(FIXED_OR_FILTER)}`
+      const nc = force ? '&nocache=1' : ''
+      const bqUrl = `/api/launch-data?prefix=${encodeURIComponent(FIXED_PREFIX)}&since=${since}&until=${until}&broadSearch=true${nc}`
+      const metaUrl = `/api/meta-spend?since=${since}&until=${until}&spendFilter=${encodeURIComponent(FIXED_SPEND_FILTER)}&orFilter=${encodeURIComponent(FIXED_OR_FILTER)}${nc}`
 
-      const salesUrl  = `/api/launch-sales-utms?since=${FIXED_SALES_SINCE}&until=${until}`
-      const surveyUrl  = `/api/survey-buyers?since=${FIXED_SALES_SINCE}&until=${until}`
-      const profileUrl = `/api/ba25-profile?since=${FIXED_SALES_SINCE}&until=${until}`
+      const salesUrl  = `/api/launch-sales-utms?since=${FIXED_SALES_SINCE}&until=${until}${nc}`
+      const surveyUrl  = `/api/survey-buyers?since=${FIXED_SALES_SINCE}&until=${until}${nc}`
+      const profileUrl = `/api/ba25-profile?since=${FIXED_SALES_SINCE}&until=${until}${nc}`
 
       const t0 = Date.now()
       const [bqRes, metaRes, salesRes, surveyRes, profileRes] = await Promise.all([
@@ -844,44 +868,57 @@ export default function TabBA25({ token, enabled }: Props) {
       }
       // ──────────────────────────────────────────────────────────────────────
 
+      let finalData: LaunchData = processed
       if (metaRes.ok) {
         const metaData = await metaRes.json()
         const cpl = totalUnique > 0 && metaData.metaSpend > 0
           ? Math.round((metaData.metaSpend / totalUnique) * 100) / 100
           : null
-        setData({ ...processed, ...metaData, cpl })
+        finalData = { ...processed, ...metaData, cpl }
       } else {
         const metaBody = await metaRes.json().catch(() => ({}))
         console.warn(`[BA25] Meta falhou ${metaRes.status}:`, metaBody)
-        setData(processed)
       }
+      setData(finalData)
 
+      let finalSalesData: SalesUtmData | null = null
+      let finalInteractionStats: { with: number; without: number } | null = null
       if (salesRes.ok) {
-        const salesData: SalesUtmData = await salesRes.json()
-        setSalesUtmData(salesData)
-        const buyerSet = new Set((salesData.buyerEmails ?? []).map((e: string) => e.toLowerCase()))
+        finalSalesData = await salesRes.json()
+        const buyerSet = new Set((finalSalesData.buyerEmails ?? []).map((e: string) => e.toLowerCase()))
         const withCount = [...buyerSet].filter(e => periodInteractionEmails.has(e)).length
-        setInteractionStats({ with: withCount, without: buyerSet.size - withCount })
+        finalInteractionStats = { with: withCount, without: buyerSet.size - withCount }
       } else {
         console.warn(`[BA25] Sales UTMs falhou ${salesRes.status}`)
-        setSalesUtmData(null)
       }
+      setSalesUtmData(finalSalesData)
+      setInteractionStats(finalInteractionStats)
 
+      let finalSurveyData: SurveyBuyersData | null = null
       if (surveyRes.ok) {
-        setSurveyData(await surveyRes.json())
+        finalSurveyData = await surveyRes.json()
       } else {
         console.warn(`[BA25] Survey falhou ${surveyRes.status}`)
-        setSurveyData(null)
       }
+      setSurveyData(finalSurveyData)
 
+      let finalProfileData: BA25ProfileData | null = null
       if (profileRes.ok) {
-        setProfileData(await profileRes.json())
+        finalProfileData = await profileRes.json()
       } else {
         console.warn(`[BA25] Profile falhou ${profileRes.status}`)
-        setProfileData(null)
       }
+      setProfileData(finalProfileData)
 
       setCaptureAdLeads(captureAdLeadsArr)
+
+      const now = Date.now()
+      _cache.current.set(cacheKey, {
+        data: finalData, salesUtmData: finalSalesData, surveyData: finalSurveyData,
+        profileData: finalProfileData, captureAdLeads: captureAdLeadsArr,
+        interactionStats: finalInteractionStats, fetchedAt: now,
+      })
+      setLastFetchedAt(now)
       setStatus('idle')
     } catch (e) {
       setStatus('error')
@@ -924,13 +961,26 @@ export default function TabBA25({ token, enabled }: Props) {
             />
           </div>
           <button
-            onClick={load}
+            onClick={() => load(false)}
             disabled={status === 'loading'}
             className="flex items-center gap-1.5 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-opacity disabled:opacity-50"
           >
             <RefreshCw className={`h-3.5 w-3.5 ${status === 'loading' ? 'animate-spin' : ''}`} />
             {status === 'loading' ? 'Carregando…' : 'Atualizar'}
           </button>
+          <button
+            onClick={() => load(true)}
+            disabled={status === 'loading'}
+            className="flex items-center gap-1.5 rounded-md border px-4 py-2 text-sm font-medium transition-opacity disabled:opacity-50 hover:bg-muted/60"
+          >
+            <RefreshCw className="h-3.5 w-3.5" />
+            Forçar Atualização
+          </button>
+          {lastFetchedAt && (
+            <span className="text-[11px] text-muted-foreground">
+              cache: {new Date(lastFetchedAt).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+            </span>
+          )}
           <div className="flex gap-2 ml-auto text-xs text-muted-foreground items-center">
             <span className="rounded-full bg-muted px-2 py-0.5 font-mono">Prefixo: {FIXED_PREFIX}</span>
             <span className="rounded-full bg-muted px-2 py-0.5 font-mono">Meta: todas campanhas BA25</span>
