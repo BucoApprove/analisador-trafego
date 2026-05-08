@@ -590,7 +590,7 @@ function TopAdsBlock({
       spend: getSpend(r.name),
     }))
 
-  function Table({ title, rows, primaryLabel }: { title: string; rows: TopAdRow[]; primaryLabel: string }) {
+  function Table({ title, rows }: { title: string; rows: TopAdRow[] }) {
     return (
       <div>
         <p className="text-[11px] font-semibold mb-2 text-muted-foreground uppercase tracking-wide">{title}</p>
@@ -653,9 +653,9 @@ function TopAdsBlock({
         </p>
       </div>
       <div className="p-4 grid gap-6 lg:grid-cols-3">
-        <Table title="Por Leads Capturados" rows={top5Leads} primaryLabel="Leads" />
-        <Table title="Por Vendas (First-Touch)" rows={top5First} primaryLabel="Vendas" />
-        <Table title="Por Vendas (Last-Touch)" rows={top5Last} primaryLabel="Vendas" />
+        <Table title="Por Leads Capturados" rows={top5Leads} />
+        <Table title="Por Vendas (First-Touch)" rows={top5First} />
+        <Table title="Por Vendas (Last-Touch)" rows={top5Last} />
       </div>
     </div>
   )
