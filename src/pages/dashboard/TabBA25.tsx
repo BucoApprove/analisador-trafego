@@ -18,7 +18,6 @@ const FIXED_PREFIX = 'BA25'
 const FIXED_SPEND_FILTER = 'BA25'
 const FIXED_OR_FILTER = 'instagram,engajamento,lembrete,remarketing'
 const FIXED_SINCE = '2026-03-13'
-const FIXED_SALES_SINCE = '2026-04-09'
 
 
 function makeGetCpl(map: Record<string, number> | undefined) {
@@ -739,9 +738,9 @@ export default function TabBA25({ token, enabled }: Props) {
       const bqUrl = `/api/launch-data?prefix=${encodeURIComponent(FIXED_PREFIX)}&since=${since}&until=${until}&broadSearch=true${nc}`
       const metaUrl = `/api/meta-spend?since=${since}&until=${until}&spendFilter=${encodeURIComponent(FIXED_SPEND_FILTER)}&orFilter=${encodeURIComponent(FIXED_OR_FILTER)}${nc}`
 
-      const salesUrl  = `/api/launch-sales-utms?since=${FIXED_SALES_SINCE}&until=${until}${nc}`
-      const surveyUrl  = `/api/survey-buyers?since=${FIXED_SALES_SINCE}&until=${until}${nc}`
-      const profileUrl = `/api/ba25-profile?since=${FIXED_SALES_SINCE}&until=${until}${nc}`
+      const salesUrl  = `/api/launch-sales-utms?since=${since}&until=${until}${nc}`
+      const surveyUrl  = `/api/survey-buyers?since=${since}&until=${until}${nc}`
+      const profileUrl = `/api/ba25-profile?since=${since}&until=${until}${nc}`
 
       const t0 = Date.now()
       const [bqRes, metaRes, salesRes, surveyRes, profileRes] = await Promise.all([
@@ -1352,7 +1351,7 @@ export default function TabBA25({ token, enabled }: Props) {
                 <div className="px-4 py-2 border-b bg-muted/40 flex flex-wrap items-center justify-between gap-2">
                   <p className="text-sm font-semibold">Distribuição de Vendas por UTM — Última UTM antes da compra</p>
                   <p className="text-xs text-muted-foreground">
-                    {salesUtmData.totalBuyers} compradores · desde {FIXED_SALES_SINCE}
+                    {salesUtmData.totalBuyers} compradores · desde {since}
                   </p>
                 </div>
                 <div className="p-4 grid grid-cols-2 xl:grid-cols-4 gap-6">
@@ -1368,7 +1367,7 @@ export default function TabBA25({ token, enabled }: Props) {
                 <div className="px-4 py-2 border-b bg-muted/40 flex flex-wrap items-center justify-between gap-2">
                   <p className="text-sm font-semibold">Distribuição de Vendas por UTM — UTM de origem do comprador</p>
                   <p className="text-xs text-muted-foreground">
-                    {salesUtmData.totalBuyers} compradores · desde {FIXED_SALES_SINCE}
+                    {salesUtmData.totalBuyers} compradores · desde {since}
                   </p>
                 </div>
                 <div className="p-4 grid grid-cols-2 xl:grid-cols-4 gap-6">
