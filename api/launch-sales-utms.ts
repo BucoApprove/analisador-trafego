@@ -179,6 +179,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       })
     }
 
+    // Só atribui criativos (utm_content) de anúncios do lançamento BA25
+    const BA25_CAMPAIGN = 'lcto-ba25-abr-26'
+
     // ── Computa as 3 métricas por dimensão ────────────────────────────────────
     // drilldown inclui source + campaign + medium + content
     const drilldownMap  = new Map<string, number>()
@@ -217,6 +220,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         for (const dim of DIMS) {
           const val = utm[dim]
           if (!val || seen[dim]!.has(val)) continue
+          // Para content: só conta se for da campanha BA25
+          if (dim === 'content' && utm.campaign !== BA25_CAMPAIGN) continue
           seen[dim]!.add(val)
           getCounter(dim, val).anyTime.add(email)
         }
@@ -226,6 +231,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (lastBefore) {
         for (const dim of DIMS) {
           const val = lastBefore[dim]
+          // Para content: só conta se for da campanha BA25
+          if (dim === 'content' && val && lastBefore.campaign !== BA25_CAMPAIGN) continue
           if (val) getCounter(dim, val).lastBefore.add(email)
         }
         const src = lastBefore.source   || '(não informado)'
@@ -241,6 +248,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (origin) {
         for (const dim of DIMS) {
           const val = origin[dim]
+          // Para content: só conta se for da campanha BA25
+          if (dim === 'content' && val && origin.campaign !== BA25_CAMPAIGN) continue
           if (val) getCounter(dim, val).origin.add(email)
         }
       }
