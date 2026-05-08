@@ -227,6 +227,7 @@ export interface UtmSalesAttribution {
 
 export interface SalesUtmData {
   totalBuyers: number
+  buyerEmails?: string[]
   since: string
   until: string
   bySource:     UtmSalesAttribution[]

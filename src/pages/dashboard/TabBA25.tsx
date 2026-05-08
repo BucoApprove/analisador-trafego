@@ -684,6 +684,7 @@ export default function TabBA25({ token, enabled }: Props) {
   const [surveyData,   setSurveyData]   = useState<SurveyBuyersData | null>(null)
   const [profileData,  setProfileData]  = useState<BA25ProfileData | null>(null)
   const [captureAdLeads, setCaptureAdLeads] = useState<{ name: string; leads: number }[]>([])
+  const [interactionStats, setInteractionStats] = useState<{ with: number; without: number } | null>(null)
 
   const loadGoals = useCallback(async () => {
     try {
@@ -740,6 +741,7 @@ export default function TabBA25({ token, enabled }: Props) {
       const mediumMap = new Map<string, Set<string>>()
       const contentMap = new Map<string, Set<string>>()
       const captureContentMap = new Map<string, Set<string>>()
+      const periodInteractionEmails = new Set<string>()
 
       const inPeriod = (d: string) => d >= sinceDate && d <= untilDate
 
@@ -780,6 +782,10 @@ export default function TabBA25({ token, enabled }: Props) {
             const k = row.utm_content ?? ''
             if (!captureContentMap.has(k)) captureContentMap.set(k, new Set())
             captureContentMap.get(k)!.add(email)
+          }
+
+          if (!tag.toLowerCase().includes('venda')) {
+            periodInteractionEmails.add(email.toLowerCase())
           }
         }
       }
@@ -841,6 +847,9 @@ export default function TabBA25({ token, enabled }: Props) {
       if (salesRes.ok) {
         const salesData: SalesUtmData = await salesRes.json()
         setSalesUtmData(salesData)
+        const buyerSet = new Set((salesData.buyerEmails ?? []).map((e: string) => e.toLowerCase()))
+        const withCount = [...buyerSet].filter(e => periodInteractionEmails.has(e)).length
+        setInteractionStats({ with: withCount, without: buyerSet.size - withCount })
       } else {
         console.warn(`[BA25] Sales UTMs falhou ${salesRes.status}`)
         setSalesUtmData(null)
@@ -939,12 +948,16 @@ export default function TabBA25({ token, enabled }: Props) {
             </div>
 
             <div className="flex flex-wrap gap-px border-b">
-              {([
+              {[
                 { label: 'Total leads', value: data.totalUniqueAll.toLocaleString('pt-BR'), color: CHART_COLORS[1], sub: 'histórico (tags + UTM)' },
                 { label: 'No período', value: data.totalUnique.toLocaleString('pt-BR'), color: CHART_COLORS[0], sub: data.dateRange.since + ' → ' + data.dateRange.until },
                 { label: 'Soma bruta', value: data.sumByTag.toLocaleString('pt-BR'), color: '#888', sub: 'c/ duplicatas (tags)' },
                 { label: 'Sobreposição', value: data.overlap > 0 ? data.overlap.toLocaleString('pt-BR') : '0', color: data.overlap > 0 ? '#c17c74' : '#7c9885', sub: 'em múltiplas tags' },
-              ] as const).map(s => (
+                ...(interactionStats != null ? [
+                  { label: 'Vendas c/ interação', value: interactionStats.with.toLocaleString('pt-BR'), color: CHART_COLORS[1], sub: 'lead captado no período → comprou' },
+                  { label: 'Vendas s/ interação', value: interactionStats.without.toLocaleString('pt-BR'), color: CHART_COLORS[3], sub: 'comprou sem lead no período' },
+                ] : []),
+              ].map(s => (
                 <div key={s.label} className="flex-1 min-w-[100px] px-4 py-2">
                   <p className="text-[10px] text-muted-foreground">{s.label}</p>
                   <p className="text-lg font-bold tabular-nums leading-tight" style={{ color: s.color }}>{s.value}</p>
