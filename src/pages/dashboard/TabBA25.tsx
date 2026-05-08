@@ -17,12 +17,9 @@ interface Props { token: string; enabled: boolean }
 const FIXED_PREFIX = 'BA25'
 const FIXED_SPEND_FILTER = 'BA25'
 const FIXED_OR_FILTER = 'instagram,engajamento,lembrete,remarketing'
-const FIXED_SINCE = '2026-03-01'
+const FIXED_SINCE = '2026-03-13'
 const FIXED_SALES_SINCE = '2026-04-09'
 
-function todayStr() {
-  return new Date().toISOString().split('T')[0]
-}
 
 function makeGetCpl(map: Record<string, number> | undefined) {
   if (!map) return undefined
@@ -541,9 +538,132 @@ function CampaignDrilldown({ drilldown }: { drilldown: DrillRow[] }) {
   )
 }
 
+interface TopAdRow {
+  name: string
+  leads: number | null
+  sales: number | null
+  spend: number | null
+}
+
+function TopAdsBlock({
+  byLeads,
+  salesByContent,
+  spendByContent,
+}: {
+  byLeads: { name: string; leads: number }[]
+  salesByContent: UtmSalesAttribution[] | undefined
+  spendByContent: Record<string, number> | undefined
+}) {
+  const brl = (v: number) =>
+    v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+
+  const leadsMap = new Map(byLeads.map(r => [r.name.toLowerCase(), r.leads]))
+  const salesLower = new Map((salesByContent ?? []).map(r => [r.name.toLowerCase(), r]))
+  const getSpend = (name: string) => spendByContent?.[name] ?? null
+
+  const top5Leads: TopAdRow[] = byLeads.slice(0, 5).map(r => ({
+    name: r.name,
+    leads: r.leads,
+    sales: salesLower.get(r.name.toLowerCase())?.lastBefore ?? null,
+    spend: getSpend(r.name),
+  }))
+
+  const top5First: TopAdRow[] = [...(salesByContent ?? [])]
+    .filter(r => r.origin > 0)
+    .sort((a, b) => b.origin - a.origin)
+    .slice(0, 5)
+    .map(r => ({
+      name: r.name,
+      leads: leadsMap.get(r.name.toLowerCase()) ?? null,
+      sales: r.origin,
+      spend: getSpend(r.name),
+    }))
+
+  const top5Last: TopAdRow[] = [...(salesByContent ?? [])]
+    .filter(r => r.lastBefore > 0)
+    .sort((a, b) => b.lastBefore - a.lastBefore)
+    .slice(0, 5)
+    .map(r => ({
+      name: r.name,
+      leads: leadsMap.get(r.name.toLowerCase()) ?? null,
+      sales: r.lastBefore,
+      spend: getSpend(r.name),
+    }))
+
+  function Table({ title, rows, primaryLabel }: { title: string; rows: TopAdRow[]; primaryLabel: string }) {
+    return (
+      <div>
+        <p className="text-[11px] font-semibold mb-2 text-muted-foreground uppercase tracking-wide">{title}</p>
+        {rows.length === 0 ? (
+          <p className="text-xs text-muted-foreground py-4">Sem dados</p>
+        ) : (
+          <div className="overflow-x-auto rounded-md border">
+            <table className="w-full text-xs">
+              <thead className="bg-muted/60">
+                <tr>
+                  <th className="px-2 py-1.5 text-left text-[10px] font-medium w-6">#</th>
+                  <th className="px-2 py-1.5 text-left text-[10px] font-medium">Anúncio</th>
+                  <th className="px-2 py-1.5 text-right text-[10px] font-medium">Leads</th>
+                  <th className="px-2 py-1.5 text-right text-[10px] font-medium">Vendas</th>
+                  <th className="px-2 py-1.5 text-right text-[10px] font-medium">Invest.</th>
+                  <th className="px-2 py-1.5 text-right text-[10px] font-medium">CPL</th>
+                  <th className="px-2 py-1.5 text-right text-[10px] font-medium">CPA</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {rows.map((r, i) => {
+                  const cpl = r.spend != null && r.leads != null && r.leads > 0 ? r.spend / r.leads : null
+                  const cpa = r.spend != null && r.sales != null && r.sales > 0 ? r.spend / r.sales : null
+                  return (
+                    <tr key={r.name + i} className="hover:bg-muted/40">
+                      <td className="px-2 py-1.5 text-[11px] font-bold text-muted-foreground">{i + 1}°</td>
+                      <td className="px-2 py-1.5 font-medium truncate max-w-[160px]" title={r.name}>{r.name}</td>
+                      <td className="px-2 py-1.5 text-right tabular-nums" style={{ color: CHART_COLORS[1] }}>
+                        {r.leads != null ? r.leads.toLocaleString('pt-BR') : '—'}
+                      </td>
+                      <td className="px-2 py-1.5 text-right tabular-nums font-semibold" style={{ color: CHART_COLORS[0] }}>
+                        {r.sales != null ? r.sales.toLocaleString('pt-BR') : '—'}
+                      </td>
+                      <td className="px-2 py-1.5 text-right tabular-nums text-muted-foreground">
+                        {r.spend != null ? `R$ ${brl(r.spend)}` : '—'}
+                      </td>
+                      <td className="px-2 py-1.5 text-right tabular-nums" style={{ color: CHART_COLORS[4] }}>
+                        {cpl != null ? `R$ ${brl(cpl)}` : '—'}
+                      </td>
+                      <td className="px-2 py-1.5 text-right tabular-nums text-muted-foreground">
+                        {cpa != null ? `R$ ${brl(cpa)}` : '—'}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  return (
+    <div className="rounded-lg border bg-card overflow-hidden">
+      <div className="px-4 py-2.5 border-b bg-muted/40">
+        <p className="text-sm font-semibold">Top 5 Anúncios — BA25 Captura</p>
+        <p className="text-xs text-muted-foreground">
+          Leads: registros com tag BA25-Captura · Vendas: compradores BA25 por criativo (last-touch na coluna de leads) · Invest.: Meta Ads spend
+        </p>
+      </div>
+      <div className="p-4 grid gap-6 lg:grid-cols-3">
+        <Table title="Por Leads Capturados" rows={top5Leads} primaryLabel="Leads" />
+        <Table title="Por Vendas (First-Touch)" rows={top5First} primaryLabel="Vendas" />
+        <Table title="Por Vendas (Last-Touch)" rows={top5Last} primaryLabel="Vendas" />
+      </div>
+    </div>
+  )
+}
+
 export default function TabBA25({ token, enabled }: Props) {
   const [since, setSince] = useState(FIXED_SINCE)
-  const [until, setUntil] = useState(todayStr)
+  const [until, setUntil] = useState('2026-04-22')
   const [data, setData] = useState<LaunchData | null>(null)
   const [status, setStatus] = useState<'idle' | 'loading' | 'error'>('idle')
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
@@ -551,6 +671,7 @@ export default function TabBA25({ token, enabled }: Props) {
   const [salesUtmData, setSalesUtmData] = useState<SalesUtmData | null>(null)
   const [surveyData,   setSurveyData]   = useState<SurveyBuyersData | null>(null)
   const [profileData,  setProfileData]  = useState<BA25ProfileData | null>(null)
+  const [captureAdLeads, setCaptureAdLeads] = useState<{ name: string; leads: number }[]>([])
 
   const loadGoals = useCallback(async () => {
     try {
@@ -606,6 +727,7 @@ export default function TabBA25({ token, enabled }: Props) {
       const campaignMap = new Map<string, Set<string>>()
       const mediumMap = new Map<string, Set<string>>()
       const contentMap = new Map<string, Set<string>>()
+      const captureContentMap = new Map<string, Set<string>>()
 
       const inPeriod = (d: string) => d >= sinceDate && d <= untilDate
 
@@ -641,8 +763,19 @@ export default function TabBA25({ token, enabled }: Props) {
           addUtm(campaignMap, row.utm_campaign)
           addUtm(mediumMap, row.utm_medium)
           addUtm(contentMap, row.utm_content)
+
+          if (tag.toLowerCase().includes('ba25-captura')) {
+            const k = row.utm_content ?? ''
+            if (!captureContentMap.has(k)) captureContentMap.set(k, new Set())
+            captureContentMap.get(k)!.add(email)
+          }
         }
       }
+
+      const captureAdLeadsArr = [...captureContentMap.entries()]
+        .filter(([name]) => name !== '')
+        .map(([name, s]) => ({ name, leads: s.size }))
+        .sort((a, b) => b.leads - a.leads)
 
       const mapToArr = (m: Map<string, Set<string>>, label: string) =>
         [...m.entries()]
@@ -715,6 +848,7 @@ export default function TabBA25({ token, enabled }: Props) {
         setProfileData(null)
       }
 
+      setCaptureAdLeads(captureAdLeadsArr)
       setStatus('idle')
     } catch (e) {
       setStatus('error')
@@ -722,12 +856,8 @@ export default function TabBA25({ token, enabled }: Props) {
     }
   }, [since, until, token])
 
-  // Auto-load quando a aba fica ativa
   useEffect(() => {
-    if (enabled) {
-      load()
-      loadGoals()
-    }
+    if (enabled) loadGoals()
   }, [enabled]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const maxTagCount = data ? Math.max(...data.byTag.map(t => t.countAll), 1) : 1
@@ -778,6 +908,12 @@ export default function TabBA25({ token, enabled }: Props) {
 
       {status === 'loading' && <TabLoading />}
       {status === 'error' && <TabError message={errorMsg ?? 'Erro ao carregar'} onRetry={load} />}
+
+      {status === 'idle' && !data && (
+        <div className="rounded-lg border bg-card px-6 py-12 text-center text-sm text-muted-foreground">
+          Selecione o período e clique em <strong>Atualizar</strong> para carregar os dados do lançamento.
+        </div>
+      )}
 
       {status === 'idle' && data && (
         <>
@@ -896,6 +1032,15 @@ export default function TabBA25({ token, enabled }: Props) {
               </div>
             )
           })()}
+
+          {/* Top 5 Anúncios */}
+          {captureAdLeads.length > 0 && (
+            <TopAdsBlock
+              byLeads={captureAdLeads}
+              salesByContent={salesUtmData?.byContent}
+              spendByContent={data.spendByUtm?.content}
+            />
+          )}
 
           {/* Metas × Realizado */}
           {goals && (() => {
