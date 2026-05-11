@@ -190,6 +190,7 @@ function CampaignCard({
   validLeadsCount,
   validLeadsContent,
   salesCount,
+  token,
 }: {
   campaign: CampaignRow
   isVideo: boolean
@@ -205,9 +206,11 @@ function CampaignCard({
   validLeadsContent?: Record<string, number> | null
   // undefined = não aplicável; null = carregando; number = valor
   salesCount?: number | null
+  token?: string
 }) {
   const [open, setOpen] = useState(false)
   const [openAdsets, setOpenAdsets] = useState<Set<string>>(new Set())
+  const [thumbs, setThumbs] = useState<Record<string, string | null>>({})
 
   const visibleAdsets = onlyActive
     ? campaign.adsets.filter(a => a.adsetStatus === 'ACTIVE')
@@ -222,11 +225,23 @@ function CampaignCard({
   const hasActive  = visibleAdsets.some(a => a.adsetStatus === 'ACTIVE')
 
   function toggleAdset(id: string) {
+    const isOpening = !openAdsets.has(id)
     setOpenAdsets(prev => {
       const next = new Set(prev)
       next.has(id) ? next.delete(id) : next.add(id)
       return next
     })
+    if (!isOpening || !token) return
+    const adset = visibleAdsets.find(a => a.adsetId === id)
+    if (!adset) return
+    const newIds = adset.ads.map(a => a.adId).filter(aid => !(aid in thumbs))
+    if (newIds.length === 0) return
+    fetch(`/api/meta-creative-thumbs?adIds=${newIds.join(',')}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => { if (data) setThumbs(prev => ({ ...prev, ...data })) })
+      .catch(() => {})
   }
 
   return (
@@ -363,6 +378,14 @@ function CampaignCard({
                           <span className="w-5 shrink-0 text-sm">
                             {isTop ? <Trophy className="h-3.5 w-3.5 text-amber-500" /> : <span className="opacity-0"><Trophy className="h-3.5 w-3.5" /></span>}
                           </span>
+                          {token && (
+                            <span className="w-10 shrink-0">
+                              {thumbs[ad.adId]
+                                ? <img src={thumbs[ad.adId]!} alt="" className="w-9 h-9 rounded object-cover border border-border" />
+                                : <span className="block w-9 h-9 rounded bg-muted border border-border" />
+                              }
+                            </span>
+                          )}
                           <span className="w-40 shrink-0 text-xs text-muted-foreground truncate">{ad.adName}</span>
                           <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden max-w-40">
                             <div
@@ -1056,7 +1079,7 @@ export default function TabPerpetuo({ token, enabled }: TabPerpetuoProps) {
         const campaigns = data.campaigns
         const isCaptura = view === 'etapa2'
         const isRmkt    = view === 'etapa5'
-        const sharedProps = { isVideo, isLead, isFollower, onlyActive, resultLabel, cprLabel }
+        const sharedProps = { isVideo, isLead, isFollower, onlyActive, resultLabel, cprLabel, token }
         if (!isCaptura) {
           const isConversao = view === 'etapa4'
           const isVlLoading = !validLeads && validLeadsLoading
