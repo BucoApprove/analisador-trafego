@@ -71,10 +71,12 @@ function getResultTypes(adset: {
   return ['lead', 'onsite_conversion.lead_grouped']
 }
 
+function normKw(s: string): string { return s.toLowerCase().replace(/[-_]/g, ' ') }
+
 function matchesFilter(campaignName: string, filter: NameFilter): boolean {
-  const lower = campaignName.toLowerCase()
-  if (filter.exclude?.some(kw => lower.includes(kw))) return false
-  return filter.include.some(kw => lower.includes(kw))
+  const lower = normKw(campaignName)
+  if (filter.exclude?.some(kw => lower.includes(normKw(kw)))) return false
+  return filter.include.some(kw => lower.includes(normKw(kw)))
 }
 
 function actionVal(
