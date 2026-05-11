@@ -860,12 +860,16 @@ export default function TabPerpetuo({ token, enabled }: TabPerpetuoProps) {
             onChange={e => updateUntil(e.target.value)}
             className="w-36 h-8 text-sm"
           />
-          <Button onClick={() => loadData(true)} disabled={loading} size="sm">
+          <Button onClick={() => loadData(false)} disabled={loading} size="sm">
             {loading
               ? <Loader2 className="h-4 w-4 animate-spin" />
               : <RefreshCw className="h-4 w-4" />
             }
             <span className="ml-1.5">Atualizar</span>
+          </Button>
+          <Button onClick={() => loadData(true)} disabled={loading} size="sm" variant="outline" title="Ignorar cache e buscar dados frescos da API">
+            <RefreshCw className="h-4 w-4" />
+            <span className="ml-1.5">Forçar</span>
           </Button>
           <Button
             variant={filterOpen ? 'default' : 'outline'}
