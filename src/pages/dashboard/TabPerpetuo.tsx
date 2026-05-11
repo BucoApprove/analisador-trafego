@@ -176,6 +176,11 @@ interface SalesData {
   drilldown: SalesDrilldownItem[]
 }
 
+// Cache nível de módulo: thumbnails são buscados UMA VEZ por sessão por ad ID
+const _thumbCache = new Map<string, string | null>()
+// Set de IDs em voo (fetch em progresso) para não duplicar chamadas
+const _thumbInFlight = new Set<string>()
+
 // ─── CampaignCard — accordion visual ─────────────────────────────────────────
 
 function CampaignCard({
@@ -234,14 +239,32 @@ function CampaignCard({
     if (!isOpening || !token) return
     const adset = visibleAdsets.find(a => a.adsetId === id)
     if (!adset) return
-    const newIds = adset.ads.map(a => a.adId).filter(aid => !(aid in thumbs))
+
+    // Aplica cache local imediatamente para IDs já conhecidos
+    const cached: Record<string, string | null> = {}
+    let hasCached = false
+    for (const ad of adset.ads) {
+      if (_thumbCache.has(ad.adId)) { cached[ad.adId] = _thumbCache.get(ad.adId)!; hasCached = true }
+    }
+    if (hasCached) setThumbs(prev => ({ ...prev, ...cached }))
+
+    // Só busca IDs que não estão em cache nem em voo
+    const newIds = adset.ads.map(a => a.adId).filter(aid => !_thumbCache.has(aid) && !_thumbInFlight.has(aid))
     if (newIds.length === 0) return
+
+    newIds.forEach(aid => _thumbInFlight.add(aid))
     fetch(`/api/meta-creative-thumbs?adIds=${newIds.join(',')}`, {
       headers: { Authorization: `Bearer ${token}` },
     })
       .then(r => r.ok ? r.json() : null)
-      .then(data => { if (data) setThumbs(prev => ({ ...prev, ...data })) })
+      .then(data => {
+        if (data) {
+          newIds.forEach(aid => { _thumbCache.set(aid, data[aid] ?? null) })
+          setThumbs(prev => ({ ...prev, ...data }))
+        }
+      })
       .catch(() => {})
+      .finally(() => newIds.forEach(aid => _thumbInFlight.delete(aid)))
   }
 
   return (
