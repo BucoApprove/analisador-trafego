@@ -4,6 +4,38 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Loader2, RefreshCw, ChevronDown, Trophy, SlidersHorizontal, X, Plus } from 'lucide-react'
 
+// ─── ThumbModal ───────────────────────────────────────────────────────────────
+function ThumbModal({ src, adName, onClose }: { src: string; adName: string; onClose: () => void }) {
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [onClose])
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        className="relative rounded-xl overflow-hidden shadow-2xl max-w-sm w-full mx-4"
+        onClick={e => e.stopPropagation()}
+      >
+        <img src={src} alt={adName} className="w-full object-contain max-h-[80vh]" />
+        <button
+          onClick={onClose}
+          className="absolute top-2 right-2 bg-black/60 hover:bg-black/80 text-white rounded-full p-1 transition-colors"
+        >
+          <X className="h-4 w-4" />
+        </button>
+        <div className="bg-black/60 px-3 py-2">
+          <p className="text-white text-xs truncate">{adName}</p>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface AdRow {
@@ -216,6 +248,7 @@ function CampaignCard({
   const [open, setOpen] = useState(false)
   const [openAdsets, setOpenAdsets] = useState<Set<string>>(new Set())
   const [thumbs, setThumbs] = useState<Record<string, string | null>>({})
+  const [modalThumb, setModalThumb] = useState<{ src: string; adName: string } | null>(null)
 
   const visibleAdsets = onlyActive
     ? campaign.adsets.filter(a => a.adsetStatus === 'ACTIVE')
@@ -402,10 +435,15 @@ function CampaignCard({
                             {isTop ? <Trophy className="h-3.5 w-3.5 text-amber-500" /> : <span className="opacity-0"><Trophy className="h-3.5 w-3.5" /></span>}
                           </span>
                           {token && (
-                            <span className="w-10 shrink-0">
+                            <span className="w-16 shrink-0">
                               {thumbs[ad.adId]
-                                ? <img src={thumbs[ad.adId]!} alt="" className="w-9 h-9 rounded object-cover border border-border" />
-                                : <span className="block w-9 h-9 rounded bg-muted border border-border" />
+                                ? <img
+                                    src={thumbs[ad.adId]!}
+                                    alt=""
+                                    className="w-16 h-16 rounded object-cover border border-border cursor-pointer hover:opacity-80 transition-opacity"
+                                    onClick={() => setModalThumb({ src: thumbs[ad.adId]!, adName: ad.adName })}
+                                  />
+                                : <span className="block w-16 h-16 rounded bg-muted border border-border" />
                               }
                             </span>
                           )}
@@ -445,6 +483,9 @@ function CampaignCard({
             )
           })}
         </div>
+      )}
+      {modalThumb && (
+        <ThumbModal src={modalThumb.src} adName={modalThumb.adName} onClose={() => setModalThumb(null)} />
       )}
     </div>
   )
