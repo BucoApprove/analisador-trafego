@@ -27,7 +27,7 @@ const NAME_FILTERS: Record<string, NameFilter> = {
   etapa1:             { include: ['impulsi', 'boost', 'seguidor', '[instagram] - post'] },
   etapa2:             { include: ['captura', 'aula'] },
   etapa3:             { include: ['relacionamento', 'engajamento'], exclude: ['ba25', 'ba 25'] },
-  etapa4:             { include: ['convers', 'venda'], exclude: ['ba25', 'ba 25'] },
+  etapa4:             { include: ['convers', 'venda', 'pptba_residencias'], exclude: ['ba25', 'ba 25'] },
   etapa5:             { include: ['remarketing', 'retarget', 'rmkt'] },
   anatomia:           { include: ['anatomia', 'anato'],                    exclude: ['[low]', 'low_'] },
   patologia:          { include: ['patologia', '[pato', 'pós pato'],        exclude: ['[low]', 'low_'] },
