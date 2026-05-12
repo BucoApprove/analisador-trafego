@@ -459,7 +459,7 @@ function CampaignCard({
                             {ad.results > 0 ? brl(ad.costPerResult) : '—'}
                           </span>
                           {validLeadsContent !== undefined && (() => {
-                            const contentKey = `${campaign.campaignName}|||${adset.adsetName}|||${ad.adName}`
+                            const contentKey = `${campaign.campaignName.toLowerCase().trim()}|||${adset.adsetName.toLowerCase().trim()}|||${ad.adName.toLowerCase().trim()}`
                             const vl = validLeadsContent === null ? null : (validLeadsContent[contentKey] ?? 0)
                             const cpl = vl !== null && vl > 0 ? brl(ad.spend / vl) : null
                             return (
@@ -1155,13 +1155,13 @@ export default function TabPerpetuo({ token, enabled }: TabPerpetuoProps) {
             if (!isConversao) return undefined
             if (isVlLoading) return null
             if (!validLeads) return undefined
-            return validLeads[name] ?? 0
+            return validLeads[name.toLowerCase().trim()] ?? 0
           }
           function saleCountOther(name: string): number | null | undefined {
             if (!isConversao) return undefined
             if (isVlLoading) return null
             if (!validLeadsSales) return undefined
-            return validLeadsSales[name] ?? 0
+            return validLeadsSales[name.toLowerCase().trim()] ?? 0
           }
           return (
             <div className="space-y-3">
@@ -1181,7 +1181,7 @@ export default function TabPerpetuo({ token, enabled }: TabPerpetuoProps) {
         function vlCount(name: string): number | null | undefined {
           if (isVlLoading) return null
           if (!validLeads) return undefined
-          return validLeads[name] ?? 0
+          return validLeads[name.toLowerCase().trim()] ?? 0
         }
         const vlContent: Record<string, number> | null | undefined =
           isVlLoading ? null : (validLeadsContent ?? undefined)

@@ -65,23 +65,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       ),
     ])
 
+    const norm = (s: string) => s.toLowerCase().trim()
+
     const counts: Record<string, number> = {}
     for (const row of campaignResult.rows) {
-      if (row.key) counts[row.key] = parseInt(row.cnt ?? '0')
+      if (row.key) counts[norm(row.key)] = parseInt(row.cnt ?? '0')
     }
 
     // Chave composta campaign|||medium|||content para filtrar corretamente por campanha+conjunto+criativo
     const contentCounts: Record<string, number> = {}
     for (const row of contentResult.rows) {
       if (row.content) {
-        const key = `${row.campaign ?? ''}|||${row.medium ?? ''}|||${row.content}`
+        const key = `${norm(row.campaign ?? '')}|||${norm(row.medium ?? '')}|||${norm(row.content)}`
         contentCounts[key] = parseInt(row.cnt ?? '0')
       }
     }
 
     const salesCounts: Record<string, number> = {}
     for (const row of salesResult.rows) {
-      if (row.key) salesCounts[row.key] = parseInt(row.cnt ?? '0')
+      if (row.key) salesCounts[norm(row.key)] = parseInt(row.cnt ?? '0')
     }
 
     res.json({ counts, contentCounts, salesCounts, since, until })
