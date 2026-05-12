@@ -172,16 +172,19 @@ async function fetchUtmCounts(since: string, until: string): Promise<UtmCounts> 
     ),
   ])
 
+  // Chaves normalizadas (lowercase + trim) para match case-insensitive com nomes do Meta
+  const norm = (s: string) => s.toLowerCase().trim()
+
   const leads: Record<string, number> = {}
-  for (const r of campaignRows.rows) if (r.key) leads[r.key] = parseInt(r.cnt ?? '0')
+  for (const r of campaignRows.rows) if (r.key) leads[norm(r.key)] = parseInt(r.cnt ?? '0')
 
   const content: Record<string, number> = {}
   for (const r of contentRows.rows) {
-    if (r.content) content[`${r.campaign ?? ''}|||${r.medium ?? ''}|||${r.content}`] = parseInt(r.cnt ?? '0')
+    if (r.content) content[`${norm(r.campaign ?? '')}|||${norm(r.medium ?? '')}|||${norm(r.content)}`] = parseInt(r.cnt ?? '0')
   }
 
   const vendas: Record<string, number> = {}
-  for (const r of salesRows.rows) if (r.key) vendas[r.key] = parseInt(r.cnt ?? '0')
+  for (const r of salesRows.rows) if (r.key) vendas[norm(r.key)] = parseInt(r.cnt ?? '0')
 
   return { leads, content, vendas }
 }
@@ -400,8 +403,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           const campImp       = camp.adsets.reduce((s, r) => s + Number(r.impressions ?? 0), 0)
           const campClk       = camp.adsets.reduce((s, r) => s + Number(r.clicks ?? 0), 0)
           const campAlc       = camp.adsets.reduce((s, r) => s + Number(r.reach ?? 0), 0)
-          const campLeads     = hasUtm ? (utmCounts.leads[camp.name] ?? 0) : 0
-          const campVendas    = hasUtm ? (utmCounts.vendas[camp.name] ?? 0) : 0
+          const campKey       = camp.name.toLowerCase().trim()
+          const campLeads     = hasUtm ? (utmCounts.leads[campKey] ?? 0) : 0
+          const campVendas    = hasUtm ? (utmCounts.vendas[campKey] ?? 0) : 0
           rows.push({
             periodo_inicio:   since,
             periodo_fim:      until,
@@ -444,9 +448,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             const rm      = getReachMetrics(adsetRow, spend)
             const df      = getDateFields(adsetRow)
             // adset: utm_medium = adset_name — leads somados de todos os criativos deste conjunto
+            const adsetPrefix = `${camp.name.toLowerCase().trim()}|||${adsetRow.adset_name.toLowerCase().trim()}|||`
             const adsetLeads  = hasUtm
               ? Object.entries(utmCounts.content)
-                  .filter(([k]) => k.startsWith(`${camp.name}|||${adsetRow.adset_name}|||`))
+                  .filter(([k]) => k.startsWith(adsetPrefix))
                   .reduce((s, [, v]) => s + v, 0)
               : 0
 
@@ -483,7 +488,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 const adResults = actionVal(ad.actions, ...rt)
                 const adRm      = getReachMetrics(ad, adSpend)
                 const adDf      = getDateFields(ad)
-                const contentKey = `${camp.name}|||${adsetRow.adset_name}|||${ad.ad_name}`
+                const contentKey = `${camp.name.toLowerCase().trim()}|||${adsetRow.adset_name.toLowerCase().trim()}|||${ad.ad_name.toLowerCase().trim()}`
                 const adLeads    = hasUtm ? (utmCounts.content[contentKey] ?? 0) : 0
                 rows.push({
                   periodo_inicio:   since,
