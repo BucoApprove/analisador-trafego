@@ -42,7 +42,7 @@ interface NavItem {
 // ─── Navigation config ────────────────────────────────────────────────────────
 
 const USER_NAV: NavItem[] = [
-  { id: 'ba25',        label: 'BA25 🚀',     icon: BarChart2    },
+  { id: 'perpetuo',    label: 'Perpétuo',    icon: Target       },
   { id: 'visao-geral', label: 'Visão Geral', icon: PieChart     },
   { id: 'campanhas',   label: 'Campanhas',   icon: TrendingUp,   hidden: true },
   { id: 'lancamento',  label: 'Lançamento',  icon: Zap,          hidden: true },
@@ -54,9 +54,9 @@ const USER_NAV: NavItem[] = [
   { id: 'vendas',      label: 'Vendas',      icon: ShoppingCart, hidden: true },
   { id: 'cruzamento',  label: 'Cruzamento',  icon: GitMerge     },
   { id: 'analises',    label: 'Análises',    icon: Activity     },
-  { id: 'perpetuo',    label: 'Perpétuo',    icon: Target       },
   { id: 'utm-leads',   label: 'UTMs Leads',  icon: Tags         },
   { id: 'report',      label: 'Relatório IA', icon: Link         },
+  { id: 'ba25',        label: 'BA25 🚀',     icon: BarChart2    },
 ]
 
 const ADMIN_NAV: NavItem[] = [
@@ -201,7 +201,7 @@ function Sidebar({
 // ─── Dashboard Layout ─────────────────────────────────────────────────────────
 
 export default function DashboardLayout({ token, role, userName, onLogout }: DashboardLayoutProps) {
-  const [activeTab, setActiveTab]   = useState('ba25')
+  const [activeTab, setActiveTab]   = useState('perpetuo')
   const [sidebarOpen, setSidebarOpen] = useState(false)
 
   const allNav     = [...USER_NAV, ...(role === 'admin' ? ADMIN_NAV : [])]
