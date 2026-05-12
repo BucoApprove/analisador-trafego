@@ -588,11 +588,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     customConvUrl.searchParams.set('access_token', accessToken)
     customConvUrl.searchParams.set('limit',        '200')
 
-    // Insights de adsets: max 5 páginas (5×200=1000 linhas — mais do que suficiente para qualquer conta)
-    // Insights de ads: max 5 páginas (5×500=2500 linhas) — usado só para breakdown por ad
-    const [adsetInsightsData, adInsightsData, adsetsData, campaignsData, customConvsData] = await Promise.all([
-      metaGetAll(adsetUrl, 5),
-      metaGetAll(adUrl, 5),
+    // Insights primeiro (pesados), depois metadados em paralelo — evita erro 1504018 por sobrecarga
+    const adsetInsightsData = await metaGetAll(adsetUrl, 5)
+    const adInsightsData    = await metaGetAll(adUrl, 5)
+    const [adsetsData, campaignsData, customConvsData] = await Promise.all([
       metaGetAll(budgetUrl),
       metaGetAll(campaignUrl),
       metaGetAll(customConvUrl),
