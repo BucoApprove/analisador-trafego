@@ -4,17 +4,18 @@
  * Gera um relatório plano (CSV ou JSON) de campanhas Meta Ads para análise por IA.
  *
  * Query params:
- *   token    — DASHBOARD_TOKEN (obrigatório, passado direto na URL)
- *   account  — conta1 | conta2
- *   views    — etapas separadas por vírgula, ex: etapa2,etapa4,etapa5
- *              ou "all" para todas as views da conta selecionada
- *   since    — YYYY-MM-DD (padrão: 1º do mês atual)
- *   until    — YYYY-MM-DD (padrão: hoje)
- *   format   — csv | json  (padrão: csv)
- *   level    — campaign | adset | ad  (padrão: adset)
+ *   token          — DASHBOARD_TOKEN (obrigatório, passado direto na URL)
+ *   account        — conta1 | conta2
+ *   views          — etapas separadas por vírgula, ex: etapa2,etapa4,etapa5
+ *                    ou "all" para todas as views da conta selecionada
+ *   since          — YYYY-MM-DD (padrão: 1º do mês atual)
+ *   until          — YYYY-MM-DD (padrão: hoje)
+ *   format         — csv | json  (padrão: csv)
+ *   level          — campaign | adset | ad  (padrão: adset)
+ *   time_increment — 1 (diário) | 7 (semanal) — opcional; sem esse param retorna agregado
  *
  * Exemplo de URL para IA:
- *   https://analisador-trafego.vercel.app/api/report?token=SEU_TOKEN&account=conta1&views=etapa2,etapa4&since=2026-04-01&until=2026-04-20&format=csv
+ *   https://analisador-trafego.vercel.app/api/report?token=SEU_TOKEN&account=conta1&views=etapa2,etapa4&since=2026-04-01&until=2026-04-20&format=json&level=adset
  */
 
 import type { VercelRequest, VercelResponse } from '@vercel/node'
@@ -91,7 +92,7 @@ async function metaGetAll(url: URL): Promise<any[]> {
 
 function getResultTypes(adset: {
   optimization_goal?: string
-  promoted_object?: { custom_conversion_id?: string; custom_event_type?: string; custom_event_str?: string }
+  promoted_object?: { custom_conversion_id?: string; custom_event_type?: string }
 }, campaignObjective?: string): string[] {
   const po = adset.promoted_object
   if (po?.custom_conversion_id) return [`offsite_conversion.custom.${po.custom_conversion_id}`]
@@ -115,34 +116,41 @@ function csvEscape(val: string | number): string {
   return s
 }
 
-// ─── Tipos de linha do relatório ──────────────────────────────────────────────
+// ─── Tipo de linha do relatório ───────────────────────────────────────────────
 
 interface ReportRow {
-  periodo_inicio:    string
-  periodo_fim:       string
-  conta:             string
-  etapa:             string
-  etapa_label:       string
-  campanha:          string
-  conjunto:          string
-  anuncio:           string
-  orcamento_diario:  string
-  orcamento_total:   string
-  investido:         string
-  resultados:        string
-  cpr:               string
-  taxa_conversao:    string
-  views_3s:          string
-  views_25pct:       string
+  periodo_inicio:   string
+  periodo_fim:      string
+  data:             string  // preenchido só com time_increment
+  semana:           string  // preenchido só com time_increment=7
+  conta:            string
+  etapa:            string
+  etapa_label:      string
+  campanha:         string
+  conjunto:         string
+  anuncio:          string
+  orcamento_diario: string
+  orcamento_total:  string
+  investido:        string
+  resultados:       string
+  cpr:              string
+  taxa_conversao:   string
+  impressoes:       string
+  cliques:          string
+  alcance:          string
+  frequencia:       string
+  cpm:              string
+  ctr:              string
+  views_3s:         string
+  views_25pct:      string
 }
 
 // ─── Handler ──────────────────────────────────────────────────────────────────
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  // Autenticação via DASHBOARD_TOKEN na URL (para facilitar acesso por IA)
   const providedToken = typeof req.query.token === 'string' ? req.query.token : ''
-  const validToken = process.env.DASHBOARD_TOKEN ?? ''
-  const validAdmin = process.env.DASHBOARD_TOKEN_ADMIN ?? ''
+  const validToken    = process.env.DASHBOARD_TOKEN ?? ''
+  const validAdmin    = process.env.DASHBOARD_TOKEN_ADMIN ?? ''
   if (!providedToken || (providedToken !== validToken && providedToken !== validAdmin)) {
     return res.status(401).json({ error: 'Token inválido. Passe ?token=SEU_TOKEN' })
   }
@@ -150,12 +158,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const accessToken = process.env.META_ACCESS_TOKEN ?? ''
   if (!accessToken) return res.status(503).json({ error: 'META_ACCESS_TOKEN não configurado' })
 
-  // Parâmetros
   const account = typeof req.query.account === 'string' ? req.query.account : 'conta1'
   if (!ACCOUNT_IDS[account]) return res.status(400).json({ error: 'account inválido (conta1 | conta2)' })
 
-  const accountViews = account === 'conta1' ? CONTA1_VIEWS : CONTA2_VIEWS
-  const viewsParam   = typeof req.query.views === 'string' ? req.query.views : 'all'
+  const accountViews  = account === 'conta1' ? CONTA1_VIEWS : CONTA2_VIEWS
+  const viewsParam    = typeof req.query.views === 'string' ? req.query.views : 'all'
   const selectedViews = viewsParam === 'all'
     ? accountViews
     : viewsParam.split(',').map(v => v.trim()).filter(v => NAME_FILTERS[v] && accountViews.includes(v))
@@ -177,24 +184,45 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const level  = typeof req.query.level  === 'string' && ['campaign', 'adset', 'ad'].includes(req.query.level)
     ? req.query.level : 'adset'
 
+  const tiRaw        = typeof req.query.time_increment === 'string' ? req.query.time_increment : ''
+  const timeIncrement = tiRaw === '1' ? 1 : tiRaw === '7' ? 7 : null
+
   const acctId    = ACCOUNT_IDS[account]
   const timeRange = JSON.stringify({ since, until })
 
+  // Campos de insights — inclui métricas de alcance/impressão
+  const insightFields = [
+    'campaign_id', 'campaign_name',
+    'adset_id', 'adset_name',
+    'spend', 'actions',
+    'impressions', 'clicks', 'reach', 'frequency', 'cpm', 'ctr',
+    'video_thruplay_watched_actions', 'video_p25_watched_actions',
+  ].join(',')
+
   try {
-    // Busca dados em paralelo
+    // ── Busca insights (adset e ad) ───────────────────────────────────────────
+
     const adsetInsightUrl = new URL(`${META_BASE}/${acctId}/insights`)
     adsetInsightUrl.searchParams.set('level',        'adset')
-    adsetInsightUrl.searchParams.set('fields',       'campaign_id,campaign_name,adset_id,adset_name,spend,actions,video_thruplay_watched_actions,video_p25_watched_actions')
+    adsetInsightUrl.searchParams.set('fields',       insightFields)
     adsetInsightUrl.searchParams.set('time_range',   timeRange)
     adsetInsightUrl.searchParams.set('access_token', accessToken)
     adsetInsightUrl.searchParams.set('limit',        '200')
+    if (timeIncrement) adsetInsightUrl.searchParams.set('time_increment', String(timeIncrement))
+
+    const adInsightFields = [
+      'campaign_name', 'adset_id', 'adset_name', 'ad_id', 'ad_name',
+      'spend', 'actions',
+      'impressions', 'clicks', 'reach', 'frequency', 'cpm', 'ctr',
+    ].join(',')
 
     const adInsightUrl = new URL(`${META_BASE}/${acctId}/insights`)
     adInsightUrl.searchParams.set('level',        'ad')
-    adInsightUrl.searchParams.set('fields',       'campaign_name,adset_id,adset_name,ad_id,ad_name,spend,actions')
+    adInsightUrl.searchParams.set('fields',       adInsightFields)
     adInsightUrl.searchParams.set('time_range',   timeRange)
     adInsightUrl.searchParams.set('access_token', accessToken)
     adInsightUrl.searchParams.set('limit',        '500')
+    if (timeIncrement) adInsightUrl.searchParams.set('time_increment', String(timeIncrement))
 
     const adsetsUrl = new URL(`${META_BASE}/${acctId}/adsets`)
     adsetsUrl.searchParams.set('fields',       'id,daily_budget,lifetime_budget,optimization_goal,promoted_object,campaign_id')
@@ -213,7 +241,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       metaGetAll(campaignUrl),
     ])
 
-    // Mapas auxiliares
+    // ── Mapas auxiliares ──────────────────────────────────────────────────────
+
     const campaignObjective = new Map<string, string>()
     for (const c of campaignsData) campaignObjective.set(c.id, c.objective ?? '')
 
@@ -227,31 +256,61 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       })
     }
 
-    // Agrupa anúncios por adsetId
+    // Agrupa anúncios por adsetId (e data se time_increment)
     const adsByAdset = new Map<string, any[]>()
     for (const ad of adInsights) {
-      const list = adsByAdset.get(ad.adset_id) ?? []
+      const key = timeIncrement ? `${ad.adset_id}__${ad.date_start ?? ''}` : ad.adset_id
+      const list = adsByAdset.get(key) ?? []
       list.push(ad)
-      adsByAdset.set(ad.adset_id, list)
+      adsByAdset.set(key, list)
     }
 
-    // Constrói linhas do relatório
+    // ── Helpers para métricas de alcance/impressão ────────────────────────────
+
+    function getReachMetrics(row: any, spend: number) {
+      const impressoes = String(Number(row.impressions ?? 0))
+      const cliques    = String(Number(row.clicks ?? 0))
+      const alcance    = String(Number(row.reach ?? 0))
+      const frequencia = row.frequency ? Number(row.frequency).toFixed(2) : ''
+      const imp        = Number(row.impressions ?? 0)
+      const cpmVal     = row.cpm ? Number(row.cpm).toFixed(2)
+                        : (imp > 0 ? ((spend / imp) * 1000).toFixed(2) : '')
+      const ctrVal     = row.ctr ? Number(row.ctr).toFixed(2) : ''
+      return { impressoes, cliques, alcance, frequencia, cpm: cpmVal, ctr: ctrVal }
+    }
+
+    function getDateFields(row: any) {
+      if (!timeIncrement) return { data: '', semana: '' }
+      const d = row.date_start ?? ''
+      return {
+        data:   d,
+        semana: timeIncrement === 7 ? d : '',
+      }
+    }
+
+    // ── Constrói linhas ───────────────────────────────────────────────────────
+
     const rows: ReportRow[] = []
 
     for (const viewId of selectedViews) {
-      const filter     = NAME_FILTERS[viewId]
-      const viewLabel  = VIEW_LABELS[viewId] ?? viewId
-      const isVideo    = viewId === 'etapa3'
+      const filter    = NAME_FILTERS[viewId]
+      const viewLabel = VIEW_LABELS[viewId] ?? viewId
+      const isVideo   = viewId === 'etapa3'
 
-      // Agrupa por campanha → adset
-      const campMap = new Map<string, { name: string; adsets: any[] }>()
+      // Agrupa por campanha → adset (considerando data se time_increment)
+      type CampEntry = { name: string; adsets: any[] }
+      const campMap = new Map<string, CampEntry>()
+
       for (const row of adsetInsights) {
         if (!matchesFilter(row.campaign_name, filter)) continue
-        if (!campMap.has(row.campaign_id)) campMap.set(row.campaign_id, { name: row.campaign_name, adsets: [] })
-        campMap.get(row.campaign_id)!.adsets.push(row)
+        const campKey = timeIncrement ? `${row.campaign_id}__${row.date_start ?? ''}` : row.campaign_id
+        if (!campMap.has(campKey)) campMap.set(campKey, { name: row.campaign_name, adsets: [] })
+        campMap.get(campKey)!.adsets.push(row)
       }
 
       for (const [, camp] of campMap) {
+        const { data: campData, semana: campSemana } = getDateFields(camp.adsets[0] ?? {})
+
         // Linha de campanha (totais)
         if (level === 'campaign' || level === 'adset' || level === 'ad') {
           const campSpend   = camp.adsets.reduce((s, r) => s + Number(r.spend ?? 0), 0)
@@ -259,23 +318,34 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             const rt = adsetMeta.get(r.adset_id)?.resultTypes ?? ['lead']
             return s + actionVal(r.actions, ...rt)
           }, 0)
+          const campImp  = camp.adsets.reduce((s, r) => s + Number(r.impressions ?? 0), 0)
+          const campClk  = camp.adsets.reduce((s, r) => s + Number(r.clicks ?? 0), 0)
+          const campAlc  = camp.adsets.reduce((s, r) => s + Number(r.reach ?? 0), 0)
           rows.push({
-            periodo_inicio:  since,
-            periodo_fim:     until,
-            conta:           account,
-            etapa:           viewId,
-            etapa_label:     viewLabel,
-            campanha:        camp.name,
-            conjunto:        '',
-            anuncio:         '',
-            orcamento_diario:  '',
-            orcamento_total:   '',
-            investido:       campSpend.toFixed(2),
-            resultados:      campResults.toString(),
-            cpr:             campResults > 0 ? (campSpend / campResults).toFixed(2) : '',
-            taxa_conversao:  '',
-            views_3s:        isVideo ? camp.adsets.reduce((s, r) => s + Number(r.video_thruplay_watched_actions?.[0]?.value ?? 0), 0).toString() : '',
-            views_25pct:     isVideo ? camp.adsets.reduce((s, r) => s + Number(r.video_p25_watched_actions?.[0]?.value ?? 0), 0).toString() : '',
+            periodo_inicio:   since,
+            periodo_fim:      until,
+            data:             campData,
+            semana:           campSemana,
+            conta:            account,
+            etapa:            viewId,
+            etapa_label:      viewLabel,
+            campanha:         camp.name,
+            conjunto:         '',
+            anuncio:          '',
+            orcamento_diario: '',
+            orcamento_total:  '',
+            investido:        campSpend.toFixed(2),
+            resultados:       campResults.toString(),
+            cpr:              campResults > 0 ? (campSpend / campResults).toFixed(2) : '',
+            taxa_conversao:   '',
+            impressoes:       String(campImp),
+            cliques:          String(campClk),
+            alcance:          String(campAlc),
+            frequencia:       campImp > 0 && campAlc > 0 ? (campImp / campAlc).toFixed(2) : '',
+            cpm:              campImp > 0 ? ((campSpend / campImp) * 1000).toFixed(2) : '',
+            ctr:              campImp > 0 ? ((campClk / campImp) * 100).toFixed(2) : '',
+            views_3s:         isVideo ? camp.adsets.reduce((s, r) => s + Number(r.video_thruplay_watched_actions?.[0]?.value ?? 0), 0).toString() : '',
+            views_25pct:      isVideo ? camp.adsets.reduce((s, r) => s + Number(r.video_p25_watched_actions?.[0]?.value ?? 0), 0).toString() : '',
           })
         }
 
@@ -286,47 +356,58 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             const rt      = meta?.resultTypes ?? ['lead']
             const results = isVideo ? 0 : actionVal(adsetRow.actions, ...rt)
             const lpv     = actionVal(adsetRow.actions, 'landing_page_view')
+            const rm      = getReachMetrics(adsetRow, spend)
+            const df      = getDateFields(adsetRow)
 
             rows.push({
-              periodo_inicio:  since,
-              periodo_fim:     until,
-              conta:           account,
-              etapa:           viewId,
-              etapa_label:     viewLabel,
-              campanha:        camp.name,
-              conjunto:        adsetRow.adset_name,
-              anuncio:         '',
-              orcamento_diario:  meta?.daily    != null ? meta.daily.toFixed(2)    : '',
-              orcamento_total:   meta?.lifetime != null ? meta.lifetime.toFixed(2) : '',
-              investido:       spend.toFixed(2),
-              resultados:      results.toString(),
-              cpr:             results > 0 ? (spend / results).toFixed(2) : '',
-              taxa_conversao:  lpv > 0 ? ((results / lpv) * 100).toFixed(1) : '',
-              views_3s:        isVideo ? String(Number(adsetRow.video_thruplay_watched_actions?.[0]?.value ?? 0)) : '',
-              views_25pct:     isVideo ? String(Number(adsetRow.video_p25_watched_actions?.[0]?.value ?? 0)) : '',
+              periodo_inicio:   since,
+              periodo_fim:      until,
+              data:             df.data,
+              semana:           df.semana,
+              conta:            account,
+              etapa:            viewId,
+              etapa_label:      viewLabel,
+              campanha:         camp.name,
+              conjunto:         adsetRow.adset_name,
+              anuncio:          '',
+              orcamento_diario: meta?.daily    != null ? meta.daily.toFixed(2)    : '',
+              orcamento_total:  meta?.lifetime != null ? meta.lifetime.toFixed(2) : '',
+              investido:        spend.toFixed(2),
+              resultados:       results.toString(),
+              cpr:              results > 0 ? (spend / results).toFixed(2) : '',
+              taxa_conversao:   lpv > 0 ? ((results / lpv) * 100).toFixed(1) : '',
+              ...rm,
+              views_3s:   isVideo ? String(Number(adsetRow.video_thruplay_watched_actions?.[0]?.value ?? 0)) : '',
+              views_25pct: isVideo ? String(Number(adsetRow.video_p25_watched_actions?.[0]?.value ?? 0)) : '',
             })
 
             if (level === 'ad') {
-              for (const ad of adsByAdset.get(adsetRow.adset_id) ?? []) {
+              const adKey = timeIncrement ? `${adsetRow.adset_id}__${adsetRow.date_start ?? ''}` : adsetRow.adset_id
+              for (const ad of adsByAdset.get(adKey) ?? []) {
                 const adSpend   = Number(ad.spend ?? 0)
                 const adResults = actionVal(ad.actions, ...rt)
+                const adRm      = getReachMetrics(ad, adSpend)
+                const adDf      = getDateFields(ad)
                 rows.push({
-                  periodo_inicio:  since,
-                  periodo_fim:     until,
-                  conta:           account,
-                  etapa:           viewId,
-                  etapa_label:     viewLabel,
-                  campanha:        camp.name,
-                  conjunto:        adsetRow.adset_name,
-                  anuncio:         ad.ad_name,
-                  orcamento_diario:  '',
-                  orcamento_total:   '',
-                  investido:       adSpend.toFixed(2),
-                  resultados:      adResults.toString(),
-                  cpr:             adResults > 0 ? (adSpend / adResults).toFixed(2) : '',
-                  taxa_conversao:  '',
-                  views_3s:        '',
-                  views_25pct:     '',
+                  periodo_inicio:   since,
+                  periodo_fim:      until,
+                  data:             adDf.data,
+                  semana:           adDf.semana,
+                  conta:            account,
+                  etapa:            viewId,
+                  etapa_label:      viewLabel,
+                  campanha:         camp.name,
+                  conjunto:         adsetRow.adset_name,
+                  anuncio:          ad.ad_name,
+                  orcamento_diario: '',
+                  orcamento_total:  '',
+                  investido:        adSpend.toFixed(2),
+                  resultados:       adResults.toString(),
+                  cpr:              adResults > 0 ? (adSpend / adResults).toFixed(2) : '',
+                  taxa_conversao:   '',
+                  ...adRm,
+                  views_3s:    '',
+                  views_25pct: '',
                 })
               }
             }
@@ -341,22 +422,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       res.setHeader('Content-Type', 'application/json; charset=utf-8')
       res.setHeader('Content-Disposition', `attachment; filename="relatorio_${since}_${until}.json"`)
       return res.json({
-        gerado_em:  new Date().toISOString(),
-        conta:      account,
-        etapas:     selectedViews,
-        periodo:    { since, until },
-        nivel:      level,
-        total_linhas: rows.length,
-        dados: rows,
+        gerado_em:      new Date().toISOString(),
+        conta:          account,
+        etapas:         selectedViews,
+        periodo:        { since, until },
+        nivel:          level,
+        time_increment: timeIncrement ?? 'aggregated',
+        total_linhas:   rows.length,
+        dados:          rows,
       })
     }
 
     // CSV
     const headers: (keyof ReportRow)[] = [
-      'periodo_inicio', 'periodo_fim', 'conta', 'etapa', 'etapa_label',
+      'periodo_inicio', 'periodo_fim', 'data', 'semana',
+      'conta', 'etapa', 'etapa_label',
       'campanha', 'conjunto', 'anuncio',
       'orcamento_diario', 'orcamento_total', 'investido',
-      'resultados', 'cpr', 'taxa_conversao', 'views_3s', 'views_25pct',
+      'resultados', 'cpr', 'taxa_conversao',
+      'impressoes', 'cliques', 'alcance', 'frequencia', 'cpm', 'ctr',
+      'views_3s', 'views_25pct',
     ]
     const csvLines = [
       headers.join(','),
@@ -365,7 +450,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     res.setHeader('Content-Type', 'text/csv; charset=utf-8')
     res.setHeader('Content-Disposition', `attachment; filename="relatorio_${since}_${until}.csv"`)
-    return res.send('\uFEFF' + csvLines.join('\r\n')) // BOM para Excel abrir UTF-8 corretamente
+    return res.send('﻿' + csvLines.join('\r\n'))
 
   } catch (err: any) {
     console.error('report error:', err)
