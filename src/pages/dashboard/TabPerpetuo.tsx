@@ -906,7 +906,7 @@ export default function TabPerpetuo({ token, enabled }: TabPerpetuoProps) {
               ? <Loader2 className="h-4 w-4 animate-spin" />
               : <RefreshCw className="h-4 w-4" />
             }
-            <span className="ml-1.5">Atualizar</span>
+            <span className="ml-1.5">Ver Desempenho</span>
           </Button>
           <Button onClick={() => loadData(true)} disabled={loading} size="sm" variant="outline" title="Ignorar cache e buscar dados frescos da API">
             <RefreshCw className="h-4 w-4" />
@@ -1089,11 +1089,22 @@ export default function TabPerpetuo({ token, enabled }: TabPerpetuoProps) {
       )}
 
       {/* ── Timestamp última atualização ── */}
-      {fetchedAt && !loading && (
-        <p className="text-xs text-muted-foreground -mt-2">
-          Dados carregados às {fetchedAt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-        </p>
-      )}
+      {fetchedAt && !loading && (() => {
+        const stage = STAGE_CONFIG.find(s => s.id === view)
+        const stageLabel = stage ? `${stage.icon} ${stage.label}` : view
+        const sinceFormatted = new Date(since + 'T12:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })
+        const untilFormatted = new Date(until + 'T12:00:00').toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })
+        const timeFormatted  = fetchedAt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+        const dateFormatted  = fetchedAt.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })
+        const isToday        = fetchedAt.toDateString() === new Date().toDateString()
+        return (
+          <p className="text-xs text-muted-foreground -mt-2">
+            Cache: <span className="font-medium text-foreground">{stageLabel}</span>
+            {' · '}{sinceFormatted} – {untilFormatted}
+            {' · '}atualizado {isToday ? 'hoje' : `em ${dateFormatted}`} às {timeFormatted}
+          </p>
+        )
+      })()}
 
       {/* ── Erro ── */}
       {error && (
