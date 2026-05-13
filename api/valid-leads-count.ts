@@ -24,10 +24,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const baseWhere = `DATE(lead_register) >= @since AND DATE(lead_register) <= @until`
 
   try {
-    const [campaignResult, contentResult, salesResult] = await Promise.all([
+    // Decodifica caracteres URL-encoded comuns em UTMs
+  // Cobre: %5B=[, %5D=], %20=espaço, +=espaço, %28=(, %29=), %2C=,, %2F=/, %3A=:
+  const decodeUtm = (col: string) =>
+    `REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(` +
+    `${col}, '%5B', '['), '%5b', '['), '%5D', ']'), '%5d', ']'), '%20', ' '), '+', ' '), '%28', '('), '%29', ')'), '%2C', ',')`
+
+  const [campaignResult, contentResult, salesResult] = await Promise.all([
       bqQuery(
         `SELECT
-           REPLACE(REPLACE(utm_campaign, '%20', ' '), '+', ' ') AS key,
+           ${decodeUtm('utm_campaign')} AS key,
            COUNT(*) AS cnt
          FROM ${tLeads}
          WHERE utm_campaign IS NOT NULL AND utm_campaign != '' AND ${baseWhere}
@@ -36,9 +42,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       ),
       bqQuery(
         `SELECT
-           REPLACE(REPLACE(utm_campaign, '%20', ' '), '+', ' ') AS campaign,
-           REPLACE(REPLACE(utm_medium,   '%20', ' '), '+', ' ') AS medium,
-           REPLACE(REPLACE(utm_content,  '%20', ' '), '+', ' ') AS content,
+           ${decodeUtm('utm_campaign')} AS campaign,
+           ${decodeUtm('utm_medium')}   AS medium,
+           ${decodeUtm('utm_content')}  AS content,
            COUNT(*) AS cnt
          FROM ${tLeads}
          WHERE utm_campaign IS NOT NULL AND utm_campaign != ''
@@ -47,11 +53,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
          GROUP BY 1, 2, 3`,
         dateParams,
       ),
-      // Vendas por campanha: leads que se registraram no período com aquela utm
-      // e que tiveram uma venda (qualquer status) APÓS o registro
       bqQuery(
         `SELECT
-           REPLACE(REPLACE(l.utm_campaign, '%20', ' '), '+', ' ') AS key,
+           ${decodeUtm('l.utm_campaign')} AS key,
            COUNT(DISTINCT LOWER(TRIM(l.lead_email))) AS cnt
          FROM ${tLeads} l
          INNER JOIN ${tVendas} s

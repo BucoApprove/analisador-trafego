@@ -137,9 +137,13 @@ async function fetchUtmCounts(since: string, until: string): Promise<UtmCounts> 
   ]
   const baseWhere = `DATE(lead_register) >= @since AND DATE(lead_register) <= @until`
 
+  const decodeUtm = (col: string) =>
+    `REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(` +
+    `${col}, '%5B', '['), '%5b', '['), '%5D', ']'), '%5d', ']'), '%20', ' '), '+', ' '), '%28', '('), '%29', ')'), '%2C', ',')`
+
   const [campaignRows, contentRows, salesRows] = await Promise.all([
     bqQuery(
-      `SELECT REPLACE(REPLACE(utm_campaign, '%20', ' '), '+', ' ') AS key, COUNT(*) AS cnt
+      `SELECT ${decodeUtm('utm_campaign')} AS key, COUNT(*) AS cnt
        FROM ${tLeads}
        WHERE utm_campaign IS NOT NULL AND utm_campaign != '' AND ${baseWhere}
        GROUP BY 1`,
@@ -147,9 +151,9 @@ async function fetchUtmCounts(since: string, until: string): Promise<UtmCounts> 
     ),
     bqQuery(
       `SELECT
-         REPLACE(REPLACE(utm_campaign, '%20', ' '), '+', ' ') AS campaign,
-         REPLACE(REPLACE(utm_medium,   '%20', ' '), '+', ' ') AS medium,
-         REPLACE(REPLACE(utm_content,  '%20', ' '), '+', ' ') AS content,
+         ${decodeUtm('utm_campaign')} AS campaign,
+         ${decodeUtm('utm_medium')}   AS medium,
+         ${decodeUtm('utm_content')}  AS content,
          COUNT(*) AS cnt
        FROM ${tLeads}
        WHERE utm_campaign IS NOT NULL AND utm_campaign != ''
@@ -159,7 +163,7 @@ async function fetchUtmCounts(since: string, until: string): Promise<UtmCounts> 
       dateParams,
     ),
     bqQuery(
-      `SELECT REPLACE(REPLACE(l.utm_campaign, '%20', ' '), '+', ' ') AS key,
+      `SELECT ${decodeUtm('l.utm_campaign')} AS key,
               COUNT(DISTINCT LOWER(TRIM(l.lead_email))) AS cnt
        FROM ${tLeads} l
        INNER JOIN ${tVendas} s
