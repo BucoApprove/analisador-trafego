@@ -25,7 +25,7 @@ interface NameFilter { include: string[]; exclude?: string[] }
 
 const NAME_FILTERS: Record<string, NameFilter> = {
   etapa1:             { include: ['impulsi', 'boost', 'seguidor', '[instagram] - post'] },
-  etapa2:             { include: ['captura', 'aula'] },
+  etapa2:             { include: ['captura', 'aula', 'leads_quizenare_'] },
   etapa3:             { include: ['relacionamento', 'engajamento'], exclude: ['ba25', 'ba 25'] },
   etapa4:             { include: ['convers', 'venda', 'pptba_residencias'], exclude: ['ba25', 'ba 25'] },
   etapa5:             { include: ['remarketing', 'retarget', 'rmkt'] },
