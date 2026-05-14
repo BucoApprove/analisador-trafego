@@ -85,10 +85,12 @@ const VIEW_LABELS: Record<string, string> = {
 const CONTA1_VIEWS = ['etapa1', 'etapa2', 'etapa3', 'etapa4', 'etapa5']
 const CONTA2_VIEWS = ['anatomia', 'patologia', 'lowticket-brasil', 'lowticket-latam']
 
+function normKw(s: string): string { return s.toLowerCase().replace(/[-_]/g, ' ') }
+
 function matchesFilter(name: string, filter: NameFilter): boolean {
-  const lower = name.toLowerCase()
-  if (filter.exclude?.some(kw => lower.includes(kw))) return false
-  return filter.include.some(kw => lower.includes(kw))
+  const lower = normKw(name)
+  if (filter.exclude?.some(kw => lower.includes(normKw(kw)))) return false
+  return filter.include.some(kw => lower.includes(normKw(kw)))
 }
 
 function actionVal(
