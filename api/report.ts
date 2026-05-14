@@ -20,6 +20,34 @@
 
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { bqQuery, tableLeads, tableVendas } from './_bq.js'
+import { createClient } from '@supabase/supabase-js'
+
+function getSupabase() {
+  return createClient(
+    process.env.SUPABASE_URL ?? '',
+    process.env.SUPABASE_SERVICE_KEY ?? '',
+    { auth: { persistSession: false } },
+  )
+}
+
+async function loadCustomFilters(account: string, views: string[]): Promise<Record<string, NameFilter>> {
+  try {
+    const sb = getSupabase()
+    const { data } = await sb
+      .from('etapa_filters')
+      .select('view, include, exclude')
+      .eq('account', account)
+      .in('view', views)
+    if (!data) return {}
+    const result: Record<string, NameFilter> = {}
+    for (const row of data) {
+      result[row.view] = { include: row.include ?? [], exclude: row.exclude ?? [] }
+    }
+    return result
+  } catch {
+    return {}
+  }
+}
 
 const META_BASE = 'https://graph.facebook.com/v19.0'
 
@@ -252,6 +280,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(400).json({ error: `Nenhuma view válida. Opções: ${accountViews.join(', ')}` })
   }
 
+  // Carrega filtros customizados do Supabase (sobrescreve NAME_FILTERS quando existir)
+  const customFilters = await loadCustomFilters(account, selectedViews)
+  const effectiveFilters: Record<string, NameFilter> = {}
+  for (const v of selectedViews) {
+    effectiveFilters[v] = customFilters[v] ?? NAME_FILTERS[v]
+  }
+
   const re    = /^\d{4}-\d{2}-\d{2}$/
   const today = new Date().toISOString().split('T')[0]
   const since = typeof req.query.since === 'string' && re.test(req.query.since)
@@ -377,7 +412,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const rows: ReportRow[] = []
 
     for (const viewId of selectedViews) {
-      const filter    = NAME_FILTERS[viewId]
+      const filter    = effectiveFilters[viewId]
       const viewLabel = VIEW_LABELS[viewId] ?? viewId
       const isVideo   = viewId === 'etapa3'
 
