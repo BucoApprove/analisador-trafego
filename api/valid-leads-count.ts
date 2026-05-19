@@ -34,7 +34,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       bqQuery(
         `SELECT
            ${decodeUtm('utm_campaign')} AS key,
-           COUNT(*) AS cnt
+           COUNT(DISTINCT lead_email) AS cnt
          FROM ${tLeads}
          WHERE utm_campaign IS NOT NULL AND utm_campaign != '' AND ${baseWhere}
          GROUP BY 1`,
@@ -45,7 +45,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
            ${decodeUtm('utm_campaign')} AS campaign,
            ${decodeUtm('utm_medium')}   AS medium,
            ${decodeUtm('utm_content')}  AS content,
-           COUNT(*) AS cnt
+           COUNT(DISTINCT lead_email) AS cnt
          FROM ${tLeads}
          WHERE utm_campaign IS NOT NULL AND utm_campaign != ''
            AND utm_content  IS NOT NULL AND utm_content  != ''
