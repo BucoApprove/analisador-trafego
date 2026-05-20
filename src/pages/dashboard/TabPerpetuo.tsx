@@ -706,6 +706,7 @@ export default function TabPerpetuo({ token, enabled }: TabPerpetuoProps) {
     setValidLeadsLoading(true)
     try {
       const params = new URLSearchParams({ since, until })
+      if (force) params.set('nocache', '1')
       const res  = await fetch(`/api/valid-leads-count?${params}`, {
         headers: { Authorization: `Bearer ${token}` },
       })
