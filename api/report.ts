@@ -448,9 +448,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       'spend', 'actions',
       'impressions', 'clicks', 'reach', 'frequency', 'cpm', 'ctr',
       'video_thruplay_watched_actions', 'video_p25_watched_actions',
-      'video_p50_watched_actions', 'video_p75_watched_actions', 'video_p100_watched_actions',
-      'video_avg_time_watched_actions',
-      'quality_ranking', 'engagement_rate_ranking', 'conversion_rate_ranking',
     ].join(',')
 
     const adInsightUrl = new URL(`${META_BASE}/${acctId}/insights`)
@@ -467,7 +464,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     adsetsUrl.searchParams.set('limit',        '500')
 
     const adsMetaUrl = new URL(`${META_BASE}/${acctId}/ads`)
-    adsMetaUrl.searchParams.set('fields',       'id,effective_status,created_time,creative{title,body,thumbnail_url,object_story_spec,asset_feed_spec,video_id}')
+    adsMetaUrl.searchParams.set('fields',       'id,effective_status,created_time')
     adsMetaUrl.searchParams.set('access_token', accessToken)
     adsMetaUrl.searchParams.set('limit',        '500')
 
