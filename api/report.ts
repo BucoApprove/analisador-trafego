@@ -376,6 +376,7 @@ interface ReportRow {
   vendas_reais:         string  // compradores únicos via UTM (BigQuery) — prioridade para análise
   cpv_real:             string  // investido / vendas_reais
   vendas_totais_periodo: string  // vendas do produto no período, sem join de lead
+  produto:               string  // label do produto vendido (ex: "Imersão Enare"), ou "" se não mapeado
   variacao_periodo_anterior?: VariacaoPeriodo
 }
 
@@ -783,6 +784,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             vendas_reais:           hasUtm ? String(campVendas) : '',
             cpv_real:               hasUtm && campVendas > 0 ? (campSpend / campVendas).toFixed(2) : '',
             vendas_totais_periodo:  (() => { const lower = camp.name.toLowerCase().trim(); const entry = produtoMap.find(e => lower.includes(e.prefixo)); if (!entry) return ''; const t = utmCounts.vendasTotais[entry.prefixo] ?? 0; return t > 0 ? String(t) : '' })(),
+            produto:                (() => { const lower = camp.name.toLowerCase().trim(); return produtoMap.find(e => lower.includes(e.prefixo))?.label ?? '' })(),
             variacao_periodo_anterior: variacao,
           })
         }
@@ -858,6 +860,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               vendas_reais:           hasUtm ? String(adsetVendas) : '',
               cpv_real:               hasUtm && adsetVendas > 0 ? (spend / adsetVendas).toFixed(2) : '',
               vendas_totais_periodo:  '',
+              produto:                '',
             })
 
             if (level === 'ad') {
@@ -919,6 +922,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                   vendas_reais:           hasUtm ? String(adVendas) : '',
                   cpv_real:               hasUtm && adVendas > 0 ? (adSpend / adVendas).toFixed(2) : '',
                   vendas_totais_periodo:  '',
+                  produto:                '',
                 })
               }
             }
@@ -958,7 +962,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       'hook_rate', 'hold_rate', 'thruplay_rate',
       'quality_ranking', 'engagement_rate_ranking', 'conversion_rate_ranking', 'status_entrega', 'dias_desde_criacao',
       'receita_reais', 'roas_real', 'ticket_medio_real', 'lag_dias_conversao_medio',
-      'leads_reais', 'cpl_real', 'vendas_reais', 'cpv_real', 'vendas_totais_periodo',
+      'leads_reais', 'cpl_real', 'vendas_reais', 'cpv_real', 'vendas_totais_periodo', 'produto',
     ]
     const csvLines = [
       headers.join(','),
