@@ -203,7 +203,7 @@ async function fetchUtmCounts(since: string, until: string): Promise<UtmCounts> 
        INNER JOIN ${tVendas} s
          ON LOWER(TRIM(l.lead_email)) = LOWER(TRIM(s.E_mail_do_Comprador))
        WHERE l.utm_campaign IS NOT NULL AND l.utm_campaign != ''
-         AND DATE(s.Data_de_Aprovacao) BETWEEN @since AND @until
+         AND DATE(s.Data_de_Aprova____o) BETWEEN @since AND @until
        GROUP BY 1`,
       dateParams,
     ),
@@ -219,7 +219,7 @@ async function fetchUtmCounts(since: string, until: string): Promise<UtmCounts> 
          ON LOWER(TRIM(l.lead_email)) = LOWER(TRIM(s.E_mail_do_Comprador))
        WHERE l.utm_campaign IS NOT NULL AND l.utm_campaign != ''
          AND l.utm_content  IS NOT NULL AND l.utm_content  != ''
-         AND DATE(s.Data_de_Aprovacao) BETWEEN @since AND @until
+         AND DATE(s.Data_de_Aprova____o) BETWEEN @since AND @until
        GROUP BY 1, 2, 3`,
       dateParams,
     ),
@@ -227,12 +227,12 @@ async function fetchUtmCounts(since: string, until: string): Promise<UtmCounts> 
     bqQuery(
       `SELECT ${decodeUtm('l.utm_campaign')} AS key,
               SUM(s.Valor_Pago_pelo_Comprador_Sem_Taxas_e_Impostos) AS receita,
-              AVG(DATE_DIFF(s.Data_de_Aprovacao, DATE(l.lead_register), DAY)) AS lag_dias
+              AVG(DATE_DIFF(s.Data_de_Aprova____o, DATE(l.lead_register), DAY)) AS lag_dias
        FROM ${tLeads} l
        INNER JOIN ${tVendas} s
          ON LOWER(TRIM(l.lead_email)) = LOWER(TRIM(s.E_mail_do_Comprador))
        WHERE l.utm_campaign IS NOT NULL AND l.utm_campaign != ''
-         AND DATE(s.Data_de_Aprovacao) BETWEEN @since AND @until
+         AND DATE(s.Data_de_Aprova____o) BETWEEN @since AND @until
        GROUP BY 1`,
       dateParams,
     ),
