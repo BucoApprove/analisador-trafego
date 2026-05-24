@@ -265,10 +265,10 @@ async function fetchUtmCounts(since: string, until: string, produtoMap: ProdutoM
     // vendas totais por produto_id no período (sem join de leads)
     produtoMap.length > 0
       ? bqQuery(
-          `SELECT ID_do_Produto AS produto_id, COUNT(*) AS cnt
+          `SELECT CAST(ID_do_Produto AS STRING) AS produto_id, COUNT(*) AS cnt
            FROM ${tVendas}
            WHERE DATE(Data_de_Aprova____o) BETWEEN @since AND @until
-             AND Status = 'Aprovado'
+             AND LOWER(TRIM(Status)) = 'aprovado'
            GROUP BY 1`,
           dateParams,
         )
@@ -303,17 +303,16 @@ async function fetchUtmCounts(since: string, until: string, produtoMap: ProdutoM
     }
   }
 
-  // Monta mapa produto_id → qty de vendas no período
-  const vendasPorProduto: Record<number, number> = {}
+  // Monta mapa produto_id (string) → qty de vendas no período
+  const vendasPorProduto: Record<string, number> = {}
   for (const r of vendasProdutoRows.rows) {
-    if (r.produto_id) vendasPorProduto[parseInt(r.produto_id)] = parseInt(r.cnt ?? '0')
+    if (r.produto_id) vendasPorProduto[String(r.produto_id).trim()] = parseInt(r.cnt ?? '0')
   }
 
   // Para cada entrada do produtoMap, soma as vendas dos produto_ids e associa ao prefixo
-  // O mapa final é campanha_key → vendas totais (preenchido no handler cruzando com nome da campanha)
   const vendasTotais: Record<string, number> = {}
   for (const entry of produtoMap) {
-    const total = entry.produto_ids.reduce((sum, id) => sum + (vendasPorProduto[id] ?? 0), 0)
+    const total = entry.produto_ids.reduce((sum, id) => sum + (vendasPorProduto[String(id)] ?? 0), 0)
     vendasTotais[entry.prefixo] = total
   }
 
