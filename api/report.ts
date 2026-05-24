@@ -153,9 +153,12 @@ function csvEscape(val: string | number): string {
 const VIEWS_WITH_UTM = new Set(['etapa2', 'etapa4'])
 
 interface UtmCounts {
-  leads:   Record<string, number>   // utm_campaign → leads únicos
-  content: Record<string, number>   // utm_campaign|||utm_medium|||utm_content → leads
-  vendas:  Record<string, number>   // utm_campaign → compradores únicos
+  leads:          Record<string, number>  // utm_campaign → leads únicos
+  content:        Record<string, number>  // utm_campaign|||utm_medium|||utm_content → leads
+  vendas:         Record<string, number>  // utm_campaign → compradores únicos
+  vendasContent:  Record<string, number>  // utm_campaign|||utm_medium|||utm_content → compradores únicos
+  receita:        Record<string, number>  // utm_campaign → soma Valor_Pago_pelo_Comprador
+  lagDias:        Record<string, number>  // utm_campaign → média de dias lead→compra
 }
 
 async function fetchUtmCounts(since: string, until: string): Promise<UtmCounts> {
@@ -171,7 +174,7 @@ async function fetchUtmCounts(since: string, until: string): Promise<UtmCounts> 
     `REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(` +
     `${col}, '%5B', '['), '%5b', '['), '%5D', ']'), '%5d', ']'), '%20', ' '), '+', ' '), '%28', '('), '%29', ')'), '%2C', ',')`
 
-  const [campaignRows, contentRows, salesRows] = await Promise.all([
+  const [campaignRows, contentRows, salesRows, salesContentRows, receitaRows] = await Promise.all([
     bqQuery(
       `SELECT ${decodeUtm('utm_campaign')} AS key, COUNT(*) AS cnt
        FROM ${tLeads}
@@ -192,6 +195,7 @@ async function fetchUtmCounts(since: string, until: string): Promise<UtmCounts> 
        GROUP BY 1, 2, 3`,
       dateParams,
     ),
+    // vendas por campanha — filtra pela data de aprovação da venda (não do lead)
     bqQuery(
       `SELECT ${decodeUtm('l.utm_campaign')} AS key,
               COUNT(DISTINCT LOWER(TRIM(l.lead_email))) AS cnt
@@ -199,8 +203,36 @@ async function fetchUtmCounts(since: string, until: string): Promise<UtmCounts> 
        INNER JOIN ${tVendas} s
          ON LOWER(TRIM(l.lead_email)) = LOWER(TRIM(s.E_mail_do_Comprador))
        WHERE l.utm_campaign IS NOT NULL AND l.utm_campaign != ''
-         AND ${baseWhere}
-         AND DATE(s.Data_do_Pedido) >= DATE(l.lead_register)
+         AND DATE(s.Data_de_Aprovacao) BETWEEN @since AND @until
+       GROUP BY 1`,
+      dateParams,
+    ),
+    // vendas por criativo (campaign|||medium|||content) para níveis adset/ad
+    bqQuery(
+      `SELECT
+         ${decodeUtm('l.utm_campaign')} AS campaign,
+         ${decodeUtm('l.utm_medium')}   AS medium,
+         ${decodeUtm('l.utm_content')}  AS content,
+         COUNT(DISTINCT LOWER(TRIM(l.lead_email))) AS cnt
+       FROM ${tLeads} l
+       INNER JOIN ${tVendas} s
+         ON LOWER(TRIM(l.lead_email)) = LOWER(TRIM(s.E_mail_do_Comprador))
+       WHERE l.utm_campaign IS NOT NULL AND l.utm_campaign != ''
+         AND l.utm_content  IS NOT NULL AND l.utm_content  != ''
+         AND DATE(s.Data_de_Aprovacao) BETWEEN @since AND @until
+       GROUP BY 1, 2, 3`,
+      dateParams,
+    ),
+    // receita e lag por campanha
+    bqQuery(
+      `SELECT ${decodeUtm('l.utm_campaign')} AS key,
+              SUM(s.Valor_Pago_pelo_Comprador_Sem_Taxas_e_Impostos) AS receita,
+              AVG(DATE_DIFF(s.Data_de_Aprovacao, DATE(l.lead_register), DAY)) AS lag_dias
+       FROM ${tLeads} l
+       INNER JOIN ${tVendas} s
+         ON LOWER(TRIM(l.lead_email)) = LOWER(TRIM(s.E_mail_do_Comprador))
+       WHERE l.utm_campaign IS NOT NULL AND l.utm_campaign != ''
+         AND DATE(s.Data_de_Aprovacao) BETWEEN @since AND @until
        GROUP BY 1`,
       dateParams,
     ),
@@ -220,7 +252,21 @@ async function fetchUtmCounts(since: string, until: string): Promise<UtmCounts> 
   const vendas: Record<string, number> = {}
   for (const r of salesRows.rows) if (r.key) vendas[norm(r.key)] = parseInt(r.cnt ?? '0')
 
-  return { leads, content, vendas }
+  const vendasContent: Record<string, number> = {}
+  for (const r of salesContentRows.rows) {
+    if (r.content) vendasContent[`${norm(r.campaign ?? '')}|||${norm(r.medium ?? '')}|||${norm(r.content)}`] = parseInt(r.cnt ?? '0')
+  }
+
+  const receita: Record<string, number> = {}
+  const lagDias: Record<string, number> = {}
+  for (const r of receitaRows.rows) {
+    if (r.key) {
+      receita[norm(r.key)] = parseFloat(r.receita ?? '0')
+      lagDias[norm(r.key)] = parseFloat(r.lag_dias ?? '0')
+    }
+  }
+
+  return { leads, content, vendas, vendasContent, receita, lagDias }
 }
 
 // ─── Tipo de linha do relatório ───────────────────────────────────────────────
@@ -250,10 +296,76 @@ interface ReportRow {
   ctr:                  string
   views_3s:             string
   views_25pct:          string
+  views_50pct:          string
+  views_75pct:          string
+  views_100pct:         string
+  video_avg_time_watched: string
+  cpc:                  string
+  hook_rate:            string
+  hold_rate:            string
+  thruplay_rate:        string
+  quality_ranking:            string
+  engagement_rate_ranking:    string
+  conversion_rate_ranking:    string
+  status_entrega:             string
+  dias_desde_criacao:         string
+  headline_texto:             string
+  corpo_texto:                string
+  description_texto:          string
+  cta_botao:                  string
+  thumbnail_url:              string
+  landing_url_real:           string
+  formato_criativo:           string
+  receita_reais:              string
+  roas_real:                  string
+  ticket_medio_real:          string
+  lag_dias_conversao_medio:   string
   leads_reais:          string  // leads únicos via UTM (BigQuery) — prioridade para análise
   cpl_real:             string  // investido / leads_reais
   vendas_reais:         string  // compradores únicos via UTM (BigQuery) — prioridade para análise
   cpv_real:             string  // investido / vendas_reais
+  variacao_periodo_anterior?: VariacaoPeriodo
+}
+
+interface VariacaoPeriodo {
+  investido:   string
+  resultados:  string
+  cpr:         string
+  cpm:         string
+  ctr:         string
+  frequencia:  string
+  leads_reais: string
+  cpl_real:    string
+}
+
+// ─── Variação período anterior (opt-in via ?include=variacao) ────────────────
+
+function prevPeriod(since: string, until: string): { since: string; until: string } {
+  const s = new Date(since)
+  const u = new Date(until)
+  const days = Math.round((u.getTime() - s.getTime()) / 86400000) + 1
+  const prevUntil = new Date(s.getTime() - 86400000)
+  const prevSince = new Date(prevUntil.getTime() - (days - 1) * 86400000)
+  return {
+    since: prevSince.toISOString().split('T')[0],
+    until: prevUntil.toISOString().split('T')[0],
+  }
+}
+
+function varPct(current: number, previous: number): string {
+  if (previous === 0 || isNaN(previous)) return ''
+  const pct = ((current - previous) / previous) * 100
+  const sign = pct >= 0 ? '+' : ''
+  return `${sign}${pct.toFixed(1)}`
+}
+
+function emptyVariacao(): VariacaoPeriodo {
+  return { investido: '', resultados: '', cpr: '', cpm: '', ctr: '', frequencia: '', leads_reais: '', cpl_real: '' }
+}
+
+// Agrega métricas da janela anterior por chave campanha|||conjunto|||anuncio
+async function fetchPrevUtmCounts(since: string, until: string): Promise<UtmCounts> {
+  return fetchUtmCounts(since, until)
 }
 
 // ─── Handler ──────────────────────────────────────────────────────────────────
@@ -305,6 +417,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const tiRaw        = typeof req.query.time_increment === 'string' ? req.query.time_increment : ''
   const timeIncrement = tiRaw === '1' ? 1 : tiRaw === '7' ? 7 : null
 
+  const includeParam  = typeof req.query.include === 'string' ? req.query.include.split(',') : []
+  const includeVariacao = includeParam.includes('variacao')
+
   const acctId    = ACCOUNT_IDS[account]
   const timeRange = JSON.stringify({ since, until })
 
@@ -332,6 +447,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       'campaign_name', 'adset_id', 'adset_name', 'ad_id', 'ad_name',
       'spend', 'actions',
       'impressions', 'clicks', 'reach', 'frequency', 'cpm', 'ctr',
+      'video_thruplay_watched_actions', 'video_p25_watched_actions',
+      'video_p50_watched_actions', 'video_p75_watched_actions', 'video_p100_watched_actions',
+      'video_avg_time_watched_actions',
+      'quality_ranking', 'engagement_rate_ranking', 'conversion_rate_ranking',
     ].join(',')
 
     const adInsightUrl = new URL(`${META_BASE}/${acctId}/insights`)
@@ -347,19 +466,38 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     adsetsUrl.searchParams.set('access_token', accessToken)
     adsetsUrl.searchParams.set('limit',        '500')
 
+    const adsMetaUrl = new URL(`${META_BASE}/${acctId}/ads`)
+    adsMetaUrl.searchParams.set('fields',       'id,effective_status,created_time,creative{title,body,thumbnail_url,object_story_spec,asset_feed_spec,video_id}')
+    adsMetaUrl.searchParams.set('access_token', accessToken)
+    adsMetaUrl.searchParams.set('limit',        '500')
+
     const campaignUrl = new URL(`${META_BASE}/${acctId}/campaigns`)
     campaignUrl.searchParams.set('fields',       'id,objective')
     campaignUrl.searchParams.set('access_token', accessToken)
     campaignUrl.searchParams.set('limit',        '500')
 
     const needsUtm = selectedViews.some(v => VIEWS_WITH_UTM.has(v))
+    const prev     = prevPeriod(since, until)
 
-    const [adsetInsights, adInsights, adsetsData, campaignsData, utmCounts] = await Promise.all([
+    const prevAdsetInsightUrl = includeVariacao ? (() => {
+      const u = new URL(`${META_BASE}/${acctId}/insights`)
+      u.searchParams.set('level',        'adset')
+      u.searchParams.set('fields',       insightFields)
+      u.searchParams.set('time_range',   JSON.stringify({ since: prev.since, until: prev.until }))
+      u.searchParams.set('access_token', accessToken)
+      u.searchParams.set('limit',        '200')
+      return u
+    })() : null
+
+    const [adsetInsights, adInsights, adsetsData, campaignsData, adsMeta, utmCounts, prevUtmCounts, prevAdsetInsights] = await Promise.all([
       metaGetAll(adsetInsightUrl),
       metaGetAll(adInsightUrl),
       metaGetAll(adsetsUrl),
       metaGetAll(campaignUrl),
-      needsUtm ? fetchUtmCounts(since, until) : Promise.resolve({ leads: {}, content: {}, vendas: {} }),
+      metaGetAll(adsMetaUrl),
+      needsUtm ? fetchUtmCounts(since, until) : Promise.resolve({ leads: {}, content: {}, vendas: {}, vendasContent: {} } as UtmCounts),
+      needsUtm && includeVariacao ? fetchPrevUtmCounts(prev.since, prev.until) : Promise.resolve({ leads: {}, content: {}, vendas: {}, vendasContent: {} } as UtmCounts),
+      prevAdsetInsightUrl ? metaGetAll(prevAdsetInsightUrl) : Promise.resolve([] as any[]),
     ])
 
     // ── Mapas auxiliares ──────────────────────────────────────────────────────
@@ -374,6 +512,54 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         daily:       s.daily_budget    ? Number(s.daily_budget) / 100    : null,
         lifetime:    s.lifetime_budget ? Number(s.lifetime_budget) / 100 : null,
         resultTypes: getResultTypes(s, obj),
+      })
+    }
+
+    // Mapa campanha_name → totais do período anterior (apenas quando includeVariacao)
+    type PrevTotals = { spend: number; results: number; impressions: number; clicks: number; reach: number }
+    const prevCampMap = new Map<string, PrevTotals>()
+    if (includeVariacao) {
+      for (const row of prevAdsetInsights) {
+        const key   = row.campaign_name as string
+        const entry = prevCampMap.get(key) ?? { spend: 0, results: 0, impressions: 0, clicks: 0, reach: 0 }
+        const rt    = adsetMeta.get(row.adset_id)?.resultTypes ?? ['lead']
+        entry.spend       += Number(row.spend ?? 0)
+        entry.results     += actionVal(row.actions, ...rt)
+        entry.impressions += Number(row.impressions ?? 0)
+        entry.clicks      += Number(row.clicks ?? 0)
+        entry.reach       += Number(row.reach ?? 0)
+        prevCampMap.set(key, entry)
+      }
+    }
+
+    // Mapa ad_id → metadados do ad (status, criativo)
+    const todayDate = new Date()
+    interface AdMeta { status: string; dias: string; headline: string; corpo: string; description: string; cta: string; thumbnail: string; landing_url: string; formato: string }
+    const adStatusMap = new Map<string, AdMeta>()
+    for (const a of adsMeta) {
+      const dias = a.created_time
+        ? String(Math.round((todayDate.getTime() - new Date(a.created_time).getTime()) / 86400000))
+        : ''
+      const cr   = a.creative ?? {}
+      const link = cr.object_story_spec?.link_data ?? {}
+      const video = cr.object_story_spec?.video_data ?? {}
+      const isCarousel = Array.isArray(cr.object_story_spec?.template_data?.child_attachments) ||
+                         Array.isArray(cr.asset_feed_spec?.bodies)
+      const formato = cr.video_id || link.child_attachments === undefined && video.video_id
+        ? 'video'
+        : isCarousel ? 'carousel'
+        : (link.link || cr.object_story_spec) ? 'single_image'
+        : 'single_image'
+      adStatusMap.set(a.id, {
+        status:      (a.effective_status as string) ?? '',
+        dias,
+        headline:    (cr.title ?? link.name ?? video.title ?? '') as string,
+        corpo:       (cr.body  ?? link.message ?? video.message ?? '') as string,
+        description: (link.description ?? '') as string,
+        cta:         (link.call_to_action?.type ?? video.call_to_action?.type ?? '') as string,
+        thumbnail:   (cr.thumbnail_url ?? link.picture ?? '') as string,
+        landing_url: (link.link ?? '') as string,
+        formato,
       })
     }
 
@@ -398,6 +584,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                         : (imp > 0 ? ((spend / imp) * 1000).toFixed(2) : '')
       const ctrVal     = row.ctr ? Number(row.ctr).toFixed(2) : ''
       return { impressoes, cliques, alcance, frequencia, cpm: cpmVal, ctr: ctrVal }
+    }
+
+    function videoVal(row: any, field: string): string {
+      const v = Number(row[field]?.[0]?.value ?? 0)
+      return v > 0 ? String(v) : ''
+    }
+
+    function div2(a: number, b: number): string {
+      return b > 0 && a !== 0 ? (a / b).toFixed(2) : ''
+    }
+
+    function pct2(num: number, den: number): string {
+      return den > 0 && num !== 0 ? ((num / den) * 100).toFixed(2) : ''
     }
 
     function getDateFields(row: any) {
@@ -447,6 +646,37 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           const campKey       = camp.name.toLowerCase().trim()
           const campLeads     = hasUtm ? (utmCounts.leads[campKey] ?? 0) : 0
           const campVendas    = hasUtm ? (utmCounts.vendas[campKey] ?? 0) : 0
+
+          let variacao: VariacaoPeriodo | undefined
+          if (includeVariacao) {
+            const p = prevCampMap.get(camp.name)
+            if (!p || p.spend === 0) {
+              variacao = emptyVariacao()
+            } else {
+              const prevLeads  = hasUtm ? (prevUtmCounts.leads[campKey] ?? 0) : 0
+              const prevCplNum = prevLeads > 0 ? p.spend / prevLeads : 0
+              const currCpr    = campResults > 0 ? campSpend / campResults : 0
+              const prevCpr    = p.results   > 0 ? p.spend  / p.results   : 0
+              const currCpm    = campImp > 0 ? (campSpend / campImp) * 1000 : 0
+              const prevCpm    = p.impressions > 0 ? (p.spend / p.impressions) * 1000 : 0
+              const currCtr    = campImp > 0 ? (campClk / campImp) * 100 : 0
+              const prevCtr    = p.impressions > 0 ? (p.clicks / p.impressions) * 100 : 0
+              const currFreq   = campImp > 0 && campAlc > 0 ? campImp / campAlc : 0
+              const prevFreq   = p.impressions > 0 && p.reach > 0 ? p.impressions / p.reach : 0
+              const currCpl    = campLeads > 0 ? campSpend / campLeads : 0
+              variacao = {
+                investido:   varPct(campSpend,  p.spend),
+                resultados:  varPct(campResults, p.results),
+                cpr:         varPct(currCpr,     prevCpr),
+                cpm:         varPct(currCpm,     prevCpm),
+                ctr:         varPct(currCtr,     prevCtr),
+                frequencia:  varPct(currFreq,    prevFreq),
+                leads_reais: varPct(campLeads,   prevLeads),
+                cpl_real:    varPct(currCpl,     prevCplNum),
+              }
+            }
+          }
+
           rows.push({
             periodo_inicio:   since,
             periodo_fim:      until,
@@ -470,12 +700,37 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             frequencia:       campImp > 0 && campAlc > 0 ? (campImp / campAlc).toFixed(2) : '',
             cpm:              campImp > 0 ? ((campSpend / campImp) * 1000).toFixed(2) : '',
             ctr:              campImp > 0 ? ((campClk / campImp) * 100).toFixed(2) : '',
-            views_3s:         isVideo ? camp.adsets.reduce((s, r) => s + Number(r.video_thruplay_watched_actions?.[0]?.value ?? 0), 0).toString() : '',
-            views_25pct:      isVideo ? camp.adsets.reduce((s, r) => s + Number(r.video_p25_watched_actions?.[0]?.value ?? 0), 0).toString() : '',
-            leads_reais:      hasUtm ? String(campLeads) : '',
-            cpl_real:         hasUtm && campLeads > 0 ? (campSpend / campLeads).toFixed(2) : '',
-            vendas_reais:     hasUtm ? String(campVendas) : '',
-            cpv_real:         hasUtm && campVendas > 0 ? (campSpend / campVendas).toFixed(2) : '',
+            views_3s:               isVideo ? String(camp.adsets.reduce((s, r) => s + Number(r.video_thruplay_watched_actions?.[0]?.value ?? 0), 0)) : '',
+            views_25pct:            isVideo ? String(camp.adsets.reduce((s, r) => s + Number(r.video_p25_watched_actions?.[0]?.value ?? 0), 0)) : '',
+            views_50pct:            '',
+            views_75pct:            '',
+            views_100pct:           '',
+            video_avg_time_watched: '',
+            cpc:                    div2(campSpend, campClk),
+            hook_rate:              '',
+            hold_rate:              '',
+            thruplay_rate:          '',
+            quality_ranking:            '',
+            engagement_rate_ranking:    '',
+            conversion_rate_ranking:    '',
+            status_entrega:             '',
+            dias_desde_criacao:         '',
+            headline_texto:             '',
+            corpo_texto:                '',
+            description_texto:          '',
+            cta_botao:                  '',
+            thumbnail_url:              '',
+            landing_url_real:           '',
+            formato_criativo:           '',
+            receita_reais:            (() => { const r = utmCounts.receita[campKey]; return r > 0 ? r.toFixed(2) : '' })(),
+            roas_real:                (() => { const r = utmCounts.receita[campKey]; return r > 0 && campSpend > 0 ? (r / campSpend).toFixed(2) : '' })(),
+            ticket_medio_real:        (() => { const r = utmCounts.receita[campKey]; const v = campVendas; return r > 0 && v > 0 ? (r / v).toFixed(2) : '' })(),
+            lag_dias_conversao_medio: (() => { const l = utmCounts.lagDias[campKey]; return l > 0 ? l.toFixed(1) : '' })(),
+            leads_reais:            hasUtm ? String(campLeads) : '',
+            cpl_real:               hasUtm && campLeads > 0 ? (campSpend / campLeads).toFixed(2) : '',
+            vendas_reais:           hasUtm ? String(campVendas) : '',
+            cpv_real:               hasUtm && campVendas > 0 ? (campSpend / campVendas).toFixed(2) : '',
+            variacao_periodo_anterior: variacao,
           })
         }
 
@@ -488,12 +743,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             const lpv     = actionVal(adsetRow.actions, 'landing_page_view')
             const rm      = getReachMetrics(adsetRow, spend)
             const df      = getDateFields(adsetRow)
-            // adset: utm_medium = adset_name — leads somados de todos os criativos deste conjunto
-            const adsetPrefix = `${camp.name.toLowerCase().trim()}|||${adsetRow.adset_name.toLowerCase().trim()}|||`
-            const adsetLeads  = hasUtm
+            // adset: utm_medium = adset_name — leads/vendas somados de todos os criativos deste conjunto
+            const adsetPrefix  = `${camp.name.toLowerCase().trim()}|||${adsetRow.adset_name.toLowerCase().trim()}|||`
+            const adsetLeads   = hasUtm
               ? Object.entries(utmCounts.content)
                   .filter(([k]) => k.startsWith(adsetPrefix))
-                  .reduce((s, [, v]) => s + v, 0)
+                  .reduce((s, [, v]) => s + (v as number), 0)
+              : 0
+            const adsetVendas  = hasUtm
+              ? Object.entries(utmCounts.vendasContent)
+                  .filter(([k]) => k.startsWith(adsetPrefix))
+                  .reduce((s, [, v]) => s + (v as number), 0)
               : 0
 
             rows.push({
@@ -514,12 +774,36 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               cpr:              results > 0 ? (spend / results).toFixed(2) : '',
               taxa_conversao:   lpv > 0 ? ((results / lpv) * 100).toFixed(1) : '',
               ...rm,
-              views_3s:         isVideo ? String(Number(adsetRow.video_thruplay_watched_actions?.[0]?.value ?? 0)) : '',
-              views_25pct:      isVideo ? String(Number(adsetRow.video_p25_watched_actions?.[0]?.value ?? 0)) : '',
-              leads_reais:      hasUtm ? String(adsetLeads) : '',
-              cpl_real:         hasUtm && adsetLeads > 0 ? (spend / adsetLeads).toFixed(2) : '',
-              vendas_reais:     '',
-              cpv_real:         '',
+              views_3s:               isVideo ? videoVal(adsetRow, 'video_thruplay_watched_actions') : '',
+              views_25pct:            isVideo ? videoVal(adsetRow, 'video_p25_watched_actions') : '',
+              views_50pct:            '',
+              views_75pct:            '',
+              views_100pct:           '',
+              video_avg_time_watched: '',
+              cpc:                    div2(spend, Number(adsetRow.clicks ?? 0)),
+              hook_rate:              '',
+              hold_rate:              '',
+              thruplay_rate:          '',
+              quality_ranking:            '',
+              engagement_rate_ranking:    '',
+              conversion_rate_ranking:    '',
+              status_entrega:             '',
+              dias_desde_criacao:         '',
+              headline_texto:             '',
+              corpo_texto:                '',
+              description_texto:          '',
+              cta_botao:                  '',
+              thumbnail_url:              '',
+              landing_url_real:           '',
+              formato_criativo:           '',
+              receita_reais:            '',
+              roas_real:                '',
+              ticket_medio_real:        '',
+              lag_dias_conversao_medio: '',
+              leads_reais:            hasUtm ? String(adsetLeads) : '',
+              cpl_real:               hasUtm && adsetLeads > 0 ? (spend / adsetLeads).toFixed(2) : '',
+              vendas_reais:           hasUtm ? String(adsetVendas) : '',
+              cpv_real:               hasUtm && adsetVendas > 0 ? (spend / adsetVendas).toFixed(2) : '',
             })
 
             if (level === 'ad') {
@@ -529,8 +813,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 const adResults = actionVal(ad.actions, ...rt)
                 const adRm      = getReachMetrics(ad, adSpend)
                 const adDf      = getDateFields(ad)
-                const contentKey = `${camp.name.toLowerCase().trim()}|||${adsetRow.adset_name.toLowerCase().trim()}|||${ad.ad_name.toLowerCase().trim()}`
+                const contentKey  = `${camp.name.toLowerCase().trim()}|||${adsetRow.adset_name.toLowerCase().trim()}|||${ad.ad_name.toLowerCase().trim()}`
                 const adLeads    = hasUtm ? (utmCounts.content[contentKey] ?? 0) : 0
+                const adVendas   = hasUtm ? (utmCounts.vendasContent[contentKey] ?? 0) : 0
                 rows.push({
                   periodo_inicio:   since,
                   periodo_fim:      until,
@@ -549,12 +834,36 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                   cpr:              adResults > 0 ? (adSpend / adResults).toFixed(2) : '',
                   taxa_conversao:   '',
                   ...adRm,
-                  views_3s:         '',
-                  views_25pct:      '',
-                  leads_reais:      hasUtm ? String(adLeads) : '',
-                  cpl_real:         hasUtm && adLeads > 0 ? (adSpend / adLeads).toFixed(2) : '',
-                  vendas_reais:     '',
-                  cpv_real:         '',
+                  views_3s:               videoVal(ad, 'video_thruplay_watched_actions'),
+                  views_25pct:            videoVal(ad, 'video_p25_watched_actions'),
+                  views_50pct:            videoVal(ad, 'video_p50_watched_actions'),
+                  views_75pct:            videoVal(ad, 'video_p75_watched_actions'),
+                  views_100pct:           videoVal(ad, 'video_p100_watched_actions'),
+                  video_avg_time_watched: videoVal(ad, 'video_avg_time_watched_actions'),
+                  cpc:                    div2(adSpend, Number(ad.clicks ?? 0)),
+                  hook_rate:              pct2(Number(ad.video_thruplay_watched_actions?.[0]?.value ?? 0), Number(ad.impressions ?? 0)),
+                  hold_rate:              pct2(Number(ad.video_p25_watched_actions?.[0]?.value ?? 0), Number(ad.video_thruplay_watched_actions?.[0]?.value ?? 0)),
+                  thruplay_rate:          pct2(Number(ad.video_p100_watched_actions?.[0]?.value ?? 0), Number(ad.video_thruplay_watched_actions?.[0]?.value ?? 0)),
+                  quality_ranking:            (ad.quality_ranking as string) ?? '',
+                  engagement_rate_ranking:    (ad.engagement_rate_ranking as string) ?? '',
+                  conversion_rate_ranking:    (ad.conversion_rate_ranking as string) ?? '',
+                  status_entrega:             adStatusMap.get(ad.ad_id)?.status ?? '',
+                  dias_desde_criacao:         adStatusMap.get(ad.ad_id)?.dias ?? '',
+                  headline_texto:             adStatusMap.get(ad.ad_id)?.headline ?? '',
+                  corpo_texto:                adStatusMap.get(ad.ad_id)?.corpo ?? '',
+                  description_texto:          adStatusMap.get(ad.ad_id)?.description ?? '',
+                  cta_botao:                  adStatusMap.get(ad.ad_id)?.cta ?? '',
+                  thumbnail_url:              adStatusMap.get(ad.ad_id)?.thumbnail ?? '',
+                  landing_url_real:           adStatusMap.get(ad.ad_id)?.landing_url ?? '',
+                  formato_criativo:           adStatusMap.get(ad.ad_id)?.formato ?? '',
+                  receita_reais:            '',
+                  roas_real:                '',
+                  ticket_medio_real:        '',
+                  lag_dias_conversao_medio: '',
+                  leads_reais:            hasUtm ? String(adLeads) : '',
+                  cpl_real:               hasUtm && adLeads > 0 ? (adSpend / adLeads).toFixed(2) : '',
+                  vendas_reais:           hasUtm ? String(adVendas) : '',
+                  cpv_real:               hasUtm && adVendas > 0 ? (adSpend / adVendas).toFixed(2) : '',
                 })
               }
             }
@@ -581,19 +890,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // CSV
-    const headers: (keyof ReportRow)[] = [
+    type CsvField = Exclude<keyof ReportRow, 'variacao_periodo_anterior'>
+    const headers: CsvField[] = [
       'periodo_inicio', 'periodo_fim', 'data', 'semana',
       'conta', 'etapa', 'etapa_label',
       'campanha', 'conjunto', 'anuncio',
       'orcamento_diario', 'orcamento_total', 'investido',
       'resultados', 'cpr', 'taxa_conversao',
       'impressoes', 'cliques', 'alcance', 'frequencia', 'cpm', 'ctr',
-      'views_3s', 'views_25pct',
+      'cpc',
+      'views_3s', 'views_25pct', 'views_50pct', 'views_75pct', 'views_100pct', 'video_avg_time_watched',
+      'hook_rate', 'hold_rate', 'thruplay_rate',
+      'quality_ranking', 'engagement_rate_ranking', 'conversion_rate_ranking', 'status_entrega', 'dias_desde_criacao',
+      'receita_reais', 'roas_real', 'ticket_medio_real', 'lag_dias_conversao_medio',
       'leads_reais', 'cpl_real', 'vendas_reais', 'cpv_real',
     ]
     const csvLines = [
       headers.join(','),
-      ...rows.map(r => headers.map(h => csvEscape(r[h])).join(',')),
+      ...rows.map(r => headers.map(h => csvEscape(r[h] as string)).join(',')),
     ]
 
     res.setHeader('Content-Type', 'text/csv; charset=utf-8')
