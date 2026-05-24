@@ -22,6 +22,7 @@ import TabAnalisesCruzadas from './TabAnalisesCruzadas'
 import TabPerpetuo from './TabPerpetuo'
 import TabUtmLeads from './TabUtmLeads'
 import TabReport from './TabReport'
+import TabConfigProdutos from './TabConfigProdutos'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -62,6 +63,7 @@ const USER_NAV: NavItem[] = [
 const ADMIN_NAV: NavItem[] = [
   { id: 'metas-mensais',    label: 'Metas Mensais',    icon: Target   },
   { id: 'instagram-gestor', label: 'Instagram Gestor', icon: Settings },
+  { id: 'config-produtos',  label: 'Produtos/Campanhas', icon: ShoppingCart },
 ]
 
 // ─── Sidebar nav button ───────────────────────────────────────────────────────
@@ -319,6 +321,9 @@ export default function DashboardLayout({ token, role, userName, onLogout }: Das
                 </TabsContent>
                 <TabsContent value="instagram-gestor" className="mt-0">
                   <TabInstagramGestor token={token} enabled={activeTab === 'instagram-gestor'} />
+                </TabsContent>
+                <TabsContent value="config-produtos" className="mt-0">
+                  <TabConfigProdutos />
                 </TabsContent>
               </>
             )}
