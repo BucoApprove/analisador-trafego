@@ -30,6 +30,31 @@ function getSupabase() {
   )
 }
 
+interface ProdutoMap {
+  prefixo:     string       // prefixo do nome da campanha (lowercase)
+  produto_ids: number[]     // IDs do produto na Hotmart/Greenn
+  label:       string       // nome legível
+}
+
+async function loadProdutoMap(account: string): Promise<ProdutoMap[]> {
+  try {
+    const sb = getSupabase()
+    const { data } = await sb
+      .from('campaign_produto_map')
+      .select('prefixo, produto_ids, label')
+      .eq('account', account)
+    if (!data) return []
+    return data.map(r => ({
+      prefixo:     (r.prefixo as string).toLowerCase().trim(),
+      produto_ids: (r.produto_ids as number[]) ?? [],
+      label:       (r.label as string) ?? '',
+    }))
+  } catch {
+    return []
+  }
+}
+
+
 async function loadCustomFilters(account: string, views: string[]): Promise<Record<string, NameFilter>> {
   try {
     const sb = getSupabase()
@@ -153,15 +178,16 @@ function csvEscape(val: string | number): string {
 const VIEWS_WITH_UTM = new Set(['etapa2', 'etapa4'])
 
 interface UtmCounts {
-  leads:          Record<string, number>  // utm_campaign → leads únicos
-  content:        Record<string, number>  // utm_campaign|||utm_medium|||utm_content → leads
-  vendas:         Record<string, number>  // utm_campaign → compradores únicos
-  vendasContent:  Record<string, number>  // utm_campaign|||utm_medium|||utm_content → compradores únicos
-  receita:        Record<string, number>  // utm_campaign → soma Valor_Pago_pelo_Comprador
-  lagDias:        Record<string, number>  // utm_campaign → média de dias lead→compra
+  leads:               Record<string, number>  // utm_campaign → leads únicos
+  content:             Record<string, number>  // utm_campaign|||utm_medium|||utm_content → leads
+  vendas:              Record<string, number>  // utm_campaign → compradores únicos via UTM
+  vendasContent:       Record<string, number>  // utm_campaign|||utm_medium|||utm_content → compradores únicos
+  receita:             Record<string, number>  // utm_campaign → soma Valor_Pago_pelo_Comprador
+  lagDias:             Record<string, number>  // utm_campaign → média de dias lead→compra
+  vendasTotais:        Record<string, number>  // utm_campaign → vendas do produto no período (sem join de lead)
 }
 
-async function fetchUtmCounts(since: string, until: string): Promise<UtmCounts> {
+async function fetchUtmCounts(since: string, until: string, produtoMap: ProdutoMap[] = []): Promise<UtmCounts> {
   const tLeads  = tableLeads()
   const tVendas = tableVendas()
   const dateParams = [
@@ -174,7 +200,7 @@ async function fetchUtmCounts(since: string, until: string): Promise<UtmCounts> 
     `REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(` +
     `${col}, '%5B', '['), '%5b', '['), '%5D', ']'), '%5d', ']'), '%20', ' '), '+', ' '), '%28', '('), '%29', ')'), '%2C', ',')`
 
-  const [campaignRows, contentRows, salesRows, salesContentRows, receitaRows] = await Promise.all([
+  const [campaignRows, contentRows, salesRows, salesContentRows, receitaRows, vendasProdutoRows] = await Promise.all([
     bqQuery(
       `SELECT ${decodeUtm('utm_campaign')} AS key, COUNT(*) AS cnt
        FROM ${tLeads}
@@ -236,6 +262,17 @@ async function fetchUtmCounts(since: string, until: string): Promise<UtmCounts> 
        GROUP BY 1`,
       dateParams,
     ),
+    // vendas totais por produto_id no período (sem join de leads)
+    produtoMap.length > 0
+      ? bqQuery(
+          `SELECT ID_do_Produto AS produto_id, COUNT(*) AS cnt
+           FROM ${tVendas}
+           WHERE DATE(Data_de_Aprova____o) BETWEEN @since AND @until
+             AND Status = 'Aprovado'
+           GROUP BY 1`,
+          dateParams,
+        )
+      : Promise.resolve({ rows: [], totalRows: 0 }),
   ])
 
   // Chaves normalizadas (lowercase + trim) para match case-insensitive com nomes do Meta
@@ -266,7 +303,21 @@ async function fetchUtmCounts(since: string, until: string): Promise<UtmCounts> 
     }
   }
 
-  return { leads, content, vendas, vendasContent, receita, lagDias }
+  // Monta mapa produto_id → qty de vendas no período
+  const vendasPorProduto: Record<number, number> = {}
+  for (const r of vendasProdutoRows.rows) {
+    if (r.produto_id) vendasPorProduto[parseInt(r.produto_id)] = parseInt(r.cnt ?? '0')
+  }
+
+  // Para cada entrada do produtoMap, soma as vendas dos produto_ids e associa ao prefixo
+  // O mapa final é campanha_key → vendas totais (preenchido no handler cruzando com nome da campanha)
+  const vendasTotais: Record<string, number> = {}
+  for (const entry of produtoMap) {
+    const total = entry.produto_ids.reduce((sum, id) => sum + (vendasPorProduto[id] ?? 0), 0)
+    vendasTotais[entry.prefixo] = total
+  }
+
+  return { leads, content, vendas, vendasContent, receita, lagDias, vendasTotais }
 }
 
 // ─── Tipo de linha do relatório ───────────────────────────────────────────────
@@ -324,6 +375,7 @@ interface ReportRow {
   cpl_real:             string  // investido / leads_reais
   vendas_reais:         string  // compradores únicos via UTM (BigQuery) — prioridade para análise
   cpv_real:             string  // investido / vendas_reais
+  vendas_totais_periodo: string  // vendas do produto no período, sem join de lead
   variacao_periodo_anterior?: VariacaoPeriodo
 }
 
@@ -394,8 +446,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(400).json({ error: `Nenhuma view válida. Opções: ${accountViews.join(', ')}` })
   }
 
-  // Carrega filtros customizados do Supabase (sobrescreve NAME_FILTERS quando existir)
-  const customFilters = await loadCustomFilters(account, selectedViews)
+  // Carrega filtros customizados e mapa de produtos do Supabase em paralelo
+  const [customFilters, produtoMap] = await Promise.all([
+    loadCustomFilters(account, selectedViews),
+    loadProdutoMap(account),
+  ])
   const effectiveFilters: Record<string, NameFilter> = {}
   for (const v of selectedViews) {
     effectiveFilters[v] = customFilters[v] ?? NAME_FILTERS[v]
@@ -492,7 +547,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       metaGetAll(adsetsUrl),
       metaGetAll(campaignUrl),
       metaGetAll(adsMetaUrl),
-      needsUtm ? fetchUtmCounts(since, until) : Promise.resolve({ leads: {}, content: {}, vendas: {}, vendasContent: {} } as UtmCounts),
+      needsUtm ? fetchUtmCounts(since, until, produtoMap) : Promise.resolve({ leads: {}, content: {}, vendas: {}, vendasContent: {}, receita: {}, lagDias: {}, vendasTotais: {} } as UtmCounts),
       needsUtm && includeVariacao ? fetchPrevUtmCounts(prev.since, prev.until) : Promise.resolve({ leads: {}, content: {}, vendas: {}, vendasContent: {} } as UtmCounts),
       prevAdsetInsightUrl ? metaGetAll(prevAdsetInsightUrl) : Promise.resolve([] as any[]),
     ])
@@ -727,6 +782,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             cpl_real:               hasUtm && campLeads > 0 ? (campSpend / campLeads).toFixed(2) : '',
             vendas_reais:           hasUtm ? String(campVendas) : '',
             cpv_real:               hasUtm && campVendas > 0 ? (campSpend / campVendas).toFixed(2) : '',
+            vendas_totais_periodo:  (() => { const lower = camp.name.toLowerCase().trim(); const entry = produtoMap.find(e => lower.includes(e.prefixo)); if (!entry) return ''; const t = utmCounts.vendasTotais[entry.prefixo] ?? 0; return t > 0 ? String(t) : '' })(),
             variacao_periodo_anterior: variacao,
           })
         }
@@ -801,6 +857,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               cpl_real:               hasUtm && adsetLeads > 0 ? (spend / adsetLeads).toFixed(2) : '',
               vendas_reais:           hasUtm ? String(adsetVendas) : '',
               cpv_real:               hasUtm && adsetVendas > 0 ? (spend / adsetVendas).toFixed(2) : '',
+              vendas_totais_periodo:  '',
             })
 
             if (level === 'ad') {
@@ -861,6 +918,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                   cpl_real:               hasUtm && adLeads > 0 ? (adSpend / adLeads).toFixed(2) : '',
                   vendas_reais:           hasUtm ? String(adVendas) : '',
                   cpv_real:               hasUtm && adVendas > 0 ? (adSpend / adVendas).toFixed(2) : '',
+                  vendas_totais_periodo:  '',
                 })
               }
             }
@@ -900,7 +958,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       'hook_rate', 'hold_rate', 'thruplay_rate',
       'quality_ranking', 'engagement_rate_ranking', 'conversion_rate_ranking', 'status_entrega', 'dias_desde_criacao',
       'receita_reais', 'roas_real', 'ticket_medio_real', 'lag_dias_conversao_medio',
-      'leads_reais', 'cpl_real', 'vendas_reais', 'cpv_real',
+      'leads_reais', 'cpl_real', 'vendas_reais', 'cpv_real', 'vendas_totais_periodo',
     ]
     const csvLines = [
       headers.join(','),
