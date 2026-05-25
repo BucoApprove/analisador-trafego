@@ -13,6 +13,8 @@
  *   format         — csv | json  (padrão: csv)
  *   level          — campaign | adset | ad  (padrão: adset)
  *   time_increment — 1 (diário) | 7 (semanal) — opcional; sem esse param retorna agregado
+ *   fields         — minimal | standard (padrão) | full
+ *   refresh        — true para forçar re-fetch Meta ignorando cache
  *
  * Exemplo de URL para IA:
  *   https://analisador-trafego.vercel.app/api/report?token=SEU_TOKEN&account=conta1&views=etapa2,etapa4&since=2026-04-01&until=2026-04-20&format=json&level=adset
@@ -21,6 +23,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { bqQuery, tableLeads, tableVendas } from './_bq.js'
 import { createClient } from '@supabase/supabase-js'
+import { createHash } from 'node:crypto'
 
 function getSupabase() {
   return createClient(
@@ -28,6 +31,49 @@ function getSupabase() {
     process.env.SUPABASE_SERVICE_KEY ?? '',
     { auth: { persistSession: false } },
   )
+}
+
+// ─── Cache helpers ────────────────────────────────────────────────────────────
+
+function makeCacheKey(parts: Record<string, string>): string {
+  const canonical = Object.keys(parts).sort().map(k => `${k}=${parts[k]}`).join('|')
+  return createHash('sha1').update(canonical).digest('hex')
+}
+
+async function cacheGet(key: string): Promise<{ data: any; stale: boolean } | null> {
+  try {
+    const sb = getSupabase()
+    const { data } = await sb
+      .from('api_cache')
+      .select('response, expires_at')
+      .eq('cache_key', key)
+      .single()
+    if (!data) return null
+    const stale = data.expires_at !== null && new Date(data.expires_at) <= new Date()
+    // fire-and-forget hit count update
+    sb.from('api_cache')
+      .update({ hit_count: sb.rpc as any, last_hit_at: new Date().toISOString() })
+      .eq('cache_key', key)
+      .then(() => {})
+    return { data: data.response, stale }
+  } catch { return null }
+}
+
+async function cacheSet(key: string, params: Record<string, string>, response: any, closedPeriod: boolean): Promise<void> {
+  try {
+    const sb = getSupabase()
+    const now = new Date()
+    const expires_at = closedPeriod ? null : new Date(now.getTime() + 600_000).toISOString()
+    await sb.from('api_cache').upsert({
+      cache_key:   key,
+      params:      params,
+      response:    response,
+      fetched_at:  now.toISOString(),
+      expires_at:  expires_at,
+      hit_count:   0,
+      last_hit_at: null,
+    }, { onConflict: 'cache_key' })
+  } catch { /* cache write failure never breaks the response */ }
 }
 
 interface ProdutoMap {
@@ -129,6 +175,13 @@ function actionVal(
   )
 }
 
+class MetaRateLimitError extends Error {
+  constructor(public retryAfter: number = 600) {
+    super(`Meta rate limit (code 17). Retry after ${retryAfter}s.`)
+    this.name = 'MetaRateLimitError'
+  }
+}
+
 async function metaGetAll(url: URL): Promise<any[]> {
   const allData: any[] = []
   let nextUrl: string | null = url.toString()
@@ -136,6 +189,11 @@ async function metaGetAll(url: URL): Promise<any[]> {
     const res = await fetch(nextUrl)
     if (!res.ok) {
       const txt = await res.text()
+      // Detecta rate limit code 17 / subcode 2446079
+      try {
+        const errJson = JSON.parse(txt)
+        if (errJson?.error?.code === 17) throw new MetaRateLimitError(600)
+      } catch (e) { if (e instanceof MetaRateLimitError) throw e }
       throw new Error(`Meta API ${res.status}: ${txt.substring(0, 300)}`)
     }
     const json = await res.json() as Record<string, unknown>
@@ -472,22 +530,72 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const tiRaw        = typeof req.query.time_increment === 'string' ? req.query.time_increment : ''
   const timeIncrement = tiRaw === '1' ? 1 : tiRaw === '7' ? 7 : null
 
-  const includeParam  = typeof req.query.include === 'string' ? req.query.include.split(',') : []
+  const includeParam    = typeof req.query.include === 'string' ? req.query.include.split(',') : []
   const includeVariacao = includeParam.includes('variacao')
 
-  const acctId    = ACCOUNT_IDS[account]
-  const timeRange = JSON.stringify({ since, until })
+  const fieldsParam = typeof req.query.fields === 'string'
+    && ['minimal', 'standard', 'full'].includes(req.query.fields)
+    ? req.query.fields as 'minimal' | 'standard' | 'full'
+    : 'standard'
 
-  // Campos de insights — inclui métricas de alcance/impressão
-  const insightFields = [
-    'campaign_id', 'campaign_name',
-    'adset_id', 'adset_name',
-    'spend', 'actions',
-    'impressions', 'clicks', 'reach', 'frequency', 'cpm', 'ctr',
-    'video_thruplay_watched_actions', 'video_p25_watched_actions',
-  ].join(',')
+  const forceRefresh = req.query.refresh === 'true' || req.query.cache === 'false'
+
+  const acctId       = ACCOUNT_IDS[account]
+  const timeRange    = JSON.stringify({ since, until })
+  const closedPeriod = until < today
+
+  // Cache key — inclui todos os parâmetros que afetam o resultado
+  const cacheParams = { account, views: selectedViews.join(','), since, until, level, fields: fieldsParam, time_increment: String(timeIncrement ?? '') }
+  const cacheKey    = makeCacheKey(cacheParams)
+
+  // Campos de insights por nível de detalhe
+  const FIELDS_MINIMAL  = ['campaign_id', 'campaign_name', 'adset_id', 'adset_name', 'spend', 'actions']
+  const FIELDS_STANDARD = [...FIELDS_MINIMAL, 'impressions', 'clicks', 'reach', 'frequency', 'cpm', 'ctr']
+  const FIELDS_FULL     = [...FIELDS_STANDARD, 'video_thruplay_watched_actions', 'video_p25_watched_actions']
+
+  const insightFieldSet = fieldsParam === 'minimal' ? FIELDS_MINIMAL : fieldsParam === 'full' ? FIELDS_FULL : FIELDS_STANDARD
+  const insightFields   = insightFieldSet.join(',')
 
   try {
+    // ── Cache read ────────────────────────────────────────────────────────────
+    if (!forceRefresh) {
+      const cached = await cacheGet(cacheKey)
+      if (cached && !cached.stale) {
+        const payload = cached.data
+        if (format === 'json') {
+          res.setHeader('Content-Type', 'application/json; charset=utf-8')
+          res.setHeader('X-Cache', 'HIT')
+          return res.json(payload)
+        }
+        // CSV from cached JSON payload
+        if (payload?.dados) {
+          type CsvField = Exclude<keyof ReportRow, 'variacao_periodo_anterior'>
+          const headers: CsvField[] = [
+            'periodo_inicio', 'periodo_fim', 'data', 'semana',
+            'conta', 'etapa', 'etapa_label',
+            'campanha', 'conjunto', 'anuncio',
+            'orcamento_diario', 'orcamento_total', 'investido',
+            'resultados', 'cpr', 'taxa_conversao',
+            'impressoes', 'cliques', 'alcance', 'frequencia', 'cpm', 'ctr',
+            'cpc',
+            'views_3s', 'views_25pct', 'views_50pct', 'views_75pct', 'views_100pct', 'video_avg_time_watched',
+            'hook_rate', 'hold_rate', 'thruplay_rate',
+            'quality_ranking', 'engagement_rate_ranking', 'conversion_rate_ranking', 'status_entrega', 'dias_desde_criacao',
+            'receita_reais', 'roas_real', 'ticket_medio_real', 'lag_dias_conversao_medio',
+            'leads_reais', 'cpl_real', 'vendas_reais', 'cpv_real', 'vendas_totais_periodo', 'produto',
+          ]
+          const csvLines = [
+            headers.join(','),
+            ...payload.dados.map((r: any) => headers.map((h: string) => csvEscape(r[h] ?? '')).join(',')),
+          ]
+          res.setHeader('Content-Type', 'text/csv; charset=utf-8')
+          res.setHeader('Content-Disposition', `attachment; filename="relatorio_${since}_${until}.csv"`)
+          res.setHeader('X-Cache', 'HIT')
+          return res.send('﻿' + csvLines.join('\r\n'))
+        }
+      }
+    }
+
     // ── Busca insights (adset e ad) ───────────────────────────────────────────
 
     const adsetInsightUrl = new URL(`${META_BASE}/${acctId}/insights`)
@@ -932,19 +1040,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // ── Resposta ──────────────────────────────────────────────────────────────
 
+    const jsonPayload = {
+      gerado_em:      new Date().toISOString(),
+      conta:          account,
+      etapas:         selectedViews,
+      periodo:        { since, until },
+      nivel:          level,
+      time_increment: timeIncrement ?? 'aggregated',
+      total_linhas:   rows.length,
+      dados:          rows,
+    }
+
+    // Salva no cache (fire-and-forget, não bloqueia a resposta)
+    cacheSet(cacheKey, cacheParams, jsonPayload, closedPeriod).catch(() => {})
+
     if (format === 'json') {
       res.setHeader('Content-Type', 'application/json; charset=utf-8')
       res.setHeader('Content-Disposition', `attachment; filename="relatorio_${since}_${until}.json"`)
-      return res.json({
-        gerado_em:      new Date().toISOString(),
-        conta:          account,
-        etapas:         selectedViews,
-        periodo:        { since, until },
-        nivel:          level,
-        time_increment: timeIncrement ?? 'aggregated',
-        total_linhas:   rows.length,
-        dados:          rows,
-      })
+      res.setHeader('X-Cache', 'MISS')
+      return res.json(jsonPayload)
     }
 
     // CSV
@@ -970,10 +1084,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     res.setHeader('Content-Type', 'text/csv; charset=utf-8')
     res.setHeader('Content-Disposition', `attachment; filename="relatorio_${since}_${until}.csv"`)
+    res.setHeader('X-Cache', 'MISS')
     return res.send('﻿' + csvLines.join('\r\n'))
 
   } catch (err: any) {
     console.error('report error:', err)
+
+    // Rate limit Meta (code 17) — tenta servir cache stale se existir
+    if (err instanceof MetaRateLimitError) {
+      const staled = await cacheGet(cacheKey).catch(() => null)
+      if (staled?.data) {
+        res.setHeader('X-Stale-Cache', 'true')
+        res.setHeader('X-Retry-After', String(err.retryAfter))
+        res.setHeader('Content-Type', 'application/json; charset=utf-8')
+        return res.status(200).json(staled.data)
+      }
+      res.setHeader('Retry-After', String(err.retryAfter))
+      return res.status(429).json({ error: 'Meta API rate limit atingido. Tente novamente em 10 min.', retry_after: err.retryAfter })
+    }
+
     return res.status(500).json({ error: err.message ?? 'Erro interno' })
   }
 }

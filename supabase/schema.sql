@@ -49,6 +49,23 @@ alter table activity_comments disable row level security;
 
 -- ─────────────────────────────────────────────────────────────────────────────
 
+-- Cache de respostas da /api/report (anti rate-limit Meta)
+-- Período fechado (until < hoje): expires_at = NULL (cache eterno)
+-- Período aberto (until = hoje):  expires_at = fetched_at + 600s
+create table if not exists api_cache (
+  cache_key   text primary key,
+  params      jsonb not null,
+  response    jsonb not null,
+  fetched_at  timestamptz not null default now(),
+  expires_at  timestamptz,
+  hit_count   int not null default 0,
+  last_hit_at timestamptz
+);
+create index if not exists api_cache_expires_idx on api_cache(expires_at);
+alter table api_cache disable row level security;
+
+-- ─────────────────────────────────────────────────────────────────────────────
+
 -- Cache genérico de relatórios (ManyChat, metas mensais, etc.)
 -- Chave ex: "manychat-monthly", "goals-2025-05"
 create table if not exists report_cache (
