@@ -559,6 +559,7 @@ interface ReportRow {
   cpv_any:               string  // investido / vendas_any
   vendas_last:           string  // last touch: compradores cujo último toque foi neste anúncio/conjunto/campanha
   cpv_last:              string  // investido / vendas_last
+  _debug_contentKey?:    string
   variacao_periodo_anterior?: VariacaoPeriodo
 }
 
@@ -1176,6 +1177,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                   cpv_any:                hasUtm && adVendas > 0 ? (adSpend / adVendas).toFixed(2) : '',
                   vendas_last:            (() => { const byId = utmCounts.vendasLastByAdId[String(ad.ad_id)] ?? 0; const v = byId > 0 ? byId : (utmCounts.vendasLastContent[contentKey] ?? 0); return hasUtm ? String(v) : '' })(),
                   cpv_last:               (() => { const byId = utmCounts.vendasLastByAdId[String(ad.ad_id)] ?? 0; const v = byId > 0 ? byId : (utmCounts.vendasLastContent[contentKey] ?? 0); return hasUtm && v > 0 ? (adSpend / v).toFixed(2) : '' })(),
+                  _debug_contentKey:      contentKey,
                 })
               }
             }
