@@ -238,9 +238,11 @@ const VIEWS_WITH_UTM = new Set(['etapa2', 'etapa4'])
 interface UtmCounts {
   leads:               Record<string, number>  // utm_campaign → leads únicos
   content:             Record<string, number>  // utm_campaign|||utm_medium|||utm_content → leads
-  vendas:              Record<string, number>  // utm_campaign → compradores únicos via UTM
-  vendasContent:       Record<string, number>  // utm_campaign|||utm_medium|||utm_content → compradores únicos
-  vendasPorAdId:       Record<string, number>  // ad_id (utm_content numérico) → compradores únicos
+  vendas:              Record<string, number>  // utm_campaign → compradores únicos via UTM (any touch)
+  vendasContent:       Record<string, number>  // utm_campaign|||utm_medium|||utm_content → compradores únicos (any touch)
+  vendasPorAdId:       Record<string, number>  // ad_id numérico → compradores únicos (any touch)
+  vendasLastCamp:      Record<string, number>  // utm_campaign → compradores únicos (last touch)
+  vendasLastContent:   Record<string, number>  // utm_campaign|||utm_medium|||utm_content → compradores únicos (last touch)
   receita:             Record<string, number>  // utm_campaign → soma Valor_Pago_pelo_Comprador
   lagDias:             Record<string, number>  // utm_campaign → média de dias lead→compra
   vendasTotais:        Record<string, number>  // utm_campaign → vendas do produto no período (sem join de lead)
@@ -259,7 +261,7 @@ async function fetchUtmCounts(since: string, until: string, produtoMap: ProdutoM
     `REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(` +
     `${col}, '%5B', '['), '%5b', '['), '%5D', ']'), '%5d', ']'), '%20', ' '), '+', ' '), '%28', '('), '%29', ')'), '%2C', ',')`
 
-  const [campaignRows, contentRows, salesRows, salesContentRows, vendasAdIdRows, receitaRows, vendasProdutoRows] = await Promise.all([
+  const [campaignRows, contentRows, salesRows, salesContentRows, vendasAdIdRows, lastCampRows, lastContentRows, receitaRows, vendasProdutoRows] = await Promise.all([
     bqQuery(
       `SELECT ${decodeUtm('utm_campaign')} AS key, COUNT(*) AS cnt
        FROM ${tLeads}
@@ -322,6 +324,53 @@ async function fetchUtmCounts(since: string, until: string, produtoMap: ProdutoM
        GROUP BY 1`,
       dateParams,
     ),
+    // last touch por campanha — lead mais recente antes da compra
+    bqQuery(
+      `WITH ranked AS (
+         SELECT
+           ${decodeUtm('l.utm_campaign')} AS campaign,
+           LOWER(TRIM(l.lead_email)) AS email,
+           ROW_NUMBER() OVER (
+             PARTITION BY LOWER(TRIM(l.lead_email)), LOWER(TRIM(s.E_mail_do_Comprador))
+             ORDER BY l.lead_register DESC
+           ) AS rn
+         FROM ${tLeads} l
+         INNER JOIN ${tVendas} s
+           ON LOWER(TRIM(l.lead_email)) = LOWER(TRIM(s.E_mail_do_Comprador))
+         WHERE l.utm_campaign IS NOT NULL AND l.utm_campaign != ''
+           AND l.lead_register <= s.Data_de_Aprova____o
+           AND DATE(s.Data_de_Aprova____o) BETWEEN @since AND @until
+       )
+       SELECT campaign AS key, COUNT(DISTINCT email) AS cnt
+       FROM ranked WHERE rn = 1
+       GROUP BY 1`,
+      dateParams,
+    ),
+    // last touch por criativo (campaign|||medium|||content)
+    bqQuery(
+      `WITH ranked AS (
+         SELECT
+           ${decodeUtm('l.utm_campaign')} AS campaign,
+           ${decodeUtm('l.utm_medium')}   AS medium,
+           ${decodeUtm('l.utm_content')}  AS content,
+           LOWER(TRIM(l.lead_email)) AS email,
+           ROW_NUMBER() OVER (
+             PARTITION BY LOWER(TRIM(l.lead_email)), LOWER(TRIM(s.E_mail_do_Comprador))
+             ORDER BY l.lead_register DESC
+           ) AS rn
+         FROM ${tLeads} l
+         INNER JOIN ${tVendas} s
+           ON LOWER(TRIM(l.lead_email)) = LOWER(TRIM(s.E_mail_do_Comprador))
+         WHERE l.utm_campaign IS NOT NULL AND l.utm_campaign != ''
+           AND l.utm_content  IS NOT NULL AND l.utm_content  != ''
+           AND l.lead_register <= s.Data_de_Aprova____o
+           AND DATE(s.Data_de_Aprova____o) BETWEEN @since AND @until
+       )
+       SELECT campaign, medium, content, COUNT(DISTINCT email) AS cnt
+       FROM ranked WHERE rn = 1
+       GROUP BY 1, 2, 3`,
+      dateParams,
+    ),
     // receita e lag por campanha
     bqQuery(
       `SELECT ${decodeUtm('l.utm_campaign')} AS key,
@@ -382,6 +431,16 @@ async function fetchUtmCounts(since: string, until: string, produtoMap: ProdutoM
     if (r.ad_id) vendasPorAdId[String(r.ad_id).trim()] = parseInt(r.cnt ?? '0')
   }
 
+  // Last touch por campanha
+  const vendasLastCamp: Record<string, number> = {}
+  for (const r of lastCampRows.rows) if (r.key) vendasLastCamp[norm(r.key)] = parseInt(r.cnt ?? '0')
+
+  // Last touch por criativo
+  const vendasLastContent: Record<string, number> = {}
+  for (const r of lastContentRows.rows) {
+    if (r.content) vendasLastContent[`${norm(r.campaign ?? '')}|||${norm(r.medium ?? '')}|||${norm(r.content)}`] = parseInt(r.cnt ?? '0')
+  }
+
   // Monta mapa produto_id (string) → qty de vendas no período
   const vendasPorProduto: Record<string, number> = {}
   for (const r of vendasProdutoRows.rows) {
@@ -395,7 +454,7 @@ async function fetchUtmCounts(since: string, until: string, produtoMap: ProdutoM
     vendasTotais[entry.prefixo] = total
   }
 
-  return { leads, content, vendas, vendasContent, vendasPorAdId, receita, lagDias, vendasTotais }
+  return { leads, content, vendas, vendasContent, vendasPorAdId, vendasLastCamp, vendasLastContent, receita, lagDias, vendasTotais }
 }
 
 // ─── Tipo de linha do relatório ───────────────────────────────────────────────
@@ -455,6 +514,10 @@ interface ReportRow {
   cpv_real:             string  // investido / vendas_reais
   vendas_totais_periodo: string  // vendas do produto no período, sem join de lead
   produto:               string  // label do produto vendido (ex: "Imersão Enare"), ou "" se não mapeado
+  vendas_any:            string  // any touch: compradores que tocaram neste anúncio/conjunto/campanha
+  cpv_any:               string  // investido / vendas_any
+  vendas_last:           string  // last touch: compradores cujo último toque foi neste anúncio/conjunto/campanha
+  cpv_last:              string  // investido / vendas_last
   variacao_periodo_anterior?: VariacaoPeriodo
 }
 
@@ -604,6 +667,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             'quality_ranking', 'engagement_rate_ranking', 'conversion_rate_ranking', 'status_entrega', 'dias_desde_criacao',
             'receita_reais', 'roas_real', 'ticket_medio_real', 'lag_dias_conversao_medio',
             'leads_reais', 'cpl_real', 'vendas_reais', 'cpv_real', 'vendas_totais_periodo', 'produto',
+      'vendas_any', 'cpv_any', 'vendas_last', 'cpv_last',
           ]
           const csvLines = [
             headers.join(','),
@@ -676,8 +740,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       metaGetAll(adsetsUrl),
       metaGetAll(campaignUrl),
       metaGetAll(adsMetaUrl),
-      needsUtm ? fetchUtmCounts(since, until, produtoMap) : Promise.resolve({ leads: {}, content: {}, vendas: {}, vendasContent: {}, vendasPorAdId: {}, receita: {}, lagDias: {}, vendasTotais: {} } as UtmCounts),
-      needsUtm && includeVariacao ? fetchPrevUtmCounts(prev.since, prev.until) : Promise.resolve({ leads: {}, content: {}, vendas: {}, vendasContent: {}, vendasPorAdId: {}, receita: {}, lagDias: {}, vendasTotais: {} } as UtmCounts),
+      needsUtm ? fetchUtmCounts(since, until, produtoMap) : Promise.resolve({ leads: {}, content: {}, vendas: {}, vendasContent: {}, vendasPorAdId: {}, vendasLastCamp: {}, vendasLastContent: {}, receita: {}, lagDias: {}, vendasTotais: {} } as UtmCounts),
+      needsUtm && includeVariacao ? fetchPrevUtmCounts(prev.since, prev.until) : Promise.resolve({ leads: {}, content: {}, vendas: {}, vendasContent: {}, vendasPorAdId: {}, vendasLastCamp: {}, vendasLastContent: {}, receita: {}, lagDias: {}, vendasTotais: {} } as UtmCounts),
       prevAdsetInsightUrl ? metaGetAll(prevAdsetInsightUrl) : Promise.resolve([] as any[]),
     ])
 
@@ -913,6 +977,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             cpv_real:               hasUtm && campVendas > 0 ? (campSpend / campVendas).toFixed(2) : '',
             vendas_totais_periodo:  (() => { const lower = camp.name.toLowerCase().trim(); const entry = produtoMap.find(e => lower.includes(e.prefixo)); if (!entry) return ''; const t = utmCounts.vendasTotais[entry.prefixo] ?? 0; return t > 0 ? String(t) : '' })(),
             produto:                (() => { const lower = camp.name.toLowerCase().trim(); return produtoMap.find(e => lower.includes(e.prefixo))?.label ?? '' })(),
+            vendas_any:             hasUtm ? String(campVendas) : '',
+            cpv_any:                hasUtm && campVendas > 0 ? (campSpend / campVendas).toFixed(2) : '',
+            vendas_last:            (() => { const v = utmCounts.vendasLastCamp[campKey] ?? 0; return hasUtm ? String(v) : '' })(),
+            cpv_last:               (() => { const v = utmCounts.vendasLastCamp[campKey] ?? 0; return hasUtm && v > 0 ? (campSpend / v).toFixed(2) : '' })(),
             variacao_periodo_anterior: variacao,
           })
         }
@@ -997,6 +1065,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               cpv_real:               hasUtm && adsetVendas > 0 ? (spend / adsetVendas).toFixed(2) : '',
               vendas_totais_periodo:  '',
               produto:                '',
+              vendas_any:             hasUtm ? String(adsetVendas) : '',
+              cpv_any:                hasUtm && adsetVendas > 0 ? (spend / adsetVendas).toFixed(2) : '',
+              vendas_last:            (() => { const prefix = `${adsetRow.adset_name.toLowerCase().trim()}|||`; const v = Object.entries(utmCounts.vendasLastContent).filter(([k]) => k.includes(prefix)).reduce((s, [, n]) => s + n, 0); return hasUtm ? String(v) : '' })(),
+              cpv_last:               (() => { const prefix = `${adsetRow.adset_name.toLowerCase().trim()}|||`; const v = Object.entries(utmCounts.vendasLastContent).filter(([k]) => k.includes(prefix)).reduce((s, [, n]) => s + n, 0); return hasUtm && v > 0 ? (spend / v).toFixed(2) : '' })(),
             })
 
             if (level === 'ad') {
@@ -1063,6 +1135,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                   cpv_real:               hasUtm && adVendas > 0 ? (adSpend / adVendas).toFixed(2) : '',
                   vendas_totais_periodo:  '',
                   produto:                '',
+                  vendas_any:             hasUtm ? String(adVendas) : '',
+                  cpv_any:                hasUtm && adVendas > 0 ? (adSpend / adVendas).toFixed(2) : '',
+                  vendas_last:            (() => { const v = utmCounts.vendasLastContent[contentKey] ?? 0; return hasUtm ? String(v) : '' })(),
+                  cpv_last:               (() => { const v = utmCounts.vendasLastContent[contentKey] ?? 0; return hasUtm && v > 0 ? (adSpend / v).toFixed(2) : '' })(),
                 })
               }
             }
@@ -1109,6 +1185,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       'quality_ranking', 'engagement_rate_ranking', 'conversion_rate_ranking', 'status_entrega', 'dias_desde_criacao',
       'receita_reais', 'roas_real', 'ticket_medio_real', 'lag_dias_conversao_medio',
       'leads_reais', 'cpl_real', 'vendas_reais', 'cpv_real', 'vendas_totais_periodo', 'produto',
+      'vendas_any', 'cpv_any', 'vendas_last', 'cpv_last',
     ]
     const csvLines = [
       headers.join(','),
