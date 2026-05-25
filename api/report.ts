@@ -280,14 +280,13 @@ async function fetchUtmCounts(since: string, until: string, produtoMap: ProdutoM
     bqQuery(
       `SELECT
          ${decodeUtm('utm_campaign')} AS campaign,
-         ${decodeUtm('utm_medium')}   AS medium,
          ${decodeUtm('utm_content')}  AS content,
          COUNT(*) AS cnt
        FROM ${tLeads}
        WHERE utm_campaign IS NOT NULL AND utm_campaign != ''
          AND utm_content  IS NOT NULL AND utm_content  != ''
          AND ${baseWhere}
-       GROUP BY 1, 2, 3`,
+       GROUP BY 1, 2`,
       dateParams,
     ),
     // vendas por campanha — filtra pela data de aprovação da venda (não do lead)
@@ -303,11 +302,10 @@ async function fetchUtmCounts(since: string, until: string, produtoMap: ProdutoM
        GROUP BY 1`,
       dateParams,
     ),
-    // vendas por criativo (campaign|||medium|||content) para níveis adset/ad
+    // vendas por criativo (campaign|||content) para níveis adset/ad
     bqQuery(
       `SELECT
          ${decodeUtm('l.utm_campaign')} AS campaign,
-         ${decodeUtm('l.utm_medium')}   AS medium,
          ${decodeUtm('l.utm_content')}  AS content,
          COUNT(DISTINCT LOWER(TRIM(l.lead_email))) AS cnt
        FROM ${tLeads} l
@@ -317,7 +315,7 @@ async function fetchUtmCounts(since: string, until: string, produtoMap: ProdutoM
          AND l.utm_content  IS NOT NULL AND l.utm_content  != ''
          AND DATE(s.Data_de_Aprova____o) BETWEEN @since AND @until
          ${produtoFilter}
-       GROUP BY 1, 2, 3`,
+       GROUP BY 1, 2`,
       dateParams,
     ),
     // vendas por ad_id: utm_content numérico = {{ad.id}} injetado pelo Meta
@@ -363,7 +361,6 @@ async function fetchUtmCounts(since: string, until: string, produtoMap: ProdutoM
       `WITH ranked AS (
          SELECT
            ${decodeUtm('l.utm_campaign')} AS campaign,
-           ${decodeUtm('l.utm_medium')}   AS medium,
            ${decodeUtm('l.utm_content')}  AS content,
            LOWER(TRIM(l.lead_email)) AS email,
            ROW_NUMBER() OVER (
@@ -379,9 +376,9 @@ async function fetchUtmCounts(since: string, until: string, produtoMap: ProdutoM
            AND DATE(s.Data_de_Aprova____o) BETWEEN @since AND @until
            ${produtoFilter}
        )
-       SELECT campaign, medium, content, COUNT(DISTINCT email) AS cnt
+       SELECT campaign, content, COUNT(DISTINCT email) AS cnt
        FROM ranked WHERE rn = 1
-       GROUP BY 1, 2, 3`,
+       GROUP BY 1, 2`,
       dateParams,
     ),
     // last touch por ad_id numérico (utm_content = {{ad.id}})
@@ -443,7 +440,7 @@ async function fetchUtmCounts(since: string, until: string, produtoMap: ProdutoM
 
   const content: Record<string, number> = {}
   for (const r of contentRows.rows) {
-    if (r.content) content[`${norm(r.campaign ?? '')}|||${norm(r.medium ?? '')}|||${norm(r.content)}`] = parseInt(r.cnt ?? '0')
+    if (r.content) content[`${norm(r.campaign ?? '')}|||${norm(r.content)}`] = parseInt(r.cnt ?? '0')
   }
 
   const vendas: Record<string, number> = {}
@@ -451,7 +448,7 @@ async function fetchUtmCounts(since: string, until: string, produtoMap: ProdutoM
 
   const vendasContent: Record<string, number> = {}
   for (const r of salesContentRows.rows) {
-    if (r.content) vendasContent[`${norm(r.campaign ?? '')}|||${norm(r.medium ?? '')}|||${norm(r.content)}`] = parseInt(r.cnt ?? '0')
+    if (r.content) vendasContent[`${norm(r.campaign ?? '')}|||${norm(r.content)}`] = parseInt(r.cnt ?? '0')
   }
 
   const receita: Record<string, number> = {}
@@ -476,7 +473,7 @@ async function fetchUtmCounts(since: string, until: string, produtoMap: ProdutoM
   // Last touch por criativo
   const vendasLastContent: Record<string, number> = {}
   for (const r of lastContentRows.rows) {
-    if (r.content) vendasLastContent[`${norm(r.campaign ?? '')}|||${norm(r.medium ?? '')}|||${norm(r.content)}`] = parseInt(r.cnt ?? '0')
+    if (r.content) vendasLastContent[`${norm(r.campaign ?? '')}|||${norm(r.content)}`] = parseInt(r.cnt ?? '0')
   }
 
   // Last touch por ad_id numérico
@@ -1038,24 +1035,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             const lpv     = actionVal(adsetRow.actions, 'landing_page_view')
             const rm      = getReachMetrics(adsetRow, spend)
             const df      = getDateFields(adsetRow)
-            // adset: utm_medium = adset_name — leads/vendas somados de todos os criativos deste conjunto
-            const adsetPrefix  = `${camp.name.toLowerCase().trim()}|||${adsetRow.adset_name.toLowerCase().trim()}|||`
-            const adsetLeads   = hasUtm
-              ? Object.entries(utmCounts.content)
-                  .filter(([k]) => k.startsWith(adsetPrefix))
-                  .reduce((s, [, v]) => s + (v as number), 0)
-              : 0
-            // Vendas por adset: soma vendasPorAdId de todos os ads do conjunto (funis Purchase),
-            // fallback para vendasContent por prefixo (funis Lead)
+            // adset: soma de todos os ads do conjunto usando chave campaign|||ad_name
             const adsetAdKey = timeIncrement ? `${adsetRow.adset_id}__${adsetRow.date_start ?? ''}` : adsetRow.adset_id
-            const adsetAdIds = (adsByAdset.get(adsetAdKey) ?? []).map((a: any) => String(a.ad_id))
+            const adsetAds   = adsByAdset.get(adsetAdKey) ?? []
+            const campNorm   = camp.name.toLowerCase().trim()
+            const adsetLeads = hasUtm
+              ? adsetAds.reduce((s: number, a: any) => s + (utmCounts.content[`${campNorm}|||${a.ad_name.toLowerCase().trim()}`] ?? 0), 0)
+              : 0
+            // Vendas por adset: soma de todos os ads do conjunto
+            const adsetAdIds = adsetAds.map((a: any) => String(a.ad_id))
             const adsetVendasById = hasUtm
-              ? adsetAdIds.reduce((s, id) => s + (utmCounts.vendasPorAdId[id] ?? 0), 0)
+              ? adsetAdIds.reduce((s: number, id: string) => s + (utmCounts.vendasPorAdId[id] ?? 0), 0)
               : 0
             const adsetVendasByKey = hasUtm
-              ? Object.entries(utmCounts.vendasContent)
-                  .filter(([k]) => k.startsWith(adsetPrefix))
-                  .reduce((s, [, v]) => s + (v as number), 0)
+              ? adsetAds.reduce((s: number, a: any) => s + (utmCounts.vendasContent[`${campNorm}|||${a.ad_name.toLowerCase().trim()}`] ?? 0), 0)
               : 0
             const adsetVendas = adsetVendasById > 0 ? adsetVendasById : adsetVendasByKey
 
@@ -1111,8 +1104,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               produto:                '',
               vendas_any:             hasUtm ? String(adsetVendas) : '',
               cpv_any:                hasUtm && adsetVendas > 0 ? (spend / adsetVendas).toFixed(2) : '',
-              vendas_last:            (() => { const prefix = `${adsetRow.adset_name.toLowerCase().trim()}|||`; const v = Object.entries(utmCounts.vendasLastContent).filter(([k]) => k.includes(prefix)).reduce((s, [, n]) => s + n, 0); return hasUtm ? String(v) : '' })(),
-              cpv_last:               (() => { const prefix = `${adsetRow.adset_name.toLowerCase().trim()}|||`; const v = Object.entries(utmCounts.vendasLastContent).filter(([k]) => k.includes(prefix)).reduce((s, [, n]) => s + n, 0); return hasUtm && v > 0 ? (spend / v).toFixed(2) : '' })(),
+              vendas_last:            (() => { const v = adsetAds.reduce((s: number, a: any) => s + (utmCounts.vendasLastContent[`${campNorm}|||${a.ad_name.toLowerCase().trim()}`] ?? 0), 0); return hasUtm ? String(v) : '' })(),
+              cpv_last:               (() => { const v = adsetAds.reduce((s: number, a: any) => s + (utmCounts.vendasLastContent[`${campNorm}|||${a.ad_name.toLowerCase().trim()}`] ?? 0), 0); return hasUtm && v > 0 ? (spend / v).toFixed(2) : '' })(),
             })
 
             if (level === 'ad') {
@@ -1122,7 +1115,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 const adResults = actionVal(ad.actions, ...rt)
                 const adRm      = getReachMetrics(ad, adSpend)
                 const adDf      = getDateFields(ad)
-                const contentKey  = `${camp.name.toLowerCase().trim()}|||${adsetRow.adset_name.toLowerCase().trim()}|||${ad.ad_name.toLowerCase().trim()}`
+                const contentKey  = `${camp.name.toLowerCase().trim()}|||${ad.ad_name.toLowerCase().trim()}`
                 const adLeads    = hasUtm ? (utmCounts.content[contentKey] ?? 0) : 0
                 // Vendas por ad: tenta primeiro por ad_id direto (funis Purchase com {{ad.id}}),
                 // fallback para contentKey (funis Lead com utm_content = ad_name)
