@@ -257,6 +257,13 @@ async function fetchUtmCounts(since: string, until: string, produtoMap: ProdutoM
   ]
   const baseWhere = `DATE(lead_register) >= @since AND DATE(lead_register) <= @until`
 
+  // Filtro por produto: quando há mapeamento, restringe o JOIN às vendas dos produtos
+  // cadastrados para esta conta — evita cruzar leads com vendas de outros produtos.
+  const allProdutoIds = [...new Set(produtoMap.flatMap(e => e.produto_ids))]
+  const produtoFilter = allProdutoIds.length > 0
+    ? `AND CAST(s.ID_do_Produto AS INT64) IN (${allProdutoIds.join(', ')})`
+    : ''
+
   const decodeUtm = (col: string) =>
     `REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(` +
     `${col}, '%5B', '['), '%5b', '['), '%5D', ']'), '%5d', ']'), '%20', ' '), '+', ' '), '%28', '('), '%29', ')'), '%2C', ',')`
@@ -291,6 +298,7 @@ async function fetchUtmCounts(since: string, until: string, produtoMap: ProdutoM
          ON LOWER(TRIM(l.lead_email)) = LOWER(TRIM(s.E_mail_do_Comprador))
        WHERE l.utm_campaign IS NOT NULL AND l.utm_campaign != ''
          AND DATE(s.Data_de_Aprova____o) BETWEEN @since AND @until
+         ${produtoFilter}
        GROUP BY 1`,
       dateParams,
     ),
@@ -307,6 +315,7 @@ async function fetchUtmCounts(since: string, until: string, produtoMap: ProdutoM
        WHERE l.utm_campaign IS NOT NULL AND l.utm_campaign != ''
          AND l.utm_content  IS NOT NULL AND l.utm_content  != ''
          AND DATE(s.Data_de_Aprova____o) BETWEEN @since AND @until
+         ${produtoFilter}
        GROUP BY 1, 2, 3`,
       dateParams,
     ),
@@ -321,6 +330,7 @@ async function fetchUtmCounts(since: string, until: string, produtoMap: ProdutoM
        WHERE l.utm_content IS NOT NULL AND l.utm_content != ''
          AND REGEXP_CONTAINS(TRIM(l.utm_content), r'^[0-9]+$')
          AND DATE(s.Data_de_Aprova____o) BETWEEN @since AND @until
+         ${produtoFilter}
        GROUP BY 1`,
       dateParams,
     ),
@@ -340,6 +350,7 @@ async function fetchUtmCounts(since: string, until: string, produtoMap: ProdutoM
          WHERE l.utm_campaign IS NOT NULL AND l.utm_campaign != ''
            AND l.lead_register <= s.Data_de_Aprova____o
            AND DATE(s.Data_de_Aprova____o) BETWEEN @since AND @until
+           ${produtoFilter}
        )
        SELECT campaign AS key, COUNT(DISTINCT email) AS cnt
        FROM ranked WHERE rn = 1
@@ -365,6 +376,7 @@ async function fetchUtmCounts(since: string, until: string, produtoMap: ProdutoM
            AND l.utm_content  IS NOT NULL AND l.utm_content  != ''
            AND l.lead_register <= s.Data_de_Aprova____o
            AND DATE(s.Data_de_Aprova____o) BETWEEN @since AND @until
+           ${produtoFilter}
        )
        SELECT campaign, medium, content, COUNT(DISTINCT email) AS cnt
        FROM ranked WHERE rn = 1
@@ -381,6 +393,7 @@ async function fetchUtmCounts(since: string, until: string, produtoMap: ProdutoM
          ON LOWER(TRIM(l.lead_email)) = LOWER(TRIM(s.E_mail_do_Comprador))
        WHERE l.utm_campaign IS NOT NULL AND l.utm_campaign != ''
          AND DATE(s.Data_de_Aprova____o) BETWEEN @since AND @until
+         ${produtoFilter}
        GROUP BY 1`,
       dateParams,
     ),
