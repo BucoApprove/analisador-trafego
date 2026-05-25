@@ -240,6 +240,7 @@ interface UtmCounts {
   content:             Record<string, number>  // utm_campaign|||utm_medium|||utm_content → leads
   vendas:              Record<string, number>  // utm_campaign → compradores únicos via UTM
   vendasContent:       Record<string, number>  // utm_campaign|||utm_medium|||utm_content → compradores únicos
+  vendasPorAdId:       Record<string, number>  // ad_id (utm_content numérico) → compradores únicos
   receita:             Record<string, number>  // utm_campaign → soma Valor_Pago_pelo_Comprador
   lagDias:             Record<string, number>  // utm_campaign → média de dias lead→compra
   vendasTotais:        Record<string, number>  // utm_campaign → vendas do produto no período (sem join de lead)
@@ -258,7 +259,7 @@ async function fetchUtmCounts(since: string, until: string, produtoMap: ProdutoM
     `REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(` +
     `${col}, '%5B', '['), '%5b', '['), '%5D', ']'), '%5d', ']'), '%20', ' '), '+', ' '), '%28', '('), '%29', ')'), '%2C', ',')`
 
-  const [campaignRows, contentRows, salesRows, salesContentRows, receitaRows, vendasProdutoRows] = await Promise.all([
+  const [campaignRows, contentRows, salesRows, salesContentRows, vendasAdIdRows, receitaRows, vendasProdutoRows] = await Promise.all([
     bqQuery(
       `SELECT ${decodeUtm('utm_campaign')} AS key, COUNT(*) AS cnt
        FROM ${tLeads}
@@ -305,6 +306,20 @@ async function fetchUtmCounts(since: string, until: string, produtoMap: ProdutoM
          AND l.utm_content  IS NOT NULL AND l.utm_content  != ''
          AND DATE(s.Data_de_Aprova____o) BETWEEN @since AND @until
        GROUP BY 1, 2, 3`,
+      dateParams,
+    ),
+    // vendas por ad_id: utm_content numérico = {{ad.id}} injetado pelo Meta
+    bqQuery(
+      `SELECT
+         TRIM(l.utm_content) AS ad_id,
+         COUNT(DISTINCT LOWER(TRIM(l.lead_email))) AS cnt
+       FROM ${tLeads} l
+       INNER JOIN ${tVendas} s
+         ON LOWER(TRIM(l.lead_email)) = LOWER(TRIM(s.E_mail_do_Comprador))
+       WHERE l.utm_content IS NOT NULL AND l.utm_content != ''
+         AND REGEXP_CONTAINS(TRIM(l.utm_content), r'^[0-9]+$')
+         AND DATE(s.Data_de_Aprova____o) BETWEEN @since AND @until
+       GROUP BY 1`,
       dateParams,
     ),
     // receita e lag por campanha
@@ -361,6 +376,12 @@ async function fetchUtmCounts(since: string, until: string, produtoMap: ProdutoM
     }
   }
 
+  // Mapa ad_id (string numérica) → compradores únicos via UTM (funis Purchase com {{ad.id}})
+  const vendasPorAdId: Record<string, number> = {}
+  for (const r of vendasAdIdRows.rows) {
+    if (r.ad_id) vendasPorAdId[String(r.ad_id).trim()] = parseInt(r.cnt ?? '0')
+  }
+
   // Monta mapa produto_id (string) → qty de vendas no período
   const vendasPorProduto: Record<string, number> = {}
   for (const r of vendasProdutoRows.rows) {
@@ -374,7 +395,7 @@ async function fetchUtmCounts(since: string, until: string, produtoMap: ProdutoM
     vendasTotais[entry.prefixo] = total
   }
 
-  return { leads, content, vendas, vendasContent, receita, lagDias, vendasTotais }
+  return { leads, content, vendas, vendasContent, vendasPorAdId, receita, lagDias, vendasTotais }
 }
 
 // ─── Tipo de linha do relatório ───────────────────────────────────────────────
@@ -655,8 +676,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       metaGetAll(adsetsUrl),
       metaGetAll(campaignUrl),
       metaGetAll(adsMetaUrl),
-      needsUtm ? fetchUtmCounts(since, until, produtoMap) : Promise.resolve({ leads: {}, content: {}, vendas: {}, vendasContent: {}, receita: {}, lagDias: {}, vendasTotais: {} } as UtmCounts),
-      needsUtm && includeVariacao ? fetchPrevUtmCounts(prev.since, prev.until) : Promise.resolve({ leads: {}, content: {}, vendas: {}, vendasContent: {} } as UtmCounts),
+      needsUtm ? fetchUtmCounts(since, until, produtoMap) : Promise.resolve({ leads: {}, content: {}, vendas: {}, vendasContent: {}, vendasPorAdId: {}, receita: {}, lagDias: {}, vendasTotais: {} } as UtmCounts),
+      needsUtm && includeVariacao ? fetchPrevUtmCounts(prev.since, prev.until) : Promise.resolve({ leads: {}, content: {}, vendas: {}, vendasContent: {}, vendasPorAdId: {}, receita: {}, lagDias: {}, vendasTotais: {} } as UtmCounts),
       prevAdsetInsightUrl ? metaGetAll(prevAdsetInsightUrl) : Promise.resolve([] as any[]),
     ])
 
@@ -912,11 +933,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                   .filter(([k]) => k.startsWith(adsetPrefix))
                   .reduce((s, [, v]) => s + (v as number), 0)
               : 0
-            const adsetVendas  = hasUtm
+            // Vendas por adset: soma vendasPorAdId de todos os ads do conjunto (funis Purchase),
+            // fallback para vendasContent por prefixo (funis Lead)
+            const adsetAdKey = timeIncrement ? `${adsetRow.adset_id}__${adsetRow.date_start ?? ''}` : adsetRow.adset_id
+            const adsetAdIds = (adsByAdset.get(adsetAdKey) ?? []).map((a: any) => String(a.ad_id))
+            const adsetVendasById = hasUtm
+              ? adsetAdIds.reduce((s, id) => s + (utmCounts.vendasPorAdId[id] ?? 0), 0)
+              : 0
+            const adsetVendasByKey = hasUtm
               ? Object.entries(utmCounts.vendasContent)
                   .filter(([k]) => k.startsWith(adsetPrefix))
                   .reduce((s, [, v]) => s + (v as number), 0)
               : 0
+            const adsetVendas = adsetVendasById > 0 ? adsetVendasById : adsetVendasByKey
 
             rows.push({
               periodo_inicio:   since,
@@ -979,7 +1008,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 const adDf      = getDateFields(ad)
                 const contentKey  = `${camp.name.toLowerCase().trim()}|||${adsetRow.adset_name.toLowerCase().trim()}|||${ad.ad_name.toLowerCase().trim()}`
                 const adLeads    = hasUtm ? (utmCounts.content[contentKey] ?? 0) : 0
-                const adVendas   = hasUtm ? (utmCounts.vendasContent[contentKey] ?? 0) : 0
+                // Vendas por ad: tenta primeiro por ad_id direto (funis Purchase com {{ad.id}}),
+                // fallback para contentKey (funis Lead com utm_content = ad_name)
+                const adVendasById  = hasUtm ? (utmCounts.vendasPorAdId[String(ad.ad_id)] ?? 0) : 0
+                const adVendasByKey = hasUtm ? (utmCounts.vendasContent[contentKey] ?? 0) : 0
+                const adVendas      = adVendasById > 0 ? adVendasById : adVendasByKey
                 rows.push({
                   periodo_inicio:   since,
                   periodo_fim:      until,
