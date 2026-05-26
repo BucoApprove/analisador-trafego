@@ -32,9 +32,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const tLeads = tableLeads()
   const tVendas = tableVendas()
-  const body = req.body as { type: string; product?: string; statuses?: string[]; tag?: string }
+  const body = req.body as { type: string; product?: string; statuses?: string[]; tag?: string; since?: string; until?: string }
   const statuses: string[] = Array.isArray(body.statuses) ? body.statuses : []
   const stClause = statusSql(statuses)
+
+  const since = body.since ?? ''
+  const until = body.until ?? ''
+  const dateFilter = since && until
+    ? ` AND DATE(lead_register) BETWEEN @since AND @until`
+    : ''
+  const saleDateFilter = since && until
+    ? ` AND DATE(COALESCE(Data_de_Aprova____o, Data_do_Pedido)) BETWEEN @since AND @until`
+    : ''
+  const dateParams: QueryParam[] = since && until
+    ? [{ name: 'since', value: since, type: 'DATE' }, { name: 'until', value: until, type: 'DATE' }]
+    : []
 
   // ── behavior-tag ────────────────────────────────────────────────────────
   if (body.type === 'behavior-tag') {
@@ -46,7 +58,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         tag_dates AS (
           SELECT LOWER(TRIM(lead_email)) AS email, MIN(lead_register) AS data_tag
           FROM ${tLeads}
-          WHERE tag_name = @tag AND lead_email IS NOT NULL
+          WHERE tag_name = @tag AND lead_email IS NOT NULL${dateFilter}
           GROUP BY LOWER(TRIM(lead_email))
         ),
         purchases AS (
@@ -54,7 +66,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             COALESCE(Data_de_Aprova____o, Data_do_Pedido) AS dt,
             Nome_do_Produto AS produto
           FROM ${tVendas}
-          WHERE E_mail_do_Comprador IS NOT NULL ${stClause.sql}
+          WHERE E_mail_do_Comprador IS NOT NULL ${stClause.sql}${saleDateFilter}
         ),
         behavior AS (
           SELECT
@@ -81,7 +93,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         tag_dates AS (
           SELECT LOWER(TRIM(lead_email)) AS email, MIN(lead_register) AS data_tag
           FROM ${tLeads}
-          WHERE tag_name = @tag AND lead_email IS NOT NULL
+          WHERE tag_name = @tag AND lead_email IS NOT NULL${dateFilter}
           GROUP BY LOWER(TRIM(lead_email))
         ),
         purchases AS (
@@ -89,7 +101,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             COALESCE(Data_de_Aprova____o, Data_do_Pedido) AS dt,
             Nome_do_Produto AS produto
           FROM ${tVendas}
-          WHERE E_mail_do_Comprador IS NOT NULL ${stClause.sql}
+          WHERE E_mail_do_Comprador IS NOT NULL ${stClause.sql}${saleDateFilter}
         )
       SELECT
         produto,
@@ -102,7 +114,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       ORDER BY (COUNTIF(p.dt < t.data_tag) + COUNTIF(p.dt >= t.data_tag)) DESC
       LIMIT 20
     `
-    const params: QueryParam[] = [{ name: 'tag', value: tag }, ...stClause.params]
+    const params: QueryParam[] = [{ name: 'tag', value: tag }, ...stClause.params, ...dateParams]
 
     try {
       const [sumRes, prodRes] = await Promise.all([
@@ -134,7 +146,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const product = body.product ?? ''
   if (!product) return res.status(400).json({ error: 'product is required' })
 
-  const baseParams: QueryParam[] = [{ name: 'product', value: product }, ...stClause.params]
+  const baseParams: QueryParam[] = [{ name: 'product', value: product }, ...stClause.params, ...dateParams]
 
   // ── A1: Lead→Compra por produto ─────────────────────────────────────────
   const ltcSql = `
@@ -142,14 +154,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       first_lead AS (
         SELECT LOWER(TRIM(lead_email)) AS email, MIN(lead_register) AS data_lead,
           ANY_VALUE(lead_name) AS lead_name
-        FROM ${tLeads} WHERE lead_email IS NOT NULL
+        FROM ${tLeads} WHERE lead_email IS NOT NULL${dateFilter}
         GROUP BY LOWER(TRIM(lead_email))
       ),
       first_sale AS (
         SELECT LOWER(TRIM(E_mail_do_Comprador)) AS email,
           MIN(COALESCE(Data_de_Aprova____o, Data_do_Pedido)) AS data_compra
         FROM ${tVendas}
-        WHERE Nome_do_Produto = @product ${stClause.sql} AND E_mail_do_Comprador IS NOT NULL
+        WHERE Nome_do_Produto = @product ${stClause.sql} AND E_mail_do_Comprador IS NOT NULL${saleDateFilter}
         GROUP BY LOWER(TRIM(E_mail_do_Comprador))
       )
     SELECT
@@ -169,14 +181,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     WITH
       first_lead AS (
         SELECT LOWER(TRIM(lead_email)) AS email, MIN(lead_register) AS data_lead
-        FROM ${tLeads} WHERE lead_email IS NOT NULL
+        FROM ${tLeads} WHERE lead_email IS NOT NULL${dateFilter}
         GROUP BY LOWER(TRIM(lead_email))
       ),
       sales AS (
         SELECT LOWER(TRIM(E_mail_do_Comprador)) AS email, Nome_do_Produto AS produto,
           MIN(COALESCE(Data_de_Aprova____o, Data_do_Pedido)) AS data_compra
         FROM ${tVendas}
-        WHERE E_mail_do_Comprador IS NOT NULL ${stClause.sql}
+        WHERE E_mail_do_Comprador IS NOT NULL ${stClause.sql}${saleDateFilter}
         GROUP BY LOWER(TRIM(E_mail_do_Comprador)), Nome_do_Produto
       ),
       joined AS (
@@ -193,7 +205,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     FROM joined
     GROUP BY produto ORDER BY mediana
   `
-  const stOnlyParams = stClause.params
+  const stOnlyParams = [...stClause.params, ...dateParams]
 
   // ── A2: Tags por comprador ───────────────────────────────────────────────
   const tagsSql = `
@@ -201,12 +213,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       buyers AS (
         SELECT DISTINCT LOWER(TRIM(E_mail_do_Comprador)) AS email
         FROM ${tVendas}
-        WHERE Nome_do_Produto = @product ${stClause.sql} AND E_mail_do_Comprador IS NOT NULL
+        WHERE Nome_do_Produto = @product ${stClause.sql} AND E_mail_do_Comprador IS NOT NULL${saleDateFilter}
       ),
       buyer_tag_counts AS (
         SELECT LOWER(TRIM(lead_email)) AS email, COUNT(DISTINCT tag_name) AS num_tags
         FROM ${tLeads}
-        WHERE tag_name IS NOT NULL AND LOWER(TRIM(lead_email)) IN (SELECT email FROM buyers)
+        WHERE tag_name IS NOT NULL${dateFilter} AND LOWER(TRIM(lead_email)) IN (SELECT email FROM buyers)
         GROUP BY LOWER(TRIM(lead_email))
       )
     SELECT
@@ -224,7 +236,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const utmContentSql = `
     SELECT utm_content AS val, COUNT(DISTINCT lead_email) AS cnt
     FROM ${tLeads}
-    WHERE utm_content IS NOT NULL AND TRIM(utm_content) != ''
+    WHERE utm_content IS NOT NULL AND TRIM(utm_content) != ''${dateFilter}
     GROUP BY utm_content ORDER BY cnt DESC LIMIT 50
   `
 
@@ -234,14 +246,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       buyers AS (
         SELECT DISTINCT LOWER(TRIM(E_mail_do_Comprador)) AS email
         FROM ${tVendas}
-        WHERE Nome_do_Produto = @product ${stClause.sql} AND E_mail_do_Comprador IS NOT NULL
+        WHERE Nome_do_Produto = @product ${stClause.sql} AND E_mail_do_Comprador IS NOT NULL${saleDateFilter}
       ),
       leads_rn AS (
         SELECT
           LOWER(TRIM(lead_email)) AS email,
           tag_name, CAST(lead_register_form AS STRING) AS form,
           ROW_NUMBER() OVER (PARTITION BY LOWER(TRIM(lead_email)) ORDER BY lead_register) AS rn
-        FROM ${tLeads} WHERE lead_email IS NOT NULL
+        FROM ${tLeads} WHERE lead_email IS NOT NULL${dateFilter}
       ),
       first_entry AS (
         SELECT l.email, l.tag_name AS first_tag, l.form AS first_form
@@ -262,13 +274,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         first_utm AS (
           SELECT LOWER(TRIM(lead_email)) AS email, ${utmCol} AS utm_val,
             ROW_NUMBER() OVER (PARTITION BY LOWER(TRIM(lead_email)) ORDER BY lead_register) AS rn
-          FROM ${tLeads} WHERE lead_email IS NOT NULL AND ${utmCol} IS NOT NULL AND TRIM(${utmCol}) != ''
+          FROM ${tLeads} WHERE lead_email IS NOT NULL AND ${utmCol} IS NOT NULL AND TRIM(${utmCol}) != ''${dateFilter}
         ),
         first_entries AS (SELECT email, utm_val FROM first_utm WHERE rn = 1),
         buyers AS (
           SELECT DISTINCT LOWER(TRIM(E_mail_do_Comprador)) AS email
           FROM ${tVendas}
-          WHERE Nome_do_Produto = @product ${stClause.sql} AND E_mail_do_Comprador IS NOT NULL
+          WHERE Nome_do_Produto = @product ${stClause.sql} AND E_mail_do_Comprador IS NOT NULL${saleDateFilter}
         )
       SELECT
         fe.utm_val AS utm,
@@ -286,23 +298,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       buyers AS (
         SELECT DISTINCT LOWER(TRIM(E_mail_do_Comprador)) AS email
         FROM ${tVendas}
-        WHERE Nome_do_Produto = @product ${stClause.sql} AND E_mail_do_Comprador IS NOT NULL
+        WHERE Nome_do_Produto = @product ${stClause.sql} AND E_mail_do_Comprador IS NOT NULL${saleDateFilter}
       ),
       buyer_count AS (
         SELECT COUNT(*) AS total FROM buyers b
-        WHERE b.email IN (SELECT DISTINCT LOWER(TRIM(lead_email)) FROM ${tLeads})
+        INNER JOIN (SELECT DISTINCT LOWER(TRIM(lead_email)) AS email FROM ${tLeads} WHERE lead_email IS NOT NULL${dateFilter}) l ON b.email = l.email
       )
     SELECT
       l.tag_name AS tag,
       COUNT(DISTINCT LOWER(TRIM(l.lead_email))) AS compradores,
       ROUND(100.0 * COUNT(DISTINCT LOWER(TRIM(l.lead_email))) / (SELECT total FROM buyer_count), 1) AS pct
     FROM ${tLeads} l INNER JOIN buyers b ON LOWER(TRIM(l.lead_email)) = b.email
-    WHERE l.tag_name IS NOT NULL
+    WHERE l.tag_name IS NOT NULL${dateFilter}
     GROUP BY l.tag_name ORDER BY compradores DESC LIMIT 50
   `
 
   // ── Available tags & products ────────────────────────────────────────────
-  const availTagsSql = `SELECT DISTINCT tag_name AS t FROM ${tLeads} WHERE tag_name IS NOT NULL ORDER BY t LIMIT 200`
+  const availTagsSql = `SELECT DISTINCT tag_name AS t FROM ${tLeads} WHERE tag_name IS NOT NULL${dateFilter} ORDER BY t LIMIT 200`
 
   try {
     // Wave 1: queries filtradas por produto (rápidas)
@@ -311,13 +323,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       bqQuery(tagsSql, baseParams),
       bqQuery(firstEntrySql, baseParams),
       bqQuery(buyerTagsSql, baseParams),
-      bqQuery(availTagsSql, []),
+      bqQuery(availTagsSql, dateParams),
     ])
 
     // Wave 2: queries full-scan (mais pesadas, separadas para não disputar timeout)
     const [ltcAllRes, utmCRes, utmF_content, utmF_campaign, utmF_medium] = await Promise.all([
       bqQuery(ltcAllSql, stOnlyParams),
-      bqQuery(utmContentSql, []),
+      bqQuery(utmContentSql, dateParams),
       bqQuery(utmFunnelSql('utm_content'), baseParams),
       bqQuery(utmFunnelSql('utm_campaign'), baseParams),
       bqQuery(utmFunnelSql('utm_medium'), baseParams),

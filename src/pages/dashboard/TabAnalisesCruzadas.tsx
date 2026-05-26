@@ -103,11 +103,22 @@ function StatusSelect({ options, value, onChange }: { options: string[]; value: 
   )
 }
 
+function defaultSince(): string {
+  const d = new Date()
+  d.setDate(d.getDate() - 90)
+  return d.toISOString().split('T')[0]
+}
+function defaultUntil(): string {
+  return new Date().toISOString().split('T')[0]
+}
+
 export default function TabAnalisesCruzadas({ token, enabled }: Props) {
   const [products, setProducts] = useState<string[]>([])
   const [statuses, setStatuses] = useState<string[]>([])
   const [selectedProduct, setSelectedProduct] = useState('')
   const [selectedStatuses, setSelectedStatuses] = useState<string[]>([])
+  const [since, setSince] = useState(defaultSince)
+  const [until, setUntil] = useState(defaultUntil)
   const [result, setResult] = useState<CrossAnalysisData | null>(null)
   const [running, setRunning] = useState(false)
   const [runError, setRunError] = useState<string | null>(null)
@@ -144,7 +155,7 @@ export default function TabAnalisesCruzadas({ token, enabled }: Props) {
       const res = await fetch('/api/cross-analysis', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ type: 'all', product: selectedProduct, statuses: selectedStatuses }),
+        body: JSON.stringify({ type: 'all', product: selectedProduct, statuses: selectedStatuses, since, until }),
       })
       if (res.status === 401) { sessionStorage.removeItem('dashboard-token'); window.location.reload(); return }
       if (!res.ok) throw new Error(`Erro ${res.status}: ${await res.text()}`)
@@ -165,7 +176,7 @@ export default function TabAnalisesCruzadas({ token, enabled }: Props) {
       const res = await fetch('/api/cross-analysis', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ type: 'behavior-tag', tag: selectedTag, statuses: selectedStatuses }),
+        body: JSON.stringify({ type: 'behavior-tag', tag: selectedTag, statuses: selectedStatuses, since, until }),
       })
       if (!res.ok) throw new Error(`Erro ${res.status}`)
       setTagResult(await res.json())
@@ -185,7 +196,16 @@ export default function TabAnalisesCruzadas({ token, enabled }: Props) {
         <SectionHeader title="Análises Cruzadas" description="Cruza dados de leads com vendas para revelar padrões de comportamento." />
         {loadingOpts && <p className="text-sm text-muted-foreground animate-pulse">Carregando produtos e status...</p>}
         {loadError && <p className="text-sm text-destructive">Erro ao carregar produtos: {loadError}</p>}
-        <div className="grid gap-4 sm:grid-cols-3">
+        <div className="grid gap-4 sm:grid-cols-2">
+          {/* Período */}
+          <div className="space-y-1">
+            <p className="text-sm font-medium">Período</p>
+            <div className="flex gap-2 items-center">
+              <input type="date" value={since} onChange={e => setSince(e.target.value)} className="border rounded px-2 py-1 text-sm bg-background" />
+              <span className="text-muted-foreground text-sm">até</span>
+              <input type="date" value={until} onChange={e => setUntil(e.target.value)} className="border rounded px-2 py-1 text-sm bg-background" />
+            </div>
+          </div>
           {/* Produto */}
           <ProductSelect
             label="Produto de referência"
@@ -193,6 +213,8 @@ export default function TabAnalisesCruzadas({ token, enabled }: Props) {
             value={selectedProduct}
             onChange={setSelectedProduct}
           />
+        </div>
+        <div className="grid gap-4 sm:grid-cols-2">
           {/* Status */}
           <div className="space-y-1">
             <p className="text-sm font-medium">Status das vendas</p>
