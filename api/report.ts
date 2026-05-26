@@ -249,12 +249,21 @@ interface UtmCounts {
   vendasTotais:        Record<string, number>  // utm_campaign → vendas do produto no período (sem join de lead)
 }
 
+const ATTRIBUTION_WINDOW_DAYS = 30
+
 async function fetchUtmCounts(since: string, until: string, produtoMap: ProdutoMap[] = []): Promise<UtmCounts> {
   const tLeads  = tableLeads()
   const tVendas = tableVendas()
+
+  // Janela de atribuição: vendas até 30 dias após o fim do período do relatório
+  const salesUntilDate = new Date(until)
+  salesUntilDate.setDate(salesUntilDate.getDate() + ATTRIBUTION_WINDOW_DAYS)
+  const salesUntil = salesUntilDate.toISOString().split('T')[0]
+
   const dateParams = [
-    { name: 'since', value: since, type: 'DATE' as const },
-    { name: 'until', value: until, type: 'DATE' as const },
+    { name: 'since',       value: since,      type: 'DATE' as const },
+    { name: 'until',       value: until,      type: 'DATE' as const },
+    { name: 'sales_until', value: salesUntil, type: 'DATE' as const },
   ]
   const baseWhere = `DATE(lead_register) >= @since AND DATE(lead_register) <= @until`
 
@@ -289,7 +298,7 @@ async function fetchUtmCounts(since: string, until: string, produtoMap: ProdutoM
        GROUP BY 1, 2`,
       dateParams,
     ),
-    // vendas por campanha — filtra pela data de aprovação da venda (não do lead)
+    // vendas por campanha — janela de atribuição estendida (@sales_until)
     bqQuery(
       `SELECT ${decodeUtm('l.utm_campaign')} AS key,
               COUNT(DISTINCT LOWER(TRIM(l.lead_email))) AS cnt
@@ -297,12 +306,12 @@ async function fetchUtmCounts(since: string, until: string, produtoMap: ProdutoM
        INNER JOIN ${tVendas} s
          ON LOWER(TRIM(l.lead_email)) = LOWER(TRIM(s.E_mail_do_Comprador))
        WHERE l.utm_campaign IS NOT NULL AND l.utm_campaign != ''
-         AND DATE(s.Data_de_Aprova____o) BETWEEN @since AND @until
+         AND DATE(s.Data_de_Aprova____o) BETWEEN @since AND @sales_until
          ${produtoFilter}
        GROUP BY 1`,
       dateParams,
     ),
-    // vendas por criativo (campaign|||content) para níveis adset/ad
+    // vendas por criativo (campaign|||content) — janela de atribuição estendida
     bqQuery(
       `SELECT
          ${decodeUtm('l.utm_campaign')} AS campaign,
@@ -313,7 +322,7 @@ async function fetchUtmCounts(since: string, until: string, produtoMap: ProdutoM
          ON LOWER(TRIM(l.lead_email)) = LOWER(TRIM(s.E_mail_do_Comprador))
        WHERE l.utm_campaign IS NOT NULL AND l.utm_campaign != ''
          AND l.utm_content  IS NOT NULL AND l.utm_content  != ''
-         AND DATE(s.Data_de_Aprova____o) BETWEEN @since AND @until
+         AND DATE(s.Data_de_Aprova____o) BETWEEN @since AND @sales_until
          ${produtoFilter}
        GROUP BY 1, 2`,
       dateParams,
@@ -328,12 +337,12 @@ async function fetchUtmCounts(since: string, until: string, produtoMap: ProdutoM
          ON LOWER(TRIM(l.lead_email)) = LOWER(TRIM(s.E_mail_do_Comprador))
        WHERE l.utm_content IS NOT NULL AND l.utm_content != ''
          AND REGEXP_CONTAINS(TRIM(l.utm_content), r'^[0-9]+$')
-         AND DATE(s.Data_de_Aprova____o) BETWEEN @since AND @until
+         AND DATE(s.Data_de_Aprova____o) BETWEEN @since AND @sales_until
          ${produtoFilter}
        GROUP BY 1`,
       dateParams,
     ),
-    // last touch por campanha — lead mais recente antes da compra
+    // last touch por campanha — janela de atribuição estendida
     bqQuery(
       `WITH ranked AS (
          SELECT
@@ -348,7 +357,7 @@ async function fetchUtmCounts(since: string, until: string, produtoMap: ProdutoM
            ON LOWER(TRIM(l.lead_email)) = LOWER(TRIM(s.E_mail_do_Comprador))
          WHERE l.utm_campaign IS NOT NULL AND l.utm_campaign != ''
            AND l.lead_register <= s.Data_de_Aprova____o
-           AND DATE(s.Data_de_Aprova____o) BETWEEN @since AND @until
+           AND DATE(s.Data_de_Aprova____o) BETWEEN @since AND @sales_until
            ${produtoFilter}
        )
        SELECT campaign AS key, COUNT(DISTINCT email) AS cnt
@@ -356,7 +365,7 @@ async function fetchUtmCounts(since: string, until: string, produtoMap: ProdutoM
        GROUP BY 1`,
       dateParams,
     ),
-    // last touch por criativo (campaign|||medium|||content)
+    // last touch por criativo — janela de atribuição estendida
     bqQuery(
       `WITH ranked AS (
          SELECT
@@ -373,7 +382,7 @@ async function fetchUtmCounts(since: string, until: string, produtoMap: ProdutoM
          WHERE l.utm_campaign IS NOT NULL AND l.utm_campaign != ''
            AND l.utm_content  IS NOT NULL AND l.utm_content  != ''
            AND l.lead_register <= s.Data_de_Aprova____o
-           AND DATE(s.Data_de_Aprova____o) BETWEEN @since AND @until
+           AND DATE(s.Data_de_Aprova____o) BETWEEN @since AND @sales_until
            ${produtoFilter}
        )
        SELECT campaign, content, COUNT(DISTINCT email) AS cnt
@@ -381,7 +390,7 @@ async function fetchUtmCounts(since: string, until: string, produtoMap: ProdutoM
        GROUP BY 1, 2`,
       dateParams,
     ),
-    // last touch por ad_id numérico (utm_content = {{ad.id}})
+    // last touch por ad_id numérico — janela de atribuição estendida
     bqQuery(
       `WITH ranked AS (
          SELECT
@@ -397,7 +406,7 @@ async function fetchUtmCounts(since: string, until: string, produtoMap: ProdutoM
          WHERE l.utm_content IS NOT NULL AND l.utm_content != ''
            AND REGEXP_CONTAINS(TRIM(l.utm_content), r'^[0-9]+$')
            AND l.lead_register <= s.Data_de_Aprova____o
-           AND DATE(s.Data_de_Aprova____o) BETWEEN @since AND @until
+           AND DATE(s.Data_de_Aprova____o) BETWEEN @since AND @sales_until
            ${produtoFilter}
        )
        SELECT ad_id, COUNT(DISTINCT email) AS cnt
@@ -405,7 +414,7 @@ async function fetchUtmCounts(since: string, until: string, produtoMap: ProdutoM
        GROUP BY 1`,
       dateParams,
     ),
-    // receita e lag por campanha
+    // receita e lag por campanha — janela de atribuição estendida
     bqQuery(
       `SELECT ${decodeUtm('l.utm_campaign')} AS key,
               SUM(s.Valor_Pago_pelo_Comprador_Sem_Taxas_e_Impostos) AS receita,
@@ -414,7 +423,7 @@ async function fetchUtmCounts(since: string, until: string, produtoMap: ProdutoM
        INNER JOIN ${tVendas} s
          ON LOWER(TRIM(l.lead_email)) = LOWER(TRIM(s.E_mail_do_Comprador))
        WHERE l.utm_campaign IS NOT NULL AND l.utm_campaign != ''
-         AND DATE(s.Data_de_Aprova____o) BETWEEN @since AND @until
+         AND DATE(s.Data_de_Aprova____o) BETWEEN @since AND @sales_until
          ${produtoFilter}
        GROUP BY 1`,
       dateParams,
