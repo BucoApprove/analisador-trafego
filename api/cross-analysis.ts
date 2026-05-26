@@ -248,10 +248,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         FROM leads_rn l INNER JOIN buyers b ON l.email = b.email WHERE l.rn = 1
       )
     SELECT first_tag AS category, 'tag' AS tipo, COUNT(*) AS compradores
-    FROM first_entry WHERE first_tag IS NOT NULL GROUP BY first_tag ORDER BY compradores DESC LIMIT 30
+    FROM first_entry WHERE first_tag IS NOT NULL GROUP BY first_tag
     UNION ALL
     SELECT first_form, 'form', COUNT(*) AS compradores
-    FROM first_entry WHERE first_form IS NOT NULL GROUP BY first_form ORDER BY compradores DESC LIMIT 30
+    FROM first_entry WHERE first_form IS NOT NULL GROUP BY first_form
+    ORDER BY compradores DESC
   `
 
   // ── A5: Funil por UTM (3 dimensões) ─────────────────────────────────────
