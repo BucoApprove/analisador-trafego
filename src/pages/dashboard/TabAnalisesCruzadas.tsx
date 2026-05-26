@@ -105,7 +105,7 @@ function StatusSelect({ options, value, onChange }: { options: string[]; value: 
 
 function defaultSince(): string {
   const d = new Date()
-  d.setDate(d.getDate() - 90)
+  d.setDate(1)
   return d.toISOString().split('T')[0]
 }
 function defaultUntil(): string {
