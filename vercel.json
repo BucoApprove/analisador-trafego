@@ -1,6 +1,7 @@
 {
   "version": 2,
   "functions": {
+    "api/report.ts": { "maxDuration": 300 },
     "api/instagram-content.ts": { "maxDuration": 30 },
     "api/instagram-analytics.ts": { "maxDuration": 60 },
     "api/instagram-publish-scheduled.ts": { "maxDuration": 60 },
@@ -19,7 +20,7 @@
     "api/refresh-perpetuo-cache.ts": { "maxDuration": 300 },
     "api/send-daily-report.ts": { "maxDuration": 30 },
     "api/cruzamento.ts": { "maxDuration": 60 },
-    "api/cross-analysis.ts": { "maxDuration": 60 }
+    "api/cross-analysis.ts": { "maxDuration": 300 }
   },
   "crons": [
     {
