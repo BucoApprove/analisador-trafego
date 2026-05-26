@@ -17,7 +17,9 @@
     "api/meta-ads-data.ts": { "maxDuration": 60 },
     "api/perpetuo-data.ts": { "maxDuration": 60 },
     "api/refresh-perpetuo-cache.ts": { "maxDuration": 300 },
-    "api/send-daily-report.ts": { "maxDuration": 30 }
+    "api/send-daily-report.ts": { "maxDuration": 30 },
+    "api/cruzamento.ts": { "maxDuration": 60 },
+    "api/cross-analysis.ts": { "maxDuration": 60 }
   },
   "crons": [
     {

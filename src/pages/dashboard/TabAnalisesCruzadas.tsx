@@ -53,6 +53,7 @@ export default function TabAnalisesCruzadas({ token, enabled }: Props) {
   const [result, setResult] = useState<CrossAnalysisData | null>(null)
   const [running, setRunning] = useState(false)
   const [runError, setRunError] = useState<string | null>(null)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [activeSubTab, setActiveSubTab] = useState('ltc')
 
   // Behavior-by-tag state
@@ -68,9 +69,9 @@ export default function TabAnalisesCruzadas({ token, enabled }: Props) {
   useEffect(() => {
     if (!enabled || products.length > 0) return
     fetch('/api/cruzamento', { headers: { Authorization: `Bearer ${token}` } })
-      .then(r => r.json())
+      .then(r => r.ok ? r.json() : r.text().then(t => Promise.reject(new Error(`${r.status}: ${t}`))))
       .then(d => { setProducts(d.products ?? []); setStatuses(d.statuses ?? []) })
-      .catch(() => {})
+      .catch(e => setLoadError((e as Error).message))
   }, [enabled, token, products.length])
 
   async function handleRun() {
@@ -119,6 +120,7 @@ export default function TabAnalisesCruzadas({ token, enabled }: Props) {
       {/* Config */}
       <div className="rounded-lg border p-4 space-y-4">
         <SectionHeader title="Análises Cruzadas" description="Cruza dados de leads com vendas para revelar padrões de comportamento." />
+        {loadError && <p className="text-sm text-destructive">Erro ao carregar produtos: {loadError}</p>}
         <div className="grid gap-4 sm:grid-cols-3">
           <div className="space-y-1">
             <p className="text-sm font-medium">Produto de referência</p>
@@ -151,7 +153,7 @@ export default function TabAnalisesCruzadas({ token, enabled }: Props) {
             <p className="text-xs text-muted-foreground">Vazio = todos</p>
           </div>
           <div className="flex items-end">
-            <Button onClick={handleRun} disabled={running || !selectedProduct}>
+            <Button type="button" onClick={handleRun} disabled={running || !selectedProduct}>
               {running ? <><span className="mr-2 animate-spin">⟳</span>Analisando...</> : <><Play className="mr-2 h-4 w-4" />Rodar análises</>}
             </Button>
           </div>
@@ -346,7 +348,7 @@ export default function TabAnalisesCruzadas({ token, enabled }: Props) {
                       {result.availableTags.map(t => <option key={t} value={t} />)}
                     </datalist>
                   </div>
-                  <Button size="sm" onClick={handleRunTag} disabled={tagRunning || !selectedTag}>
+                  <Button type="button" size="sm" onClick={handleRunTag} disabled={tagRunning || !selectedTag}>
                     {tagRunning ? '⟳ Analisando...' : 'Analisar tag'}
                   </Button>
                 </div>
