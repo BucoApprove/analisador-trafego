@@ -1197,6 +1197,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // ── Resposta ──────────────────────────────────────────────────────────────
 
+    const _debugSalesUntil = (() => { const d = new Date(until); d.setDate(d.getDate() + ATTRIBUTION_WINDOW_DAYS); return d.toISOString().split('T')[0] })()
+
     const jsonPayload = {
       gerado_em:      new Date().toISOString(),
       conta:          account,
@@ -1206,6 +1208,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       time_increment: timeIncrement ?? 'aggregated',
       total_linhas:   rows.length,
       dados:          rows,
+      _debug_sales: {
+        report_since:         since,
+        report_until:         until,
+        sales_until:          _debugSalesUntil,
+        vendas_map_size:      Object.keys(utmCounts.vendasContent).length,
+        vendas_last_map_size: Object.keys(utmCounts.vendasLastContent).length,
+        sample_key:           Object.keys(utmCounts.vendasContent)[0] ?? 'VAZIO',
+      },
     }
 
     // Salva no cache (fire-and-forget, não bloqueia a resposta)
