@@ -113,6 +113,7 @@ export default function TabAnalisesCruzadas({ token, enabled }: Props) {
   const [runError, setRunError] = useState<string | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [loaded, setLoaded] = useState(false)
+  const [loadingOpts, setLoadingOpts] = useState(false)
   const [activeSubTab, setActiveSubTab] = useState('ltc')
 
   // Behavior-by-tag state
@@ -128,10 +129,12 @@ export default function TabAnalisesCruzadas({ token, enabled }: Props) {
   useEffect(() => {
     if (!enabled || loaded) return
     setLoaded(true)
+    setLoadingOpts(true)
     fetch('/api/cruzamento', { headers: { Authorization: `Bearer ${token}` } })
       .then(r => r.ok ? r.json() : r.text().then(t => Promise.reject(new Error(`${r.status}: ${t}`))))
       .then(d => { setProducts(d.products ?? []); setStatuses(d.statuses ?? []) })
       .catch(e => { setLoadError((e as Error).message); setLoaded(false) })
+      .finally(() => setLoadingOpts(false))
   }, [enabled, token])
 
   async function handleRun() {
@@ -180,6 +183,7 @@ export default function TabAnalisesCruzadas({ token, enabled }: Props) {
       {/* Config */}
       <div className="rounded-lg border p-4 space-y-4">
         <SectionHeader title="Análises Cruzadas" description="Cruza dados de leads com vendas para revelar padrões de comportamento." />
+        {loadingOpts && <p className="text-sm text-muted-foreground animate-pulse">Carregando produtos e status...</p>}
         {loadError && <p className="text-sm text-destructive">Erro ao carregar produtos: {loadError}</p>}
         <div className="grid gap-4 sm:grid-cols-3">
           {/* Produto */}
