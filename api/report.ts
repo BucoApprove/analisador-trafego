@@ -298,7 +298,7 @@ async function fetchUtmCounts(since: string, until: string, produtoMap: ProdutoM
        GROUP BY 1, 2`,
       dateParams,
     ),
-    // vendas por campanha — janela de atribuição estendida (@sales_until)
+    // vendas por campanha — leads no período, vendas na janela de atribuição
     bqQuery(
       `SELECT ${decodeUtm('l.utm_campaign')} AS key,
               COUNT(DISTINCT LOWER(TRIM(l.lead_email))) AS cnt
@@ -306,12 +306,13 @@ async function fetchUtmCounts(since: string, until: string, produtoMap: ProdutoM
        INNER JOIN ${tVendas} s
          ON LOWER(TRIM(l.lead_email)) = LOWER(TRIM(s.E_mail_do_Comprador))
        WHERE l.utm_campaign IS NOT NULL AND l.utm_campaign != ''
+         AND DATE(l.lead_register) BETWEEN @since AND @until
          AND DATE(s.Data_de_Aprova____o) BETWEEN @since AND @sales_until
          ${produtoFilter}
        GROUP BY 1`,
       dateParams,
     ),
-    // vendas por criativo (campaign|||content) — janela de atribuição estendida
+    // vendas por criativo (campaign|||content) — leads no período, vendas na janela
     bqQuery(
       `SELECT
          ${decodeUtm('l.utm_campaign')} AS campaign,
@@ -322,12 +323,13 @@ async function fetchUtmCounts(since: string, until: string, produtoMap: ProdutoM
          ON LOWER(TRIM(l.lead_email)) = LOWER(TRIM(s.E_mail_do_Comprador))
        WHERE l.utm_campaign IS NOT NULL AND l.utm_campaign != ''
          AND l.utm_content  IS NOT NULL AND l.utm_content  != ''
+         AND DATE(l.lead_register) BETWEEN @since AND @until
          AND DATE(s.Data_de_Aprova____o) BETWEEN @since AND @sales_until
          ${produtoFilter}
        GROUP BY 1, 2`,
       dateParams,
     ),
-    // vendas por ad_id: utm_content numérico = {{ad.id}} injetado pelo Meta
+    // vendas por ad_id numérico — leads no período, vendas na janela
     bqQuery(
       `SELECT
          TRIM(l.utm_content) AS ad_id,
@@ -337,12 +339,13 @@ async function fetchUtmCounts(since: string, until: string, produtoMap: ProdutoM
          ON LOWER(TRIM(l.lead_email)) = LOWER(TRIM(s.E_mail_do_Comprador))
        WHERE l.utm_content IS NOT NULL AND l.utm_content != ''
          AND REGEXP_CONTAINS(TRIM(l.utm_content), r'^[0-9]+$')
+         AND DATE(l.lead_register) BETWEEN @since AND @until
          AND DATE(s.Data_de_Aprova____o) BETWEEN @since AND @sales_until
          ${produtoFilter}
        GROUP BY 1`,
       dateParams,
     ),
-    // last touch por campanha — janela de atribuição estendida
+    // last touch por campanha — leads no período, vendas na janela
     bqQuery(
       `WITH ranked AS (
          SELECT
@@ -356,6 +359,7 @@ async function fetchUtmCounts(since: string, until: string, produtoMap: ProdutoM
          INNER JOIN ${tVendas} s
            ON LOWER(TRIM(l.lead_email)) = LOWER(TRIM(s.E_mail_do_Comprador))
          WHERE l.utm_campaign IS NOT NULL AND l.utm_campaign != ''
+           AND DATE(l.lead_register) BETWEEN @since AND @until
            AND l.lead_register <= s.Data_de_Aprova____o
            AND DATE(s.Data_de_Aprova____o) BETWEEN @since AND @sales_until
            ${produtoFilter}
@@ -365,7 +369,7 @@ async function fetchUtmCounts(since: string, until: string, produtoMap: ProdutoM
        GROUP BY 1`,
       dateParams,
     ),
-    // last touch por criativo — janela de atribuição estendida
+    // last touch por criativo — leads no período, vendas na janela
     bqQuery(
       `WITH ranked AS (
          SELECT
@@ -381,6 +385,7 @@ async function fetchUtmCounts(since: string, until: string, produtoMap: ProdutoM
            ON LOWER(TRIM(l.lead_email)) = LOWER(TRIM(s.E_mail_do_Comprador))
          WHERE l.utm_campaign IS NOT NULL AND l.utm_campaign != ''
            AND l.utm_content  IS NOT NULL AND l.utm_content  != ''
+           AND DATE(l.lead_register) BETWEEN @since AND @until
            AND l.lead_register <= s.Data_de_Aprova____o
            AND DATE(s.Data_de_Aprova____o) BETWEEN @since AND @sales_until
            ${produtoFilter}
@@ -390,7 +395,7 @@ async function fetchUtmCounts(since: string, until: string, produtoMap: ProdutoM
        GROUP BY 1, 2`,
       dateParams,
     ),
-    // last touch por ad_id numérico — janela de atribuição estendida
+    // last touch por ad_id numérico — leads no período, vendas na janela
     bqQuery(
       `WITH ranked AS (
          SELECT
@@ -405,6 +410,7 @@ async function fetchUtmCounts(since: string, until: string, produtoMap: ProdutoM
            ON LOWER(TRIM(l.lead_email)) = LOWER(TRIM(s.E_mail_do_Comprador))
          WHERE l.utm_content IS NOT NULL AND l.utm_content != ''
            AND REGEXP_CONTAINS(TRIM(l.utm_content), r'^[0-9]+$')
+           AND DATE(l.lead_register) BETWEEN @since AND @until
            AND l.lead_register <= s.Data_de_Aprova____o
            AND DATE(s.Data_de_Aprova____o) BETWEEN @since AND @sales_until
            ${produtoFilter}
@@ -414,7 +420,7 @@ async function fetchUtmCounts(since: string, until: string, produtoMap: ProdutoM
        GROUP BY 1`,
       dateParams,
     ),
-    // receita e lag por campanha — janela de atribuição estendida
+    // receita e lag por campanha — leads no período, vendas na janela
     bqQuery(
       `SELECT ${decodeUtm('l.utm_campaign')} AS key,
               SUM(s.Valor_Pago_pelo_Comprador_Sem_Taxas_e_Impostos) AS receita,
@@ -423,6 +429,7 @@ async function fetchUtmCounts(since: string, until: string, produtoMap: ProdutoM
        INNER JOIN ${tVendas} s
          ON LOWER(TRIM(l.lead_email)) = LOWER(TRIM(s.E_mail_do_Comprador))
        WHERE l.utm_campaign IS NOT NULL AND l.utm_campaign != ''
+         AND DATE(l.lead_register) BETWEEN @since AND @until
          AND DATE(s.Data_de_Aprova____o) BETWEEN @since AND @sales_until
          ${produtoFilter}
        GROUP BY 1`,
@@ -673,7 +680,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     ? req.query.fields as 'minimal' | 'standard' | 'full'
     : 'standard'
 
-  const forceRefresh = req.query.refresh === 'true' || req.query.cache === 'false'
+  const forceRefresh = req.query.refresh === 'true' || req.query.cache === 'false' || req.query.nocache === '1'
 
   const acctId       = ACCOUNT_IDS[account]
   const timeRange    = JSON.stringify({ since, until })
