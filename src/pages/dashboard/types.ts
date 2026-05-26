@@ -401,6 +401,20 @@ export interface BuyerTagRow {
   pct: number
 }
 
+export interface UtmAttrRow {
+  utm:        string
+  leads:      number
+  anyTime:    number
+  lastBefore: number
+  origin:     number
+}
+
+export interface UtmAttributionData {
+  byContent:  UtmAttrRow[]
+  byCampaign: UtmAttrRow[]
+  byMedium:   UtmAttrRow[]
+}
+
 export interface BehaviorTagResult {
   count: number
   soAntes: number

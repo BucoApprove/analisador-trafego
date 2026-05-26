@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react'
-import type { CrossAnalysisData, BehaviorTagResult } from './types'
+import { useState, useEffect, useMemo } from 'react'
+import type { CrossAnalysisData, BehaviorTagResult, UtmAttributionData, UtmAttrRow } from './types'
 import { KpiCard, SectionHeader, CHART_COLORS } from './components'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { Button } from '@/components/ui/button'
@@ -133,8 +133,17 @@ export default function TabAnalisesCruzadas({ token, enabled }: Props) {
   const [tagRunning, setTagRunning] = useState(false)
   const [tagError, setTagError] = useState<string | null>(null)
 
-  // UTM funnel dim selector
+  // UTM funnel dim selector (legacy)
   const [utmDim, setUtmDim] = useState<'utm_content' | 'utm_campaign' | 'utm_medium'>('utm_content')
+
+  // UTM attribution (new)
+  const [utmAttr, setUtmAttr] = useState<UtmAttributionData | null>(null)
+  const [utmAttrRunning, setUtmAttrRunning] = useState(false)
+  const [utmAttrError, setUtmAttrError] = useState<string | null>(null)
+  const [utmAttrDim, setUtmAttrDim] = useState<'byContent' | 'byCampaign' | 'byMedium'>('byCampaign')
+  type SortKey = 'leads' | 'anyTime' | 'lastBefore' | 'origin'
+  const [utmAttrSort, setUtmAttrSort] = useState<SortKey>('leads')
+  const [utmAttrDesc, setUtmAttrDesc] = useState(true)
 
   // Load product/status options once when tab becomes active
   useEffect(() => {
@@ -184,6 +193,24 @@ export default function TabAnalisesCruzadas({ token, enabled }: Props) {
       setTagError((e as Error).message)
     } finally {
       setTagRunning(false)
+    }
+  }
+
+  async function handleRunUtmAttr() {
+    if (!selectedProduct) return
+    setUtmAttrRunning(true); setUtmAttrError(null); setUtmAttr(null)
+    try {
+      const res = await fetch('/api/cross-analysis', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ type: 'utm-attribution', product: selectedProduct, statuses: selectedStatuses, since, until }),
+      })
+      if (!res.ok) throw new Error(`Erro ${res.status}: ${await res.text()}`)
+      setUtmAttr(await res.json())
+    } catch (e) {
+      setUtmAttrError((e as Error).message)
+    } finally {
+      setUtmAttrRunning(false)
     }
   }
 
@@ -241,6 +268,7 @@ export default function TabAnalisesCruzadas({ token, enabled }: Props) {
               { id: 'entry', label: '🚪 Primeira entrada' },
               { id: 'funnel', label: '📡 Funil UTM' },
               { id: 'buyer-tags', label: '🔖 Tags compradores' },
+              { id: 'utm-attr', label: '🎯 UTM Compradores' },
             ].map(t => (
               <TabsTrigger key={t.id} value={t.id} className="text-xs sm:text-sm">{t.label}</TabsTrigger>
             ))}
@@ -539,7 +567,132 @@ export default function TabAnalisesCruzadas({ token, enabled }: Props) {
               </>
             )}
           </TabsContent>
+
+          {/* 🎯 UTM Compradores */}
+          <TabsContent value="utm-attr" className="space-y-4 mt-4">
+            <UtmAttrPanel
+              token={token}
+              product={selectedProduct}
+              statuses={selectedStatuses}
+              since={since}
+              until={until}
+              data={utmAttr}
+              running={utmAttrRunning}
+              error={utmAttrError}
+              dim={utmAttrDim}
+              sortKey={utmAttrSort}
+              sortDesc={utmAttrDesc}
+              onRun={handleRunUtmAttr}
+              onDim={setUtmAttrDim}
+              onSort={(k) => { if (utmAttrSort === k) setUtmAttrDesc(d => !d); else { setUtmAttrSort(k); setUtmAttrDesc(true) } }}
+            />
+          </TabsContent>
         </Tabs>
+      )}
+    </div>
+  )
+}
+
+// ─── UTM Compradores panel ────────────────────────────────────────────────────
+
+type SortKey = 'leads' | 'anyTime' | 'lastBefore' | 'origin'
+
+function UtmAttrPanel({
+  product, data, running, error, dim, sortKey, sortDesc,
+  onRun, onDim, onSort,
+}: {
+  token: string; product: string; statuses: string[]; since: string; until: string
+  data: UtmAttributionData | null; running: boolean; error: string | null
+  dim: 'byContent' | 'byCampaign' | 'byMedium'
+  sortKey: SortKey; sortDesc: boolean
+  onRun: () => void; onDim: (d: 'byContent' | 'byCampaign' | 'byMedium') => void
+  onSort: (k: SortKey) => void
+}) {
+  const DIMS = [
+    { key: 'byCampaign' as const, label: 'Campanha' },
+    { key: 'byMedium'   as const, label: 'Público (medium)' },
+    { key: 'byContent'  as const, label: 'Criativo (content)' },
+  ]
+
+  const rows: UtmAttrRow[] = useMemo(() => {
+    const raw = data?.[dim] ?? []
+    return [...raw].sort((a, b) => {
+      const diff = (a[sortKey] as number) - (b[sortKey] as number)
+      return sortDesc ? -diff : diff
+    })
+  }, [data, dim, sortKey, sortDesc])
+
+  function SortTh({ label, k }: { label: string; k: SortKey }) {
+    const active = sortKey === k
+    return (
+      <th
+        className="px-3 py-2 text-right font-medium cursor-pointer select-none hover:bg-muted/70"
+        onClick={() => onSort(k)}
+      >
+        {label} {active ? (sortDesc ? '▼' : '▲') : ''}
+      </th>
+    )
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="flex gap-2">
+          {DIMS.map(d => (
+            <Button key={d.key} type="button" size="sm" variant={dim === d.key ? 'default' : 'outline'} onClick={() => onDim(d.key)}>
+              {d.label}
+            </Button>
+          ))}
+        </div>
+        <Button type="button" size="sm" onClick={onRun} disabled={running || !product}>
+          {running ? <><span className="mr-1 animate-spin">⟳</span>Buscando...</> : <><Play className="mr-1 h-3 w-3" />Buscar UTMs</>}
+        </Button>
+      </div>
+
+      {error && <p className="text-sm text-destructive">{error}</p>}
+
+      {!data && !running && (
+        <p className="text-sm text-muted-foreground">Clique em "Buscar UTMs" para carregar a atribuição de compradores.</p>
+      )}
+
+      {data && (
+        <>
+          <p className="text-xs text-muted-foreground">
+            <strong>Any-touch</strong> = comprador tinha este UTM em algum momento · <strong>Last</strong> = último UTM antes da compra · <strong>Origin</strong> = primeiro UTM do comprador
+          </p>
+          <div className="overflow-x-auto rounded border">
+            <table className="w-full text-sm">
+              <thead className="bg-muted">
+                <tr>
+                  <th className="px-3 py-2 text-left font-medium">UTM</th>
+                  <SortTh label="Leads" k="leads" />
+                  <SortTh label="Any-touch" k="anyTime" />
+                  <SortTh label="Last touch" k="lastBefore" />
+                  <SortTh label="Origin" k="origin" />
+                  <th className="px-3 py-2 text-right font-medium">Conv. (last)</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {rows.map((r, i) => {
+                  const taxa = r.leads > 0 ? ((r.lastBefore / r.leads) * 100).toFixed(1) : '—'
+                  return (
+                    <tr key={i} className="hover:bg-muted/50">
+                      <td className="px-3 py-2 font-mono text-xs max-w-[240px] truncate" title={r.utm}>{r.utm}</td>
+                      <td className="px-3 py-2 text-right">{r.leads.toLocaleString('pt-BR')}</td>
+                      <td className="px-3 py-2 text-right">{r.anyTime > 0 ? r.anyTime : '—'}</td>
+                      <td className="px-3 py-2 text-right font-medium">{r.lastBefore > 0 ? r.lastBefore : '—'}</td>
+                      <td className="px-3 py-2 text-right">{r.origin > 0 ? r.origin : '—'}</td>
+                      <td className="px-3 py-2 text-right"><Badge variant={r.lastBefore > 0 ? 'default' : 'outline'}>{taxa}%</Badge></td>
+                    </tr>
+                  )
+                })}
+                {rows.length === 0 && (
+                  <tr><td colSpan={6} className="px-3 py-4 text-center text-muted-foreground">Sem dados.</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </>
       )}
     </div>
   )

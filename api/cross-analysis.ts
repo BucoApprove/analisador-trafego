@@ -141,6 +141,98 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
   }
 
+  // ── type = 'utm-attribution' ─────────────────────────────────────────────
+  if (body.type === 'utm-attribution') {
+    const product = body.product ?? ''
+    if (!product) return res.status(400).json({ error: 'product is required' })
+
+    const params: QueryParam[] = [{ name: 'product', value: product }, ...stClause.params, ...dateParams]
+
+    // For each UTM dimension: anyTime (any lead→sale match), lastBefore (last UTM before sale), origin (first UTM ever)
+    function utmAttrSql(utmCol: string): string {
+      return `
+        WITH
+          buyers AS (
+            SELECT DISTINCT LOWER(TRIM(E_mail_do_Comprador)) AS email
+            FROM ${tVendas}
+            WHERE Nome_do_Produto = @product ${stClause.sql} AND E_mail_do_Comprador IS NOT NULL${saleDateFilter}
+          ),
+          leads_with_utm AS (
+            SELECT
+              LOWER(TRIM(lead_email)) AS email,
+              ${utmCol} AS utm_val,
+              lead_register,
+              ROW_NUMBER() OVER (PARTITION BY LOWER(TRIM(lead_email)) ORDER BY lead_register ASC)  AS rn_first,
+              ROW_NUMBER() OVER (PARTITION BY LOWER(TRIM(lead_email)) ORDER BY lead_register DESC) AS rn_last
+            FROM ${tLeads}
+            WHERE lead_email IS NOT NULL
+              AND ${utmCol} IS NOT NULL AND TRIM(${utmCol}) != ''${dateFilter}
+          ),
+          any_touch AS (
+            SELECT utm_val, COUNT(DISTINCT l.email) AS cnt
+            FROM leads_with_utm l INNER JOIN buyers b ON l.email = b.email
+            GROUP BY utm_val
+          ),
+          last_touch AS (
+            SELECT utm_val, COUNT(DISTINCT l.email) AS cnt
+            FROM leads_with_utm l INNER JOIN buyers b ON l.email = b.email
+            WHERE rn_last = 1
+            GROUP BY utm_val
+          ),
+          origin_touch AS (
+            SELECT utm_val, COUNT(DISTINCT l.email) AS cnt
+            FROM leads_with_utm l INNER JOIN buyers b ON l.email = b.email
+            WHERE rn_first = 1
+            GROUP BY utm_val
+          ),
+          all_leads AS (
+            SELECT utm_val, COUNT(DISTINCT lead_email) AS cnt
+            FROM ${tLeads}
+            WHERE lead_email IS NOT NULL
+              AND ${utmCol} IS NOT NULL AND TRIM(${utmCol}) != ''${dateFilter}
+            GROUP BY utm_val
+          )
+        SELECT
+          a.utm_val AS utm,
+          IFNULL(al.cnt, 0) AS leads,
+          IFNULL(at2.cnt, 0) AS any_time,
+          IFNULL(lt.cnt, 0) AS last_before,
+          IFNULL(ot.cnt, 0) AS origin
+        FROM all_leads al
+        LEFT JOIN any_touch at2 ON al.utm_val = at2.utm_val
+        LEFT JOIN last_touch lt ON al.utm_val = lt.utm_val
+        LEFT JOIN origin_touch ot ON al.utm_val = ot.utm_val
+        LEFT JOIN (SELECT utm_val FROM any_touch UNION DISTINCT SELECT utm_val FROM last_touch UNION DISTINCT SELECT utm_val FROM origin_touch) a ON al.utm_val = a.utm_val
+        ORDER BY leads DESC
+        LIMIT 100
+      `
+    }
+
+    try {
+      const [contentRes, campaignRes, mediumRes] = await Promise.all([
+        bqQuery(utmAttrSql('utm_content'),  params),
+        bqQuery(utmAttrSql('utm_campaign'), params),
+        bqQuery(utmAttrSql('utm_medium'),   params),
+      ])
+
+      const parseRows = (rows: typeof contentRes.rows) => rows.map(r => ({
+        utm:        r.utm ?? '',
+        leads:      parseInt(r.leads     ?? '0'),
+        anyTime:    parseInt(r.any_time  ?? '0'),
+        lastBefore: parseInt(r.last_before ?? '0'),
+        origin:     parseInt(r.origin    ?? '0'),
+      }))
+
+      return res.json({
+        byContent:  parseRows(contentRes.rows),
+        byCampaign: parseRows(campaignRes.rows),
+        byMedium:   parseRows(mediumRes.rows),
+      })
+    } catch (e) {
+      return res.status(500).json({ error: (e as Error).message })
+    }
+  }
+
   // ── type = 'all' ─────────────────────────────────────────────────────────
   if (body.type !== 'all') return res.status(400).json({ error: "type must be 'all' or 'behavior-tag'" })
   const product = body.product ?? ''
