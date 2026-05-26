@@ -414,6 +414,7 @@ export interface UtmAttributionData {
   byContent:   UtmAttrRow[]
   byCampaign:  UtmAttrRow[]
   byMedium:    UtmAttrRow[]
+  lastTagDist: { tag: string; compradores: number }[]
 }
 
 export interface BehaviorTagResult {

@@ -247,12 +247,49 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       WHERE Nome_do_Produto = @product ${stClause.sql} AND E_mail_do_Comprador IS NOT NULL${saleDateFilter}
     `
 
+    // Última tag do comprador antes da data da compra
+    const lastTagSql = `
+      WITH
+        sales AS (
+          SELECT
+            LOWER(TRIM(E_mail_do_Comprador)) AS email,
+            MIN(COALESCE(Data_de_Aprova____o, Data_do_Pedido)) AS data_compra
+          FROM ${tVendas}
+          WHERE Nome_do_Produto = @product ${stClause.sql} AND E_mail_do_Comprador IS NOT NULL${saleDateFilter}
+          GROUP BY LOWER(TRIM(E_mail_do_Comprador))
+        ),
+        leads_before AS (
+          SELECT
+            LOWER(TRIM(l.lead_email)) AS email,
+            l.tag_name,
+            l.lead_register,
+            ROW_NUMBER() OVER (
+              PARTITION BY LOWER(TRIM(l.lead_email))
+              ORDER BY l.lead_register DESC
+            ) AS rn
+          FROM ${tLeads} l
+          INNER JOIN sales s ON LOWER(TRIM(l.lead_email)) = s.email
+          WHERE l.lead_email IS NOT NULL
+            AND l.tag_name IS NOT NULL
+            AND l.lead_register <= s.data_compra${dateFilter}
+        )
+      SELECT
+        IFNULL(tag_name, '(sem tag antes da compra)') AS last_tag,
+        COUNT(DISTINCT email) AS compradores
+      FROM leads_before
+      WHERE rn = 1
+      GROUP BY last_tag
+      ORDER BY compradores DESC
+      LIMIT 50
+    `
+
     try {
-      const [contentRes, campaignRes, mediumRes, totalRes] = await Promise.all([
+      const [contentRes, campaignRes, mediumRes, totalRes, lastTagRes] = await Promise.all([
         bqQuery(utmAttrSql('utm_content'),  params),
         bqQuery(utmAttrSql('utm_campaign'), params),
         bqQuery(utmAttrSql('utm_medium'),   params),
         bqQuery(totalBuyersSql, params),
+        bqQuery(lastTagSql, params),
       ])
 
       const parseRows = (rows: typeof contentRes.rows) => rows.map(r => ({
@@ -268,6 +305,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         byContent:   parseRows(contentRes.rows),
         byCampaign:  parseRows(campaignRes.rows),
         byMedium:    parseRows(mediumRes.rows),
+        lastTagDist: lastTagRes.rows.map(r => ({
+          tag:         r.last_tag ?? '',
+          compradores: parseInt(r.compradores ?? '0'),
+        })),
       })
     } catch (e) {
       return res.status(500).json({ error: (e as Error).message })

@@ -699,6 +699,37 @@ function UtmAttrPanel({
               </tbody>
             </table>
           </div>
+
+          {/* Última tag antes da compra */}
+          {data.lastTagDist.length > 0 && (
+            <div className="space-y-2 pt-2">
+              <p className="text-sm font-medium">Última tag do comprador antes da compra</p>
+              <p className="text-xs text-muted-foreground">Último registro de tag encontrado para cada comprador, anterior à data da venda.</p>
+              <div className="overflow-x-auto rounded border">
+                <table className="w-full text-sm">
+                  <thead className="bg-muted">
+                    <tr>
+                      <th className="px-3 py-2 text-left font-medium">Tag</th>
+                      <th className="px-3 py-2 text-right font-medium">Compradores</th>
+                      <th className="px-3 py-2 text-right font-medium">%</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {data.lastTagDist.map((r, i) => {
+                      const pct = data.totalBuyers > 0 ? ((r.compradores / data.totalBuyers) * 100).toFixed(1) : '—'
+                      return (
+                        <tr key={i} className="hover:bg-muted/50">
+                          <td className="px-3 py-2 font-mono text-xs">{r.tag}</td>
+                          <td className="px-3 py-2 text-right font-medium">{r.compradores.toLocaleString('pt-BR')}</td>
+                          <td className="px-3 py-2 text-right"><Badge variant="outline">{pct}%</Badge></td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
         </>
       )}
     </div>
