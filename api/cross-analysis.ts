@@ -303,34 +303,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   // ── Available tags & products ────────────────────────────────────────────
   const availTagsSql = `SELECT DISTINCT tag_name AS t FROM ${tLeads} WHERE tag_name IS NOT NULL ORDER BY t LIMIT 200`
-  const availProdSql = `SELECT DISTINCT Nome_do_Produto AS p FROM ${tVendas} WHERE Nome_do_Produto IS NOT NULL ORDER BY p`
 
   try {
-    const [
-      ltcRes,
-      ltcAllRes,
-      tagsRes,
-      utmCRes,
-      firstEntryRes,
-      utmF_content,
-      utmF_campaign,
-      utmF_medium,
-      buyerTagsRes,
-      availTagsRes,
-      availProdRes,
-    ] = await Promise.all([
+    // Wave 1: queries filtradas por produto (rápidas)
+    const [ltcRes, tagsRes, firstEntryRes, buyerTagsRes, availTagsRes] = await Promise.all([
       bqQuery(ltcSql, baseParams),
-      bqQuery(ltcAllSql, stOnlyParams),
       bqQuery(tagsSql, baseParams),
-      bqQuery(utmContentSql, []),
       bqQuery(firstEntrySql, baseParams),
+      bqQuery(buyerTagsSql, baseParams),
+      bqQuery(availTagsSql, []),
+    ])
+
+    // Wave 2: queries full-scan (mais pesadas, separadas para não disputar timeout)
+    const [ltcAllRes, utmCRes, utmF_content, utmF_campaign, utmF_medium] = await Promise.all([
+      bqQuery(ltcAllSql, stOnlyParams),
+      bqQuery(utmContentSql, []),
       bqQuery(utmFunnelSql('utm_content'), baseParams),
       bqQuery(utmFunnelSql('utm_campaign'), baseParams),
       bqQuery(utmFunnelSql('utm_medium'), baseParams),
-      bqQuery(buyerTagsSql, baseParams),
-      bqQuery(availTagsSql, []),
-      bqQuery(availProdSql, []),
     ])
+
 
     // Parse A1
     const ltcRows = ltcRes.rows
@@ -420,7 +412,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       utmFunnel,
       buyerTags,
       availableTags: availTagsRes.rows.map(r => r.t ?? '').filter(Boolean),
-      availableProducts: availProdRes.rows.map(r => r.p ?? '').filter(Boolean),
+      availableProducts: [],
     })
   } catch (e) {
     res.status(500).json({ error: (e as Error).message })
