@@ -8,16 +8,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import type { QueryParam } from './_bq.js'
 import { bqQuery, tableVendas } from './_bq.js'
-
-function auth(req: VercelRequest, res: VercelResponse): boolean {
-  const header = req.headers.authorization ?? ''
-  const provided = header.startsWith('Bearer ') ? header.slice(7) : ''
-  const ok =
-    (provided && provided === process.env.DASHBOARD_TOKEN_ADMIN) ||
-    (provided && provided === process.env.DASHBOARD_TOKEN)
-  if (!ok) { res.status(401).json({ error: 'Unauthorized' }); return false }
-  return true
-}
+import { authUser } from './_supabase-auth.js'
 
 function inClause(col: string, values: string[], prefix: string): { sql: string; params: QueryParam[] } {
   if (values.length === 0) return { sql: '1=0', params: [] }
@@ -35,7 +26,7 @@ function statusClause(statuses: string[]): { sql: string; params: QueryParam[] }
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  if (!auth(req, res)) return
+  if (!await authUser(req, res)) return
 
   const tVendas = tableVendas()
 

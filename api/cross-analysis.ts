@@ -11,16 +11,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import type { QueryParam } from './_bq.js'
 import { bqQuery, tableLeads, tableVendas } from './_bq.js'
-
-function auth(req: VercelRequest, res: VercelResponse): boolean {
-  const header = req.headers.authorization ?? ''
-  const provided = header.startsWith('Bearer ') ? header.slice(7) : ''
-  const ok =
-    (provided && provided === process.env.DASHBOARD_TOKEN_ADMIN) ||
-    (provided && provided === process.env.DASHBOARD_TOKEN)
-  if (!ok) { res.status(401).json({ error: 'Unauthorized' }); return false }
-  return true
-}
+import { authUser } from './_supabase-auth.js'
 
 function statusSql(statuses: string[]): { sql: string; params: QueryParam[] } {
   if (statuses.length === 0) return { sql: '', params: [] }
@@ -34,7 +25,7 @@ function statusSql(statuses: string[]): { sql: string; params: QueryParam[] } {
 const VALID_UTM_COLS = ['utm_content', 'utm_campaign', 'utm_medium'] as const
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  if (!auth(req, res)) return
+  if (!await authUser(req, res)) return
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
 
   res.setHeader('Cache-Control', 'no-store')
