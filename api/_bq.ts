@@ -195,30 +195,52 @@ export async function bqQuery(
     jobReference?: { jobId: string }
   }
 
-  if (!result.jobComplete) throw new Error('BigQuery query timed out (jobComplete=false)')
+  // Job still running — poll getQueryResults until complete (max ~36s)
+  let polled = result
+  if (!polled.jobComplete) {
+    const jobId = polled.jobReference?.jobId
+    if (!jobId) throw new Error('BigQuery query timed out (jobComplete=false, no jobId)')
+    const location = process.env.BQ_LOCATION ?? 'US'
+    const MAX_ATTEMPTS = 12
+    const POLL_MS = 3000
+    for (let i = 0; i < MAX_ATTEMPTS; i++) {
+      await new Promise(r => setTimeout(r, POLL_MS))
+      const pollUrl = new URL(
+        `https://bigquery.googleapis.com/bigquery/v2/projects/${creds.project_id}/queries/${jobId}`,
+      )
+      pollUrl.searchParams.set('timeoutMs', '5000')
+      pollUrl.searchParams.set('maxResults', '10000')
+      pollUrl.searchParams.set('location', location)
+      const pollRes = await fetch(pollUrl.toString(), { headers: { Authorization: `Bearer ${token}` } })
+      if (!pollRes.ok) throw new Error(`BigQuery poll failed (${pollRes.status}): ${await pollRes.text()}`)
+      polled = await pollRes.json()
+      if (polled.jobComplete) break
+    }
+    if (!polled.jobComplete) throw new Error('BigQuery query timed out after polling')
+  }
 
-  const fields = result.schema?.fields?.map((f) => f.name) ?? []
-  const firstRows: BQRow[] = (result.rows ?? []).map((row) => {
+  const fields = polled.schema?.fields?.map((f: { name: string }) => f.name) ?? []
+  const firstRows: BQRow[] = (polled.rows ?? []).map((row: { f: { v: string | null }[] }) => {
     const obj: BQRow = {}
-    row.f.forEach((cell, i) => {
+    row.f.forEach((cell: { v: string | null }, i: number) => {
       obj[fields[i]] = cell.v
     })
     return obj
   })
 
   const allRows =
-    result.pageToken && result.jobReference
+    polled.pageToken && polled.jobReference
       ? await fetchRemainingPages(
           creds.project_id,
-          result.jobReference.jobId,
+          polled.jobReference.jobId,
           token,
           fields,
           firstRows,
-          result.pageToken,
+          polled.pageToken,
         )
       : firstRows
 
-  return { rows: allRows, totalRows: parseInt(result.totalRows ?? '0') }
+  return { rows: allRows, totalRows: parseInt(polled.totalRows ?? '0') }
 }
 
 // ─── Table reference helpers ──────────────────────────────────────────────────
