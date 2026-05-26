@@ -273,6 +273,7 @@ async function fetchUtmCounts(since: string, until: string, produtoMap: ProdutoM
   const produtoFilter = allProdutoIds.length > 0
     ? `AND CAST(s.ID_do_Produto AS INT64) IN (${allProdutoIds.join(', ')})`
     : ''
+  const statusFilter = `AND s.Status IN ('APROVADO', 'COMPLETO')`
 
   const decodeUtm = (col: string) =>
     `REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(` +
@@ -309,6 +310,7 @@ async function fetchUtmCounts(since: string, until: string, produtoMap: ProdutoM
          AND DATE(l.lead_register) BETWEEN @since AND @until
          AND DATE(s.Data_de_Aprova____o) BETWEEN @since AND @sales_until
          ${produtoFilter}
+         ${statusFilter}
        GROUP BY 1`,
       dateParams,
     ),
@@ -326,6 +328,7 @@ async function fetchUtmCounts(since: string, until: string, produtoMap: ProdutoM
          AND DATE(l.lead_register) BETWEEN @since AND @until
          AND DATE(s.Data_de_Aprova____o) BETWEEN @since AND @sales_until
          ${produtoFilter}
+         ${statusFilter}
        GROUP BY 1, 2`,
       dateParams,
     ),
@@ -342,6 +345,7 @@ async function fetchUtmCounts(since: string, until: string, produtoMap: ProdutoM
          AND DATE(l.lead_register) BETWEEN @since AND @until
          AND DATE(s.Data_de_Aprova____o) BETWEEN @since AND @sales_until
          ${produtoFilter}
+         ${statusFilter}
        GROUP BY 1`,
       dateParams,
     ),
@@ -363,6 +367,7 @@ async function fetchUtmCounts(since: string, until: string, produtoMap: ProdutoM
            AND l.lead_register <= s.Data_de_Aprova____o
            AND DATE(s.Data_de_Aprova____o) BETWEEN @since AND @sales_until
            ${produtoFilter}
+           ${statusFilter}
        )
        SELECT campaign AS key, COUNT(DISTINCT email) AS cnt
        FROM ranked WHERE rn = 1
@@ -389,6 +394,7 @@ async function fetchUtmCounts(since: string, until: string, produtoMap: ProdutoM
            AND l.lead_register <= s.Data_de_Aprova____o
            AND DATE(s.Data_de_Aprova____o) BETWEEN @since AND @sales_until
            ${produtoFilter}
+           ${statusFilter}
        )
        SELECT campaign, content, COUNT(DISTINCT email) AS cnt
        FROM ranked WHERE rn = 1
@@ -414,6 +420,7 @@ async function fetchUtmCounts(since: string, until: string, produtoMap: ProdutoM
            AND l.lead_register <= s.Data_de_Aprova____o
            AND DATE(s.Data_de_Aprova____o) BETWEEN @since AND @sales_until
            ${produtoFilter}
+           ${statusFilter}
        )
        SELECT ad_id, COUNT(DISTINCT email) AS cnt
        FROM ranked WHERE rn = 1
@@ -432,6 +439,7 @@ async function fetchUtmCounts(since: string, until: string, produtoMap: ProdutoM
          AND DATE(l.lead_register) BETWEEN @since AND @until
          AND DATE(s.Data_de_Aprova____o) BETWEEN @since AND @sales_until
          ${produtoFilter}
+         ${statusFilter}
        GROUP BY 1`,
       dateParams,
     ),
