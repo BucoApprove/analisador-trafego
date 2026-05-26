@@ -112,6 +112,7 @@ export default function TabAnalisesCruzadas({ token, enabled }: Props) {
   const [running, setRunning] = useState(false)
   const [runError, setRunError] = useState<string | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
+  const [loaded, setLoaded] = useState(false)
   const [activeSubTab, setActiveSubTab] = useState('ltc')
 
   // Behavior-by-tag state
@@ -123,14 +124,15 @@ export default function TabAnalisesCruzadas({ token, enabled }: Props) {
   // UTM funnel dim selector
   const [utmDim, setUtmDim] = useState<'utm_content' | 'utm_campaign' | 'utm_medium'>('utm_content')
 
-  // Load product/status options once
+  // Load product/status options once when tab becomes active
   useEffect(() => {
-    if (!enabled || products.length > 0) return
+    if (!enabled || loaded) return
+    setLoaded(true)
     fetch('/api/cruzamento', { headers: { Authorization: `Bearer ${token}` } })
       .then(r => r.ok ? r.json() : r.text().then(t => Promise.reject(new Error(`${r.status}: ${t}`))))
       .then(d => { setProducts(d.products ?? []); setStatuses(d.statuses ?? []) })
-      .catch(e => setLoadError((e as Error).message))
-  }, [enabled, token, products.length])
+      .catch(e => { setLoadError((e as Error).message); setLoaded(false) })
+  }, [enabled, token])
 
   async function handleRun() {
     if (!selectedProduct) return
