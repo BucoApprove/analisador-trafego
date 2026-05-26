@@ -4,7 +4,7 @@ import { KpiCard, SectionHeader, CHART_COLORS } from './components'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Play } from 'lucide-react'
+import { Play, X } from 'lucide-react'
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell,
   PieChart, Pie, Legend,
@@ -42,6 +42,64 @@ function DonutChart({ data }: { data: { name: string; value: number }[] }) {
         <Legend iconSize={10} wrapperStyle={{ fontSize: 12 }} />
       </PieChart>
     </ResponsiveContainer>
+  )
+}
+
+function ProductSelect({ label, options, value, onChange }: { label: string; options: string[]; value: string; onChange: (v: string) => void }) {
+  const [search, setSearch] = useState('')
+  const [open, setOpen] = useState(false)
+  const filtered = options.filter(o => o.toLowerCase().includes(search.toLowerCase()))
+  return (
+    <div className="space-y-1 relative">
+      <p className="text-sm font-medium">{label}</p>
+      <input
+        className="w-full rounded border px-2 py-1.5 text-sm"
+        placeholder="Buscar produto..."
+        value={value || search}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setTimeout(() => setOpen(false), 150)}
+        onChange={e => { setSearch(e.target.value); onChange('') }}
+      />
+      {open && filtered.length > 0 && (
+        <div className="absolute z-50 w-full rounded border bg-background shadow-md max-h-52 overflow-y-auto">
+          {filtered.map(p => (
+            <div
+              key={p}
+              className={`px-3 py-1.5 text-sm cursor-pointer hover:bg-muted ${value === p ? 'bg-muted font-medium' : ''}`}
+              onMouseDown={() => { onChange(p); setSearch(''); setOpen(false) }}
+            >{p}</div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function StatusSelect({ options, value, onChange }: { options: string[]; value: string[]; onChange: (v: string[]) => void }) {
+  return (
+    <div className="space-y-1">
+      <div className="flex flex-wrap gap-1 min-h-[28px]">
+        {value.map(s => (
+          <Badge key={s} variant="secondary" className="gap-1 text-xs">
+            {s}
+            <X className="h-3 w-3 cursor-pointer" onClick={() => onChange(value.filter(v => v !== s))} />
+          </Badge>
+        ))}
+      </div>
+      <div className="max-h-36 overflow-y-auto rounded border p-1 space-y-0.5">
+        {options.map(s => (
+          <label key={s} className="flex cursor-pointer items-center gap-2 rounded px-2 py-0.5 text-xs hover:bg-muted">
+            <input
+              type="checkbox"
+              checked={value.includes(s)}
+              onChange={e => onChange(e.target.checked ? [...value, s] : value.filter(v => v !== s))}
+              className="h-3 w-3"
+            />
+            <span>{s}</span>
+          </label>
+        ))}
+      </div>
+    </div>
   )
 }
 
@@ -122,34 +180,17 @@ export default function TabAnalisesCruzadas({ token, enabled }: Props) {
         <SectionHeader title="Análises Cruzadas" description="Cruza dados de leads com vendas para revelar padrões de comportamento." />
         {loadError && <p className="text-sm text-destructive">Erro ao carregar produtos: {loadError}</p>}
         <div className="grid gap-4 sm:grid-cols-3">
-          <div className="space-y-1">
-            <p className="text-sm font-medium">Produto de referência</p>
-            <input
-              className="w-full rounded border px-2 py-1.5 text-sm"
-              placeholder="Buscar produto..."
-              list="an-product-list"
-              value={selectedProduct}
-              onChange={e => setSelectedProduct(e.target.value)}
-            />
-            <datalist id="an-product-list">
-              {products.map(p => <option key={p} value={p} />)}
-            </datalist>
-          </div>
+          {/* Produto */}
+          <ProductSelect
+            label="Produto de referência"
+            options={products}
+            value={selectedProduct}
+            onChange={setSelectedProduct}
+          />
+          {/* Status */}
           <div className="space-y-1">
             <p className="text-sm font-medium">Status das vendas</p>
-            <div className="max-h-32 overflow-y-auto rounded border p-1 space-y-0.5">
-              {statuses.map(s => (
-                <label key={s} className="flex cursor-pointer items-center gap-2 rounded px-2 py-0.5 text-xs hover:bg-muted">
-                  <input
-                    type="checkbox"
-                    checked={selectedStatuses.includes(s)}
-                    onChange={e => setSelectedStatuses(e.target.checked ? [...selectedStatuses, s] : selectedStatuses.filter(v => v !== s))}
-                    className="h-3 w-3"
-                  />
-                  <span>{s}</span>
-                </label>
-              ))}
-            </div>
+            <StatusSelect options={statuses} value={selectedStatuses} onChange={setSelectedStatuses} />
             <p className="text-xs text-muted-foreground">Vazio = todos</p>
           </div>
           <div className="flex items-end">
