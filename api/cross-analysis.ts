@@ -148,7 +148,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const params: QueryParam[] = [{ name: 'product', value: product }, ...stClause.params, ...dateParams]
 
-    // For each UTM dimension: anyTime (any lead→sale match), lastBefore (last UTM before sale), origin (first UTM ever)
+    // For each UTM dimension: anyTime / lastBefore / origin attribution.
+    // Buyers without any lead record appear as utm='(sem UTM)' with leads=0.
     function utmAttrSql(utmCol: string): string {
       return `
         WITH
@@ -157,10 +158,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             FROM ${tVendas}
             WHERE Nome_do_Produto = @product ${stClause.sql} AND E_mail_do_Comprador IS NOT NULL${saleDateFilter}
           ),
-          leads_with_utm AS (
+          -- leads rankeados por email: rn_first=1 é o mais antigo, rn_last=1 é o mais recente
+          leads_ranked AS (
             SELECT
               LOWER(TRIM(lead_email)) AS email,
-              ${utmCol} AS utm_val,
+              ${utmCol} AS utm_raw,
               lead_register,
               ROW_NUMBER() OVER (PARTITION BY LOWER(TRIM(lead_email)) ORDER BY lead_register ASC)  AS rn_first,
               ROW_NUMBER() OVER (PARTITION BY LOWER(TRIM(lead_email)) ORDER BY lead_register DESC) AS rn_last
@@ -168,51 +170,88 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             WHERE lead_email IS NOT NULL
               AND ${utmCol} IS NOT NULL AND TRIM(${utmCol}) != ''${dateFilter}
           ),
+          -- any-touch: comprador aparece em ao menos 1 lead com este utm
           any_touch AS (
-            SELECT utm_val, COUNT(DISTINCT l.email) AS cnt
-            FROM leads_with_utm l INNER JOIN buyers b ON l.email = b.email
-            GROUP BY utm_val
+            SELECT utm_raw AS utm_val, COUNT(DISTINCT l.email) AS cnt
+            FROM leads_ranked l INNER JOIN buyers b ON l.email = b.email
+            GROUP BY utm_raw
           ),
+          -- last-touch: utm do lead mais recente do comprador
           last_touch AS (
-            SELECT utm_val, COUNT(DISTINCT l.email) AS cnt
-            FROM leads_with_utm l INNER JOIN buyers b ON l.email = b.email
+            SELECT utm_raw AS utm_val, COUNT(DISTINCT l.email) AS cnt
+            FROM leads_ranked l INNER JOIN buyers b ON l.email = b.email
             WHERE rn_last = 1
-            GROUP BY utm_val
+            GROUP BY utm_raw
           ),
+          -- origin: utm do lead mais antigo do comprador
           origin_touch AS (
-            SELECT utm_val, COUNT(DISTINCT l.email) AS cnt
-            FROM leads_with_utm l INNER JOIN buyers b ON l.email = b.email
+            SELECT utm_raw AS utm_val, COUNT(DISTINCT l.email) AS cnt
+            FROM leads_ranked l INNER JOIN buyers b ON l.email = b.email
             WHERE rn_first = 1
-            GROUP BY utm_val
+            GROUP BY utm_raw
           ),
-          all_leads AS (
-            SELECT utm_val, COUNT(DISTINCT lead_email) AS cnt
+          -- todos os valores de utm que aparecem na tabela de leads no período
+          all_utms AS (
+            SELECT DISTINCT ${utmCol} AS utm_val
             FROM ${tLeads}
             WHERE lead_email IS NOT NULL
               AND ${utmCol} IS NOT NULL AND TRIM(${utmCol}) != ''${dateFilter}
-            GROUP BY utm_val
+          ),
+          -- leads únicos por utm no período
+          lead_counts AS (
+            SELECT ${utmCol} AS utm_val, COUNT(DISTINCT lead_email) AS cnt
+            FROM ${tLeads}
+            WHERE lead_email IS NOT NULL
+              AND ${utmCol} IS NOT NULL AND TRIM(${utmCol}) != ''${dateFilter}
+            GROUP BY ${utmCol}
+          ),
+          -- compradores sem nenhum registro na tabela de leads
+          buyers_no_lead AS (
+            SELECT COUNT(*) AS cnt
+            FROM buyers b
+            WHERE b.email NOT IN (
+              SELECT DISTINCT LOWER(TRIM(lead_email)) FROM ${tLeads} WHERE lead_email IS NOT NULL
+            )
           )
+        -- linhas por utm conhecido
         SELECT
-          a.utm_val AS utm,
-          IFNULL(al.cnt, 0) AS leads,
+          au.utm_val AS utm,
+          IFNULL(lc.cnt, 0) AS leads,
           IFNULL(at2.cnt, 0) AS any_time,
-          IFNULL(lt.cnt, 0) AS last_before,
-          IFNULL(ot.cnt, 0) AS origin
-        FROM all_leads al
-        LEFT JOIN any_touch at2 ON al.utm_val = at2.utm_val
-        LEFT JOIN last_touch lt ON al.utm_val = lt.utm_val
-        LEFT JOIN origin_touch ot ON al.utm_val = ot.utm_val
-        LEFT JOIN (SELECT utm_val FROM any_touch UNION DISTINCT SELECT utm_val FROM last_touch UNION DISTINCT SELECT utm_val FROM origin_touch) a ON al.utm_val = a.utm_val
-        ORDER BY leads DESC
+          IFNULL(lt.cnt, 0)  AS last_before,
+          IFNULL(ot.cnt, 0)  AS origin
+        FROM all_utms au
+        LEFT JOIN lead_counts lc  ON au.utm_val = lc.utm_val
+        LEFT JOIN any_touch   at2 ON au.utm_val = at2.utm_val
+        LEFT JOIN last_touch  lt  ON au.utm_val = lt.utm_val
+        LEFT JOIN origin_touch ot ON au.utm_val = ot.utm_val
+        UNION ALL
+        -- linha especial: compradores sem UTM rastreado
+        SELECT
+          '(sem UTM)' AS utm,
+          0           AS leads,
+          cnt         AS any_time,
+          cnt         AS last_before,
+          cnt         AS origin
+        FROM buyers_no_lead
+        WHERE cnt > 0
+        ORDER BY leads DESC, any_time DESC
         LIMIT 100
       `
     }
 
+    const totalBuyersSql = `
+      SELECT COUNT(DISTINCT LOWER(TRIM(E_mail_do_Comprador))) AS cnt
+      FROM ${tVendas}
+      WHERE Nome_do_Produto = @product ${stClause.sql} AND E_mail_do_Comprador IS NOT NULL${saleDateFilter}
+    `
+
     try {
-      const [contentRes, campaignRes, mediumRes] = await Promise.all([
+      const [contentRes, campaignRes, mediumRes, totalRes] = await Promise.all([
         bqQuery(utmAttrSql('utm_content'),  params),
         bqQuery(utmAttrSql('utm_campaign'), params),
         bqQuery(utmAttrSql('utm_medium'),   params),
+        bqQuery(totalBuyersSql, params),
       ])
 
       const parseRows = (rows: typeof contentRes.rows) => rows.map(r => ({
@@ -224,9 +263,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }))
 
       return res.json({
-        byContent:  parseRows(contentRes.rows),
-        byCampaign: parseRows(campaignRes.rows),
-        byMedium:   parseRows(mediumRes.rows),
+        totalBuyers: parseInt(totalRes.rows[0]?.cnt ?? '0'),
+        byContent:   parseRows(contentRes.rows),
+        byCampaign:  parseRows(campaignRes.rows),
+        byMedium:    parseRows(mediumRes.rows),
       })
     } catch (e) {
       return res.status(500).json({ error: (e as Error).message })

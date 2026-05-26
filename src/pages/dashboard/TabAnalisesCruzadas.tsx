@@ -657,6 +657,13 @@ function UtmAttrPanel({
 
       {data && (
         <>
+          <p className="text-sm font-medium">
+            Total compradores no período: <strong>{data.totalBuyers.toLocaleString('pt-BR')}</strong>
+            {' · '}
+            <span className="text-muted-foreground text-xs">
+              linha "(sem UTM)" = compradores sem nenhum registro na base de leads
+            </span>
+          </p>
           <p className="text-xs text-muted-foreground">
             <strong>Any-touch</strong> = comprador tinha este UTM em algum momento · <strong>Last</strong> = último UTM antes da compra · <strong>Origin</strong> = primeiro UTM do comprador
           </p>

@@ -410,9 +410,10 @@ export interface UtmAttrRow {
 }
 
 export interface UtmAttributionData {
-  byContent:  UtmAttrRow[]
-  byCampaign: UtmAttrRow[]
-  byMedium:   UtmAttrRow[]
+  totalBuyers: number
+  byContent:   UtmAttrRow[]
+  byCampaign:  UtmAttrRow[]
+  byMedium:    UtmAttrRow[]
 }
 
 export interface BehaviorTagResult {
