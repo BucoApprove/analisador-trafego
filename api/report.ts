@@ -255,6 +255,7 @@ interface UtmCounts {
 }
 
 const ATTRIBUTION_WINDOW_DAYS = 30
+const LEAD_LOOKBACK_DAYS = 60   // busca leads registrados até 60d antes do período para atribuição
 
 async function fetchUtmCounts(since: string, until: string, produtoMap: ProdutoMap[] = []): Promise<UtmCounts> {
   const tLeads  = tableLeads()
@@ -265,10 +266,15 @@ async function fetchUtmCounts(since: string, until: string, produtoMap: ProdutoM
   salesUntilDate.setDate(salesUntilDate.getDate() + ATTRIBUTION_WINDOW_DAYS)
   const salesUntil = salesUntilDate.toISOString().split('T')[0]
 
+  const leadLookbackDate = new Date(since)
+  leadLookbackDate.setDate(leadLookbackDate.getDate() - LEAD_LOOKBACK_DAYS)
+  const leadSince = leadLookbackDate.toISOString().split('T')[0]
+
   const dateParams = [
     { name: 'since',       value: since,      type: 'DATE' as const },
     { name: 'until',       value: until,      type: 'DATE' as const },
     { name: 'sales_until', value: salesUntil, type: 'DATE' as const },
+    { name: 'lead_since',  value: leadSince,  type: 'DATE' as const },
   ]
   const baseWhere = `DATE(lead_register) >= @since AND DATE(lead_register) <= @until`
 
@@ -284,7 +290,53 @@ async function fetchUtmCounts(since: string, until: string, produtoMap: ProdutoM
     `REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(` +
     `${col}, '%5B', '['), '%5b', '['), '%5D', ']'), '%5d', ']'), '%20', ' '), '+', ' '), '%28', '('), '%29', ')'), '%2C', ',')`
 
-  const [campaignRows, contentRows, salesRows, salesContentRows, vendasAdIdRows, lastCampRows, lastContentRows, lastAdIdRows, receitaRows, vendasProdutoRows] = await Promise.all([
+  // ─── Query consolidada de vendas ────────────────────────────────────────────
+  // Lê as planilhas UMA VEZ via um único JOIN com CTE + UNION ALL para dois níveis
+  // de granularidade. Substitui as 7-22 queries paralelas que saturavam o Sheets API.
+  const salesConsolidatedQuery =
+    `WITH joined AS (
+       SELECT
+         ${decodeUtm('l.utm_campaign')} AS campaign,
+         ${decodeUtm('l.utm_content')}  AS content,
+         TRIM(l.utm_content)            AS content_raw,
+         CAST(s.ID_do_Produto AS INT64) AS produto_id,
+         s.ID_Transacao                 AS id_transacao,
+         s.Valor_Pago_pelo_Comprador_Sem_Taxas_e_Impostos AS valor,
+         DATE_DIFF(DATE(s.Data_de_Aprova____o), DATE(l.lead_register), DAY) AS lag_days,
+         ROW_NUMBER() OVER (
+           PARTITION BY LOWER(TRIM(l.lead_email)), s.ID_Transacao
+           ORDER BY l.lead_register DESC
+         ) AS rn_last
+       FROM ${tLeads} l
+       INNER JOIN ${tVendas} s
+         ON LOWER(TRIM(l.lead_email)) = LOWER(TRIM(s.E_mail_do_Comprador))
+       WHERE l.utm_campaign IS NOT NULL AND l.utm_campaign != ''
+         AND DATE(l.lead_register) BETWEEN @lead_since AND @until
+         AND DATE(s.Data_de_Aprova____o) BETWEEN @since AND @sales_until
+         ${produtoFilter}
+         ${statusFilter}
+     )
+     -- Nível campanha: vendas_reais, receita e lag sem deduplicação cross-content
+     SELECT campaign, '' AS content, '' AS content_raw, produto_id,
+            COUNT(DISTINCT id_transacao) AS vendas_any,
+            COUNT(DISTINCT CASE WHEN rn_last = 1 THEN id_transacao END) AS vendas_last,
+            SUM(CASE WHEN rn_last = 1 THEN valor ELSE 0 END) AS receita,
+            AVG(CASE WHEN rn_last = 1 THEN lag_days END) AS lag_dias,
+            'campaign' AS _level
+     FROM joined GROUP BY 1, 4
+     UNION ALL
+     -- Nível conteúdo: para atribuição em adsets e ads (inclui ad_id numérico via content_raw)
+     SELECT campaign, content, content_raw, produto_id,
+            COUNT(DISTINCT id_transacao) AS vendas_any,
+            COUNT(DISTINCT CASE WHEN rn_last = 1 THEN id_transacao END) AS vendas_last,
+            CAST(NULL AS FLOAT64) AS receita,
+            CAST(NULL AS FLOAT64) AS lag_dias,
+            'content' AS _level
+     FROM joined
+     WHERE content IS NOT NULL AND content != ''
+     GROUP BY 1, 2, 3, 4`
+
+  const [campaignRows, contentRows, salesRows, vendasProdutoRows] = await Promise.all([
     bqQuery(
       `SELECT ${decodeUtm('utm_campaign')} AS key, COUNT(*) AS cnt
        FROM ${tLeads}
@@ -304,151 +356,7 @@ async function fetchUtmCounts(since: string, until: string, produtoMap: ProdutoM
        GROUP BY 1, 2`,
       dateParams,
     ),
-    // vendas por campanha — leads no período, vendas na janela de atribuição
-    bqQuery(
-      `SELECT ${decodeUtm('l.utm_campaign')} AS key,
-              COUNT(DISTINCT LOWER(TRIM(l.lead_email))) AS cnt
-       FROM ${tLeads} l
-       INNER JOIN ${tVendas} s
-         ON LOWER(TRIM(l.lead_email)) = LOWER(TRIM(s.E_mail_do_Comprador))
-       WHERE l.utm_campaign IS NOT NULL AND l.utm_campaign != ''
-         AND DATE(l.lead_register) BETWEEN @since AND @until
-         AND DATE(s.Data_de_Aprova____o) BETWEEN @since AND @sales_until
-         ${produtoFilter}
-         ${statusFilter}
-       GROUP BY 1`,
-      dateParams,
-    ),
-    // vendas por criativo (campaign|||content) — leads no período, vendas na janela
-    bqQuery(
-      `SELECT
-         ${decodeUtm('l.utm_campaign')} AS campaign,
-         ${decodeUtm('l.utm_content')}  AS content,
-         COUNT(DISTINCT LOWER(TRIM(l.lead_email))) AS cnt
-       FROM ${tLeads} l
-       INNER JOIN ${tVendas} s
-         ON LOWER(TRIM(l.lead_email)) = LOWER(TRIM(s.E_mail_do_Comprador))
-       WHERE l.utm_campaign IS NOT NULL AND l.utm_campaign != ''
-         AND l.utm_content  IS NOT NULL AND l.utm_content  != ''
-         AND DATE(l.lead_register) BETWEEN @since AND @until
-         AND DATE(s.Data_de_Aprova____o) BETWEEN @since AND @sales_until
-         ${produtoFilter}
-         ${statusFilter}
-       GROUP BY 1, 2`,
-      dateParams,
-    ),
-    // vendas por ad_id numérico — leads no período, vendas na janela
-    bqQuery(
-      `SELECT
-         TRIM(l.utm_content) AS ad_id,
-         COUNT(DISTINCT LOWER(TRIM(l.lead_email))) AS cnt
-       FROM ${tLeads} l
-       INNER JOIN ${tVendas} s
-         ON LOWER(TRIM(l.lead_email)) = LOWER(TRIM(s.E_mail_do_Comprador))
-       WHERE l.utm_content IS NOT NULL AND l.utm_content != ''
-         AND REGEXP_CONTAINS(TRIM(l.utm_content), r'^[0-9]+$')
-         AND DATE(l.lead_register) BETWEEN @since AND @until
-         AND DATE(s.Data_de_Aprova____o) BETWEEN @since AND @sales_until
-         ${produtoFilter}
-         ${statusFilter}
-       GROUP BY 1`,
-      dateParams,
-    ),
-    // last touch por campanha — leads no período, vendas na janela
-    bqQuery(
-      `WITH ranked AS (
-         SELECT
-           ${decodeUtm('l.utm_campaign')} AS campaign,
-           LOWER(TRIM(l.lead_email)) AS email,
-           ROW_NUMBER() OVER (
-             PARTITION BY LOWER(TRIM(l.lead_email)), LOWER(TRIM(s.E_mail_do_Comprador))
-             ORDER BY l.lead_register DESC
-           ) AS rn
-         FROM ${tLeads} l
-         INNER JOIN ${tVendas} s
-           ON LOWER(TRIM(l.lead_email)) = LOWER(TRIM(s.E_mail_do_Comprador))
-         WHERE l.utm_campaign IS NOT NULL AND l.utm_campaign != ''
-           AND DATE(l.lead_register) BETWEEN @since AND @until
-           AND l.lead_register <= s.Data_de_Aprova____o
-           AND DATE(s.Data_de_Aprova____o) BETWEEN @since AND @sales_until
-           ${produtoFilter}
-           ${statusFilter}
-       )
-       SELECT campaign AS key, COUNT(DISTINCT email) AS cnt
-       FROM ranked WHERE rn = 1
-       GROUP BY 1`,
-      dateParams,
-    ),
-    // last touch por criativo — leads no período, vendas na janela
-    bqQuery(
-      `WITH ranked AS (
-         SELECT
-           ${decodeUtm('l.utm_campaign')} AS campaign,
-           ${decodeUtm('l.utm_content')}  AS content,
-           LOWER(TRIM(l.lead_email)) AS email,
-           ROW_NUMBER() OVER (
-             PARTITION BY LOWER(TRIM(l.lead_email)), LOWER(TRIM(s.E_mail_do_Comprador))
-             ORDER BY l.lead_register DESC
-           ) AS rn
-         FROM ${tLeads} l
-         INNER JOIN ${tVendas} s
-           ON LOWER(TRIM(l.lead_email)) = LOWER(TRIM(s.E_mail_do_Comprador))
-         WHERE l.utm_campaign IS NOT NULL AND l.utm_campaign != ''
-           AND l.utm_content  IS NOT NULL AND l.utm_content  != ''
-           AND DATE(l.lead_register) BETWEEN @since AND @until
-           AND l.lead_register <= s.Data_de_Aprova____o
-           AND DATE(s.Data_de_Aprova____o) BETWEEN @since AND @sales_until
-           ${produtoFilter}
-           ${statusFilter}
-       )
-       SELECT campaign, content, COUNT(DISTINCT email) AS cnt
-       FROM ranked WHERE rn = 1
-       GROUP BY 1, 2`,
-      dateParams,
-    ),
-    // last touch por ad_id numérico — leads no período, vendas na janela
-    bqQuery(
-      `WITH ranked AS (
-         SELECT
-           TRIM(l.utm_content) AS ad_id,
-           LOWER(TRIM(l.lead_email)) AS email,
-           ROW_NUMBER() OVER (
-             PARTITION BY LOWER(TRIM(l.lead_email)), LOWER(TRIM(s.E_mail_do_Comprador))
-             ORDER BY l.lead_register DESC
-           ) AS rn
-         FROM ${tLeads} l
-         INNER JOIN ${tVendas} s
-           ON LOWER(TRIM(l.lead_email)) = LOWER(TRIM(s.E_mail_do_Comprador))
-         WHERE l.utm_content IS NOT NULL AND l.utm_content != ''
-           AND REGEXP_CONTAINS(TRIM(l.utm_content), r'^[0-9]+$')
-           AND DATE(l.lead_register) BETWEEN @since AND @until
-           AND l.lead_register <= s.Data_de_Aprova____o
-           AND DATE(s.Data_de_Aprova____o) BETWEEN @since AND @sales_until
-           ${produtoFilter}
-           ${statusFilter}
-       )
-       SELECT ad_id, COUNT(DISTINCT email) AS cnt
-       FROM ranked WHERE rn = 1
-       GROUP BY 1`,
-      dateParams,
-    ),
-    // receita e lag por campanha — leads no período, vendas na janela
-    bqQuery(
-      `SELECT ${decodeUtm('l.utm_campaign')} AS key,
-              SUM(s.Valor_Pago_pelo_Comprador_Sem_Taxas_e_Impostos) AS receita,
-              AVG(DATE_DIFF(s.Data_de_Aprova____o, DATE(l.lead_register), DAY)) AS lag_dias
-       FROM ${tLeads} l
-       INNER JOIN ${tVendas} s
-         ON LOWER(TRIM(l.lead_email)) = LOWER(TRIM(s.E_mail_do_Comprador))
-       WHERE l.utm_campaign IS NOT NULL AND l.utm_campaign != ''
-         AND DATE(l.lead_register) BETWEEN @since AND @until
-         AND DATE(s.Data_de_Aprova____o) BETWEEN @since AND @sales_until
-         ${produtoFilter}
-         ${statusFilter}
-       GROUP BY 1`,
-      dateParams,
-    ),
-    // vendas totais por produto_id no período (sem join de leads)
+    bqQuery(salesConsolidatedQuery, dateParams),
     produtoMap.length > 0
       ? bqQuery(
           `SELECT CAST(ID_do_Produto AS STRING) AS produto_id, COUNT(*) AS cnt
@@ -472,143 +380,83 @@ async function fetchUtmCounts(since: string, until: string, produtoMap: ProdutoM
     if (r.content) content[`${norm(r.campaign ?? '')}|||${norm(r.content)}`] = parseInt(r.cnt ?? '0')
   }
 
-  const vendas: Record<string, number> = {}
-  for (const r of salesRows.rows) if (r.key) vendas[norm(r.key)] = parseInt(r.cnt ?? '0')
-
-  const vendasContent: Record<string, number> = {}
-  for (const r of salesContentRows.rows) {
-    if (r.content) vendasContent[`${norm(r.campaign ?? '')}|||${norm(r.content)}`] = parseInt(r.cnt ?? '0')
-  }
-
-  const receita: Record<string, number> = {}
-  const lagDias: Record<string, number> = {}
-  for (const r of receitaRows.rows) {
-    if (r.key) {
-      receita[norm(r.key)] = parseFloat(r.receita ?? '0')
-      lagDias[norm(r.key)] = parseFloat(r.lag_dias ?? '0')
-    }
-  }
-
-  // Mapa ad_id (string numérica) → compradores únicos via UTM (funis Purchase com {{ad.id}})
-  const vendasPorAdId: Record<string, number> = {}
-  for (const r of vendasAdIdRows.rows) {
-    if (r.ad_id) vendasPorAdId[String(r.ad_id).trim()] = parseInt(r.cnt ?? '0')
-  }
-
-  // Last touch por campanha
-  const vendasLastCamp: Record<string, number> = {}
-  for (const r of lastCampRows.rows) if (r.key) vendasLastCamp[norm(r.key)] = parseInt(r.cnt ?? '0')
-
-  // Last touch por criativo
-  const vendasLastContent: Record<string, number> = {}
-  for (const r of lastContentRows.rows) {
-    if (r.content) vendasLastContent[`${norm(r.campaign ?? '')}|||${norm(r.content)}`] = parseInt(r.cnt ?? '0')
-  }
-
-  // Last touch por ad_id numérico
-  const vendasLastByAdId: Record<string, number> = {}
-  for (const r of lastAdIdRows.rows) {
-    if (r.ad_id) vendasLastByAdId[String(r.ad_id).trim()] = parseInt(r.cnt ?? '0')
-  }
-
-  // Monta mapa produto_id (string) → qty de vendas no período
-  const vendasPorProduto: Record<string, number> = {}
-  for (const r of vendasProdutoRows.rows) {
-    if (r.produto_id) vendasPorProduto[String(r.produto_id).trim()] = parseInt(r.cnt ?? '0')
-  }
-
-  // Para cada entrada do produtoMap, soma as vendas dos produto_ids e associa ao prefixo
-  const vendasTotais: Record<string, number> = {}
-  for (const entry of produtoMap) {
-    const total = entry.produto_ids.reduce((sum, id) => sum + (vendasPorProduto[String(id)] ?? 0), 0)
-    vendasTotais[entry.prefixo] = total
-  }
-
-  // Queries por produto isolado — evita que vendas de produto A sejam atribuídas a campanhas de produto B
+  // Inicializa maps de vendas — populados pelo loop de salesRows abaixo
+  const vendas:              Record<string, number> = {}
+  const vendasContent:       Record<string, number> = {}
+  const vendasPorAdId:       Record<string, number> = {}
+  const vendasLastCamp:      Record<string, number> = {}
+  const vendasLastContent:   Record<string, number> = {}
+  const vendasLastByAdId:    Record<string, number> = {}
+  const receita:             Record<string, number> = {}
+  const lagDias:             Record<string, number> = {}
   const vendasByProduto:     Record<string, Record<string, number>> = {}
   const vendasLastByProduto: Record<string, Record<string, number>> = {}
   const receitaByProduto:    Record<string, Record<string, number>> = {}
   const lagDiasByProduto:    Record<string, Record<string, number>> = {}
 
-  if (produtoMap.length > 1) {
-    // Só executa queries isoladas quando há mais de 1 produto (se há só 1, vendas/receita/lagDias já estão corretos)
-    await Promise.all(produtoMap.map(async entry => {
-      const pFilter = `AND CAST(s.ID_do_Produto AS INT64) IN (${entry.produto_ids.join(', ')})`
+  for (const entry of produtoMap) {
+    vendasByProduto[entry.prefixo]     = {}
+    vendasLastByProduto[entry.prefixo] = {}
+    receitaByProduto[entry.prefixo]    = {}
+    lagDiasByProduto[entry.prefixo]    = {}
+  }
 
-      const [pvRows, plRows, prRows] = await Promise.all([
-        bqQuery(
-          `SELECT ${decodeUtm('l.utm_campaign')} AS key,
-                  COUNT(DISTINCT LOWER(TRIM(l.lead_email))) AS cnt
-           FROM ${tLeads} l
-           INNER JOIN ${tVendas} s
-             ON LOWER(TRIM(l.lead_email)) = LOWER(TRIM(s.E_mail_do_Comprador))
-           WHERE l.utm_campaign IS NOT NULL AND l.utm_campaign != ''
-             AND DATE(l.lead_register) BETWEEN @since AND @until
-             AND DATE(s.Data_de_Aprova____o) BETWEEN @since AND @sales_until
-             ${pFilter}
-             ${statusFilter}
-           GROUP BY 1`,
-          dateParams,
-        ),
-        bqQuery(
-          `WITH ranked AS (
-             SELECT ${decodeUtm('l.utm_campaign')} AS campaign,
-                    LOWER(TRIM(l.lead_email)) AS email,
-                    ROW_NUMBER() OVER (
-                      PARTITION BY LOWER(TRIM(l.lead_email)), LOWER(TRIM(s.E_mail_do_Comprador))
-                      ORDER BY l.lead_register DESC
-                    ) AS rn
-             FROM ${tLeads} l
-             INNER JOIN ${tVendas} s
-               ON LOWER(TRIM(l.lead_email)) = LOWER(TRIM(s.E_mail_do_Comprador))
-             WHERE l.utm_campaign IS NOT NULL AND l.utm_campaign != ''
-               AND DATE(l.lead_register) BETWEEN @since AND @until
-               AND l.lead_register <= s.Data_de_Aprova____o
-               AND DATE(s.Data_de_Aprova____o) BETWEEN @since AND @sales_until
-               ${pFilter}
-               ${statusFilter}
-           )
-           SELECT campaign AS key, COUNT(DISTINCT email) AS cnt
-           FROM ranked WHERE rn = 1
-           GROUP BY 1`,
-          dateParams,
-        ),
-        bqQuery(
-          `SELECT ${decodeUtm('l.utm_campaign')} AS key,
-                  SUM(s.Valor_Pago_pelo_Comprador_Sem_Taxas_e_Impostos) AS receita,
-                  AVG(DATE_DIFF(s.Data_de_Aprova____o, DATE(l.lead_register), DAY)) AS lag_dias
-           FROM ${tLeads} l
-           INNER JOIN ${tVendas} s
-             ON LOWER(TRIM(l.lead_email)) = LOWER(TRIM(s.E_mail_do_Comprador))
-           WHERE l.utm_campaign IS NOT NULL AND l.utm_campaign != ''
-             AND DATE(l.lead_register) BETWEEN @since AND @until
-             AND DATE(s.Data_de_Aprova____o) BETWEEN @since AND @sales_until
-             ${pFilter}
-             ${statusFilter}
-           GROUP BY 1`,
-          dateParams,
-        ),
-      ])
+  // Processa os dois níveis retornados pelo UNION ALL
+  for (const r of salesRows.rows) {
+    const camp      = norm(r.campaign ?? '')
+    const cont      = norm(r.content  ?? '')
+    const contRaw   = String(r.content_raw ?? '').trim()
+    const produtoId = parseInt(String(r.produto_id ?? '0'))
+    const anyCount  = parseInt(r.vendas_any  ?? '0')
+    const lastCount = parseInt(r.vendas_last ?? '0')
+    const receitaV  = parseFloat(r.receita   ?? '0')
+    const lagV      = r.lag_dias != null ? parseFloat(r.lag_dias) : 0
+    const level     = r._level as string
 
-      const vMap: Record<string, number> = {}
-      for (const r of pvRows.rows) if (r.key) vMap[norm(r.key)] = parseInt(r.cnt ?? '0')
-      vendasByProduto[entry.prefixo] = vMap
+    if (!camp) continue
 
-      const vlMap: Record<string, number> = {}
-      for (const r of plRows.rows) if (r.key) vlMap[norm(r.key)] = parseInt(r.cnt ?? '0')
-      vendasLastByProduto[entry.prefixo] = vlMap
+    // Localiza a entrada de produto para isolamento cross-produto
+    const prodEntry = produtoMap.find(e => e.produto_ids.includes(produtoId))
 
-      const rMap: Record<string, number> = {}
-      const lMap: Record<string, number> = {}
-      for (const r of prRows.rows) {
-        if (r.key) {
-          rMap[norm(r.key)] = parseFloat(r.receita ?? '0')
-          lMap[norm(r.key)] = parseFloat(r.lag_dias ?? '0')
-        }
+    if (level === 'campaign') {
+      // Maps globais de campanha (fallback quando campanha não tem prefixo mapeado)
+      vendas[camp]         = (vendas[camp]         ?? 0) + anyCount
+      vendasLastCamp[camp] = (vendasLastCamp[camp] ?? 0) + lastCount
+      receita[camp]        = (receita[camp]        ?? 0) + receitaV
+      lagDias[camp]        = lagV  // AVG já calculado pelo BigQuery por produto
+      // Maps isolados por produto — usados para evitar cross-produto na campanha
+      if (prodEntry) {
+        const p = prodEntry.prefixo
+        vendasByProduto[p][camp]     = (vendasByProduto[p][camp]     ?? 0) + anyCount
+        vendasLastByProduto[p][camp] = (vendasLastByProduto[p][camp] ?? 0) + lastCount
+        receitaByProduto[p][camp]    = (receitaByProduto[p][camp]    ?? 0) + receitaV
+        lagDiasByProduto[p][camp]    = lagV
       }
-      receitaByProduto[entry.prefixo]  = rMap
-      lagDiasByProduto[entry.prefixo]  = lMap
-    }))
+    } else if (level === 'content') {
+      // Maps de criativo (campaign|||content)
+      if (cont) {
+        const ck = `${camp}|||${cont}`
+        vendasContent[ck]     = (vendasContent[ck]     ?? 0) + anyCount
+        vendasLastContent[ck] = (vendasLastContent[ck] ?? 0) + lastCount
+      }
+      // Maps de ad_id numérico (funis Purchase com {{ad.id}} no utm_content)
+      if (contRaw && /^\d+$/.test(contRaw)) {
+        vendasPorAdId[contRaw]    = (vendasPorAdId[contRaw]    ?? 0) + anyCount
+        vendasLastByAdId[contRaw] = (vendasLastByAdId[contRaw] ?? 0) + lastCount
+      }
+    }
+  }
+
+  // Vendas totais por produto no período (sem join de leads — fallback quando UTM não disponível)
+  const vendasPorProduto: Record<string, number> = {}
+  for (const r of vendasProdutoRows.rows) {
+    if (r.produto_id) vendasPorProduto[String(r.produto_id).trim()] = parseInt(r.cnt ?? '0')
+  }
+
+  const vendasTotais: Record<string, number> = {}
+  for (const entry of produtoMap) {
+    const total = entry.produto_ids.reduce((sum, id) => sum + (vendasPorProduto[String(id)] ?? 0), 0)
+    vendasTotais[entry.prefixo] = total
   }
 
   return { leads, content, vendas, vendasContent, vendasPorAdId, vendasLastCamp, vendasLastContent, vendasLastByAdId, receita, lagDias, vendasTotais, vendasByProduto, vendasLastByProduto, receitaByProduto, lagDiasByProduto }
