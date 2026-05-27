@@ -149,7 +149,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const params: QueryParam[] = [{ name: 'product', value: product }, ...stClause.params, ...dateParams]
 
     // For each UTM dimension: anyTime / lastBefore / origin attribution.
-    // Rows: known UTMs + "(sem campanha)" (has lead but no UTM) + "(sem UTM)" (no lead at all)
+    // Leads sem filtro de data — UTM histórico dos compradores (período se aplica só às vendas)
+    // Uma única query por dimensão retorna as 3 atribuições + contagens de leads
     function utmAttrSql(utmCol: string): string {
       return `
         WITH
@@ -158,85 +159,74 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             FROM ${tVendas}
             WHERE Nome_do_Produto = @product ${stClause.sql} AND E_mail_do_Comprador IS NOT NULL${saleDateFilter}
           ),
-          -- todos os leads dos compradores (sem filtro de utm para incluir nulls)
+          -- todos os leads históricos dos compradores (sem filtro de data)
           buyer_leads_all AS (
-            SELECT LOWER(TRIM(lead_email)) AS email
+            SELECT DISTINCT LOWER(TRIM(lead_email)) AS email
             FROM ${tLeads}
-            WHERE lead_email IS NOT NULL${dateFilter}
+            WHERE lead_email IS NOT NULL
           ),
-          -- leads rankeados por email com utm preenchido
+          -- leads com UTM preenchido, rankeados por comprador (histórico completo)
           leads_ranked AS (
             SELECT
               LOWER(TRIM(lead_email)) AS email,
               ${utmCol} AS utm_raw,
-              lead_register,
               ROW_NUMBER() OVER (PARTITION BY LOWER(TRIM(lead_email)) ORDER BY lead_register ASC)  AS rn_first,
               ROW_NUMBER() OVER (PARTITION BY LOWER(TRIM(lead_email)) ORDER BY lead_register DESC) AS rn_last
             FROM ${tLeads}
             WHERE lead_email IS NOT NULL
-              AND ${utmCol} IS NOT NULL AND TRIM(${utmCol}) != ''${dateFilter}
+              AND ${utmCol} IS NOT NULL AND TRIM(${utmCol}) != ''
           ),
-          any_touch AS (
-            SELECT utm_raw AS utm_val, COUNT(DISTINCT l.email) AS cnt
-            FROM leads_ranked l INNER JOIN buyers b ON l.email = b.email
+          -- join com compradores para as 3 atribuições numa passagem só
+          buyer_utms AS (
+            SELECT
+              l.utm_raw,
+              l.email,
+              l.rn_first,
+              l.rn_last
+            FROM leads_ranked l
+            INNER JOIN buyers b ON l.email = b.email
+          ),
+          agg AS (
+            SELECT
+              utm_raw AS utm_val,
+              COUNT(DISTINCT email)                              AS any_time,
+              COUNT(DISTINCT CASE WHEN rn_last  = 1 THEN email END) AS last_before,
+              COUNT(DISTINCT CASE WHEN rn_first = 1 THEN email END) AS origin
+            FROM buyer_utms
             GROUP BY utm_raw
           ),
-          last_touch AS (
-            SELECT utm_raw AS utm_val, COUNT(DISTINCT l.email) AS cnt
-            FROM leads_ranked l INNER JOIN buyers b ON l.email = b.email
-            WHERE rn_last = 1
-            GROUP BY utm_raw
-          ),
-          origin_touch AS (
-            SELECT utm_raw AS utm_val, COUNT(DISTINCT l.email) AS cnt
-            FROM leads_ranked l INNER JOIN buyers b ON l.email = b.email
-            WHERE rn_first = 1
-            GROUP BY utm_raw
-          ),
-          all_utms AS (
-            SELECT DISTINCT ${utmCol} AS utm_val
-            FROM ${tLeads}
-            WHERE lead_email IS NOT NULL
-              AND ${utmCol} IS NOT NULL AND TRIM(${utmCol}) != ''${dateFilter}
-          ),
+          -- contagem de leads totais (histórico) por utm
           lead_counts AS (
             SELECT ${utmCol} AS utm_val, COUNT(DISTINCT lead_email) AS cnt
             FROM ${tLeads}
             WHERE lead_email IS NOT NULL
-              AND ${utmCol} IS NOT NULL AND TRIM(${utmCol}) != ''${dateFilter}
+              AND ${utmCol} IS NOT NULL AND TRIM(${utmCol}) != ''
             GROUP BY ${utmCol}
           ),
-          -- compradores com lead mas sem este UTM específico preenchido
           buyers_no_utm AS (
             SELECT COUNT(DISTINCT b.email) AS cnt
             FROM buyers b
             INNER JOIN buyer_leads_all la ON b.email = la.email
             WHERE b.email NOT IN (SELECT DISTINCT email FROM leads_ranked)
           ),
-          -- compradores sem nenhum registro na tabela de leads
           buyers_no_lead AS (
             SELECT COUNT(DISTINCT b.email) AS cnt
             FROM buyers b
             WHERE b.email NOT IN (SELECT DISTINCT email FROM buyer_leads_all)
           )
         SELECT
-          au.utm_val AS utm,
-          IFNULL(lc.cnt, 0) AS leads,
-          IFNULL(at2.cnt, 0) AS any_time,
-          IFNULL(lt.cnt, 0)  AS last_before,
-          IFNULL(ot.cnt, 0)  AS origin
-        FROM all_utms au
-        LEFT JOIN lead_counts  lc  ON au.utm_val = lc.utm_val
-        LEFT JOIN any_touch    at2 ON au.utm_val = at2.utm_val
-        LEFT JOIN last_touch   lt  ON au.utm_val = lt.utm_val
-        LEFT JOIN origin_touch ot  ON au.utm_val = ot.utm_val
+          ag.utm_val                AS utm,
+          IFNULL(lc.cnt, 0)         AS leads,
+          ag.any_time,
+          ag.last_before,
+          ag.origin
+        FROM agg ag
+        LEFT JOIN lead_counts lc ON ag.utm_val = lc.utm_val
         UNION ALL
-        SELECT '(sem campanha)' AS utm, 0 AS leads, cnt AS any_time, cnt AS last_before, cnt AS origin
-        FROM buyers_no_utm WHERE cnt > 0
+        SELECT '(sem campanha)', 0, cnt, cnt, cnt FROM buyers_no_utm  WHERE cnt > 0
         UNION ALL
-        SELECT '(sem UTM)' AS utm, 0 AS leads, cnt AS any_time, cnt AS last_before, cnt AS origin
-        FROM buyers_no_lead WHERE cnt > 0
-        ORDER BY leads DESC, any_time DESC
+        SELECT '(sem UTM)',      0, cnt, cnt, cnt FROM buyers_no_lead WHERE cnt > 0
+        ORDER BY any_time DESC, leads DESC
         LIMIT 100
       `
     }
@@ -271,7 +261,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           INNER JOIN sales s ON LOWER(TRIM(l.lead_email)) = s.email
           WHERE l.lead_email IS NOT NULL
             AND l.tag_name IS NOT NULL
-            AND l.lead_register <= s.data_compra${dateFilter}
+            AND l.lead_register <= s.data_compra
         )
       SELECT
         IFNULL(tag_name, '(sem tag antes da compra)') AS last_tag,
@@ -284,10 +274,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     `
 
     try {
-      const [contentRes, campaignRes, mediumRes, totalRes, lastTagRes] = await Promise.all([
+      // Wave 1: 3 dimensões UTM (queries pesadas com window functions)
+      const [contentRes, campaignRes, mediumRes] = await Promise.all([
         bqQuery(utmAttrSql('utm_content'),  params),
         bqQuery(utmAttrSql('utm_campaign'), params),
         bqQuery(utmAttrSql('utm_medium'),   params),
+      ])
+      // Wave 2: totais e last tag (mais leves)
+      const [totalRes, lastTagRes] = await Promise.all([
         bqQuery(totalBuyersSql, params),
         bqQuery(lastTagSql, params),
       ])
