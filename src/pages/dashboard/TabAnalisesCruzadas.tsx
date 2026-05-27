@@ -635,7 +635,7 @@ export default function TabAnalisesCruzadas({ token, enabled }: Props) {
 // ─── Funnel Overview panel ────────────────────────────────────────────────────
 
 function FunnelOverviewPanel({
-  statuses, since, until, data, running, error, onRun,
+  data, running, error, onRun,
 }: {
   token: string; statuses: string[]; since: string; until: string
   data: FunnelOverviewData | null; running: boolean; error: string | null

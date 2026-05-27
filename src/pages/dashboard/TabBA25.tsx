@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react'
-import type { LaunchData, GoalsData, RawLaunchResponse, SalesUtmData, UtmSalesAttribution, SurveyBuyersData, BA25ProfileData, BA25ProfileEntry } from './types'
+import type { LaunchData, GoalsData, RawLaunchResponse, SalesUtmData, UtmSalesAttribution, SurveyBuyersData, BA25ProfileData } from './types'
 import {
   SectionHeader, TabLoading, TabError,
   ChartTooltip, CHART_COLORS,
