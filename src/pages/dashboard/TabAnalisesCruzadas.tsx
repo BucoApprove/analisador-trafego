@@ -650,8 +650,10 @@ function TopTable({
   valueKey: 'leads' | 'anyTime' | 'lastBefore' | 'origin'
   color: string
 }) {
+  const isLeadsTable = valueKey === 'leads'
   const sorted = [...rows].sort((a, b) => b[valueKey] - a[valueKey]).slice(0, 10)
   const max = Math.max(...sorted.map(r => r[valueKey]), 1)
+  const colSpan = isLeadsTable ? 4 : 5
 
   return (
     <div className="rounded-lg border bg-card overflow-hidden">
@@ -666,7 +668,7 @@ function TopTable({
               <th className="px-2 py-1.5 text-center font-medium w-6">#</th>
               <th className="px-3 py-1.5 text-left font-medium">Anúncio</th>
               <th className="px-3 py-1.5 text-right font-medium">Leads</th>
-              <th className="px-3 py-1.5 text-right font-medium">Vendas</th>
+              {!isLeadsTable && <th className="px-3 py-1.5 text-right font-medium">Vendas</th>}
               <th className="px-3 py-1.5 w-20"></th>
             </tr>
           </thead>
@@ -677,12 +679,14 @@ function TopTable({
                 <tr key={r.name} className="hover:bg-muted/40">
                   <td className="px-2 py-1.5 text-center text-muted-foreground">{i + 1}°</td>
                   <td className="px-3 py-1.5 truncate max-w-[200px] font-medium" title={r.name}>{r.name}</td>
-                  <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
+                  <td className="px-3 py-1.5 text-right tabular-nums" style={{ color: isLeadsTable && val > 0 ? color : undefined }}>
                     {r.leads > 0 ? r.leads.toLocaleString('pt-BR') : '—'}
                   </td>
-                  <td className="px-3 py-1.5 text-right tabular-nums font-semibold" style={{ color: val > 0 ? color : undefined }}>
-                    {val > 0 ? val : '—'}
-                  </td>
+                  {!isLeadsTable && (
+                    <td className="px-3 py-1.5 text-right tabular-nums font-semibold" style={{ color: val > 0 ? color : undefined }}>
+                      {val > 0 ? val : '—'}
+                    </td>
+                  )}
                   <td className="px-3 py-1.5">
                     <div className="h-1.5 rounded-full bg-muted overflow-hidden">
                       <div className="h-full rounded-full" style={{ width: `${(val / max) * 100}%`, backgroundColor: color }} />
@@ -692,7 +696,7 @@ function TopTable({
               )
             })}
             {sorted.length === 0 && (
-              <tr><td colSpan={5} className="px-3 py-3 text-center text-muted-foreground">Sem dados.</td></tr>
+              <tr><td colSpan={colSpan} className="px-3 py-3 text-center text-muted-foreground">Sem dados.</td></tr>
             )}
           </tbody>
         </table>
