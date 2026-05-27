@@ -465,6 +465,23 @@ export interface LeadsBehaviorData {
   products: { product: string; antes: number; depois: number }[]
 }
 
+// ─── Visão Geral de Funis ────────────────────────────────────────────────────
+
+export interface FunnelOverviewData {
+  totalBuyers:     number
+  bySource:        UtmSalesAttribution[]
+  byCampaign:      UtmSalesAttribution[]
+  byMedium:        UtmSalesAttribution[]
+  byContent:       UtmSalesAttribution[]
+  leadsBySource:   { name: string; leads: number }[]
+  leadsByCampaign: { name: string; leads: number }[]
+  leadsByMedium:   { name: string; leads: number }[]
+  leadsByContent:  { name: string; leads: number }[]
+  byProduct: {
+    produto: string; totalVendas: number; vendasComLead: number; vendasSemLead: number
+  }[]
+}
+
 // ─── Tipos de estado do hook ─────────────────────────────────────────────────
 
 export type FetchStatus = 'idle' | 'loading' | 'success' | 'error'

@@ -309,8 +309,146 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
   }
 
+  // ── type = 'funnel-overview' ─────────────────────────────────────────────
+  if (body.type === 'funnel-overview') {
+    if (!since || !until) return res.status(400).json({ error: 'since and until are required' })
+
+    function overviewUtmAttrSql(utmCol: string): string {
+      return `
+        WITH
+          buyers AS (
+            SELECT DISTINCT LOWER(TRIM(E_mail_do_Comprador)) AS email
+            FROM ${tVendas}
+            WHERE E_mail_do_Comprador IS NOT NULL ${stClause.sql}${saleDateFilter}
+          ),
+          buyer_leads_all AS (
+            SELECT DISTINCT LOWER(TRIM(lead_email)) AS email
+            FROM ${tLeads}
+            WHERE lead_email IS NOT NULL
+          ),
+          leads_ranked AS (
+            SELECT
+              LOWER(TRIM(lead_email)) AS email,
+              ${utmCol} AS utm_raw,
+              ROW_NUMBER() OVER (PARTITION BY LOWER(TRIM(lead_email)) ORDER BY lead_register ASC)  AS rn_first,
+              ROW_NUMBER() OVER (PARTITION BY LOWER(TRIM(lead_email)) ORDER BY lead_register DESC) AS rn_last
+            FROM ${tLeads}
+            WHERE lead_email IS NOT NULL
+              AND ${utmCol} IS NOT NULL AND TRIM(${utmCol}) != ''
+          ),
+          buyer_utms AS (
+            SELECT l.utm_raw, l.email, l.rn_first, l.rn_last
+            FROM leads_ranked l
+            INNER JOIN buyers b ON l.email = b.email
+          ),
+          agg AS (
+            SELECT
+              utm_raw AS utm_val,
+              COUNT(DISTINCT email)                                   AS any_time,
+              COUNT(DISTINCT CASE WHEN rn_last  = 1 THEN email END)  AS last_before,
+              COUNT(DISTINCT CASE WHEN rn_first = 1 THEN email END)  AS origin
+            FROM buyer_utms
+            GROUP BY utm_raw
+          )
+        SELECT utm_val AS name, any_time, last_before, origin
+        FROM agg
+        ORDER BY any_time DESC
+        LIMIT 100
+      `
+    }
+
+    function leadsInPeriodSql(utmCol: string): string {
+      return `
+        SELECT ${utmCol} AS name, COUNT(DISTINCT lead_email) AS leads
+        FROM ${tLeads}
+        WHERE lead_email IS NOT NULL
+          AND ${utmCol} IS NOT NULL AND TRIM(${utmCol}) != ''
+          AND DATE(lead_register) BETWEEN @since AND @until
+        GROUP BY ${utmCol}
+        ORDER BY leads DESC
+        LIMIT 100
+      `
+    }
+
+    const totalBuyersSql = `
+      SELECT COUNT(DISTINCT LOWER(TRIM(E_mail_do_Comprador))) AS cnt
+      FROM ${tVendas}
+      WHERE E_mail_do_Comprador IS NOT NULL ${stClause.sql}${saleDateFilter}
+    `
+
+    const productCoverageSql = `
+      WITH
+        all_buyers AS (
+          SELECT Nome_do_Produto AS produto, LOWER(TRIM(E_mail_do_Comprador)) AS email
+          FROM ${tVendas}
+          WHERE Status IN ('APROVADO','COMPLETO') AND E_mail_do_Comprador IS NOT NULL${saleDateFilter}
+        ),
+        lead_emails AS (
+          SELECT DISTINCT LOWER(TRIM(lead_email)) AS email FROM ${tLeads} WHERE lead_email IS NOT NULL
+        )
+      SELECT
+        produto,
+        COUNT(DISTINCT email)                                                             AS total_vendas,
+        COUNT(DISTINCT CASE WHEN email IN (SELECT email FROM lead_emails) THEN email END) AS com_lead,
+        COUNT(DISTINCT CASE WHEN email NOT IN (SELECT email FROM lead_emails) THEN email END) AS sem_lead
+      FROM all_buyers
+      GROUP BY produto
+      ORDER BY total_vendas DESC
+    `
+
+    try {
+      // Wave 1 — UTM attribution (4 dimensões)
+      const [sourceAttr, campaignAttr, mediumAttr, contentAttr] = await Promise.all([
+        bqQuery(overviewUtmAttrSql('utm_source'),   [...stClause.params, ...dateParams]),
+        bqQuery(overviewUtmAttrSql('utm_campaign'), [...stClause.params, ...dateParams]),
+        bqQuery(overviewUtmAttrSql('utm_medium'),   [...stClause.params, ...dateParams]),
+        bqQuery(overviewUtmAttrSql('utm_content'),  [...stClause.params, ...dateParams]),
+      ])
+      // Wave 2 — leads no período + cobertura por produto + total compradores
+      const [srcLeads, campLeads, medLeads, contLeads, totalRes, productRes] = await Promise.all([
+        bqQuery(leadsInPeriodSql('utm_source'),   dateParams),
+        bqQuery(leadsInPeriodSql('utm_campaign'), dateParams),
+        bqQuery(leadsInPeriodSql('utm_medium'),   dateParams),
+        bqQuery(leadsInPeriodSql('utm_content'),  dateParams),
+        bqQuery(totalBuyersSql, [...stClause.params, ...dateParams]),
+        bqQuery(productCoverageSql, dateParams),
+      ])
+
+      const parseAttr = (rows: typeof sourceAttr.rows) => rows.map(r => ({
+        name:       r.name ?? '',
+        anyTime:    parseInt(r.any_time    ?? '0'),
+        lastBefore: parseInt(r.last_before ?? '0'),
+        origin:     parseInt(r.origin      ?? '0'),
+      }))
+      const parseLeads = (rows: typeof srcLeads.rows) => rows.map(r => ({
+        name:  r.name  ?? '',
+        leads: parseInt(r.leads ?? '0'),
+      }))
+
+      return res.json({
+        totalBuyers:     parseInt(totalRes.rows[0]?.cnt ?? '0'),
+        bySource:        parseAttr(sourceAttr.rows),
+        byCampaign:      parseAttr(campaignAttr.rows),
+        byMedium:        parseAttr(mediumAttr.rows),
+        byContent:       parseAttr(contentAttr.rows),
+        leadsBySource:   parseLeads(srcLeads.rows),
+        leadsByCampaign: parseLeads(campLeads.rows),
+        leadsByMedium:   parseLeads(medLeads.rows),
+        leadsByContent:  parseLeads(contLeads.rows),
+        byProduct: productRes.rows.map(r => ({
+          produto:       r.produto ?? '',
+          totalVendas:   parseInt(r.total_vendas ?? '0'),
+          vendasComLead: parseInt(r.com_lead     ?? '0'),
+          vendasSemLead: parseInt(r.sem_lead     ?? '0'),
+        })),
+      })
+    } catch (e) {
+      return res.status(500).json({ error: (e as Error).message })
+    }
+  }
+
   // ── type = 'all' ─────────────────────────────────────────────────────────
-  if (body.type !== 'all') return res.status(400).json({ error: "type must be 'all' or 'behavior-tag'" })
+  if (body.type !== 'all') return res.status(400).json({ error: "type must be 'all', 'behavior-tag', 'utm-attribution', or 'funnel-overview'" })
   const product = body.product ?? ''
   if (!product) return res.status(400).json({ error: 'product is required' })
 

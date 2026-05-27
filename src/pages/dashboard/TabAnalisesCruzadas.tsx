@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
-import type { CrossAnalysisData, BehaviorTagResult, UtmAttributionData, UtmAttrRow } from './types'
-import { KpiCard, SectionHeader, CHART_COLORS } from './components'
+import type { CrossAnalysisData, BehaviorTagResult, UtmAttributionData, UtmAttrRow, FunnelOverviewData } from './types'
+import { KpiCard, SectionHeader, CHART_COLORS, UtmTable } from './components'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -125,7 +125,7 @@ export default function TabAnalisesCruzadas({ token, enabled }: Props) {
   const [loadError, setLoadError] = useState<string | null>(null)
   const [loaded, setLoaded] = useState(false)
   const [loadingOpts, setLoadingOpts] = useState(false)
-  const [activeSubTab, setActiveSubTab] = useState('ltc')
+  const [activeSubTab, setActiveSubTab] = useState('overview')
 
   // Behavior-by-tag state
   const [selectedTag, setSelectedTag] = useState('')
@@ -144,6 +144,11 @@ export default function TabAnalisesCruzadas({ token, enabled }: Props) {
   type SortKey = 'leads' | 'anyTime' | 'lastBefore' | 'origin'
   const [utmAttrSort, setUtmAttrSort] = useState<SortKey>('leads')
   const [utmAttrDesc, setUtmAttrDesc] = useState(true)
+
+  // Funnel overview
+  const [funnelOverview, setFunnelOverview] = useState<FunnelOverviewData | null>(null)
+  const [funnelRunning, setFunnelRunning] = useState(false)
+  const [funnelError, setFunnelError] = useState<string | null>(null)
 
   // Load product/status options once when tab becomes active
   useEffect(() => {
@@ -214,6 +219,24 @@ export default function TabAnalisesCruzadas({ token, enabled }: Props) {
     }
   }
 
+  async function handleRunFunnel() {
+    setFunnelRunning(true); setFunnelError(null); setFunnelOverview(null)
+    try {
+      const res = await fetch('/api/cross-analysis', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ type: 'funnel-overview', statuses: selectedStatuses, since, until }),
+      })
+      if (res.status === 401) { sessionStorage.removeItem('dashboard-token'); window.location.reload(); return }
+      if (!res.ok) throw new Error(`Erro ${res.status}: ${await res.text()}`)
+      setFunnelOverview(await res.json())
+    } catch (e) {
+      setFunnelError((e as Error).message)
+    } finally {
+      setFunnelRunning(false)
+    }
+  }
+
   if (!enabled) return null
 
   return (
@@ -258,21 +281,37 @@ export default function TabAnalisesCruzadas({ token, enabled }: Props) {
       </div>
 
       {/* Resultados */}
-      {result && (
-        <Tabs value={activeSubTab} onValueChange={setActiveSubTab}>
-          <TabsList className="flex h-auto flex-wrap gap-1 bg-muted p-1">
-            {[
-              { id: 'ltc', label: '⏱ Lead→Compra' },
-              { id: 'tags', label: '🏷 Tags/Comprador' },
-              { id: 'utm3', label: '📣 utm_content' },
-              { id: 'entry', label: '🚪 Primeira entrada' },
-              { id: 'funnel', label: '📡 Funil UTM' },
-              { id: 'buyer-tags', label: '🔖 Tags compradores' },
-              { id: 'utm-attr', label: '🎯 UTM Compradores' },
-            ].map(t => (
-              <TabsTrigger key={t.id} value={t.id} className="text-xs sm:text-sm">{t.label}</TabsTrigger>
-            ))}
-          </TabsList>
+      <Tabs value={activeSubTab} onValueChange={setActiveSubTab}>
+        <TabsList className="flex h-auto flex-wrap gap-1 bg-muted p-1">
+          {[
+            { id: 'overview', label: '📊 Visão Geral' },
+            { id: 'ltc', label: '⏱ Lead→Compra' },
+            { id: 'tags', label: '🏷 Tags/Comprador' },
+            { id: 'utm3', label: '📣 utm_content' },
+            { id: 'entry', label: '🚪 Primeira entrada' },
+            { id: 'funnel', label: '📡 Funil UTM' },
+            { id: 'buyer-tags', label: '🔖 Tags compradores' },
+            { id: 'utm-attr', label: '🎯 UTM Compradores' },
+          ].map(t => (
+            <TabsTrigger key={t.id} value={t.id} className="text-xs sm:text-sm">{t.label}</TabsTrigger>
+          ))}
+        </TabsList>
+
+        {/* 📊 Visão Geral */}
+        <TabsContent value="overview" className="space-y-4 mt-4">
+          <FunnelOverviewPanel
+            token={token}
+            statuses={selectedStatuses}
+            since={since}
+            until={until}
+            data={funnelOverview}
+            running={funnelRunning}
+            error={funnelError}
+            onRun={handleRunFunnel}
+          />
+        </TabsContent>
+
+        {result && (<>
 
           {/* ⏱ Lead → Compra */}
           <TabsContent value="ltc" className="space-y-6 mt-4">
@@ -587,7 +626,113 @@ export default function TabAnalisesCruzadas({ token, enabled }: Props) {
               onSort={(k) => { if (utmAttrSort === k) setUtmAttrDesc(d => !d); else { setUtmAttrSort(k); setUtmAttrDesc(true) } }}
             />
           </TabsContent>
-        </Tabs>
+        </>)}
+      </Tabs>
+    </div>
+  )
+}
+
+// ─── Funnel Overview panel ────────────────────────────────────────────────────
+
+function FunnelOverviewPanel({
+  statuses, since, until, data, running, error, onRun,
+}: {
+  token: string; statuses: string[]; since: string; until: string
+  data: FunnelOverviewData | null; running: boolean; error: string | null
+  onRun: () => void
+}) {
+  const DIMS: { key: keyof Pick<FunnelOverviewData, 'bySource' | 'byCampaign' | 'byMedium' | 'byContent'>; leadsKey: keyof Pick<FunnelOverviewData, 'leadsBySource' | 'leadsByCampaign' | 'leadsByMedium' | 'leadsByContent'>; label: string; color: string }[] = [
+    { key: 'bySource',   leadsKey: 'leadsBySource',   label: 'Fonte (utm_source)',      color: CHART_COLORS[0] },
+    { key: 'byMedium',   leadsKey: 'leadsByMedium',   label: 'Público (utm_medium)',    color: CHART_COLORS[2] },
+    { key: 'byCampaign', leadsKey: 'leadsByCampaign', label: 'Campanha (utm_campaign)', color: CHART_COLORS[1] },
+    { key: 'byContent',  leadsKey: 'leadsByContent',  label: 'Criativo (utm_content)',  color: CHART_COLORS[3] },
+  ]
+
+  return (
+    <div className="space-y-5">
+      <div className="flex flex-wrap items-center gap-3">
+        <p className="text-sm text-muted-foreground">
+          Analisa performance de UTMs em toda a conta no período selecionado, sem filtro de produto.
+        </p>
+        <Button type="button" size="sm" onClick={onRun} disabled={running}>
+          {running ? <><span className="mr-1 animate-spin">⟳</span>Buscando...</> : <><span className="mr-1">▶</span>Buscar Visão Geral</>}
+        </Button>
+      </div>
+
+      {error && <p className="text-sm text-destructive">{error}</p>}
+
+      {!data && !running && (
+        <p className="text-sm text-muted-foreground">Clique em "Buscar Visão Geral" para carregar os dados.</p>
+      )}
+
+      {data && (
+        <>
+          <div className="flex items-center gap-3">
+            <KpiCard label="Total compradores" value={data.totalBuyers.toLocaleString('pt-BR')} />
+          </div>
+
+          {/* Seção 1 — Tabelas UTM */}
+          <div className="space-y-3">
+            <p className="text-sm font-semibold">Atribuição por dimensão UTM</p>
+            <p className="text-xs text-muted-foreground">
+              Leads = captados no período · Vendas = <strong>Todos</strong> / <strong>Última UTM</strong> / <strong>Origem</strong>
+            </p>
+            {DIMS.map(dim => {
+              const leadsRows = (data[dim.leadsKey] as { name: string; leads: number }[]).map(r => ({ name: r.name, value: r.leads }))
+              const totalLeads = leadsRows.reduce((s, r) => s + r.value, 0)
+              return (
+                <UtmTable
+                  key={dim.key}
+                  title={dim.label}
+                  rows={leadsRows}
+                  total={totalLeads}
+                  color={dim.color}
+                  salesRows={data[dim.key]}
+                  totalBuyers={data.totalBuyers}
+                />
+              )
+            })}
+          </div>
+
+          {/* Seção 2 — Cobertura por produto */}
+          {data.byProduct.length > 0 && (
+            <div className="space-y-3">
+              <p className="text-sm font-semibold">Cobertura por produto</p>
+              <p className="text-xs text-muted-foreground">
+                Compradores identificados na base de leads vs. sem rastreio.
+              </p>
+              <div className="overflow-x-auto rounded border">
+                <table className="w-full text-sm">
+                  <thead className="bg-muted">
+                    <tr>
+                      <th className="px-3 py-2 text-left font-medium">Produto</th>
+                      <th className="px-3 py-2 text-right font-medium">Total vendas</th>
+                      <th className="px-3 py-2 text-right font-medium">Com lead</th>
+                      <th className="px-3 py-2 text-right font-medium">Sem lead</th>
+                      <th className="px-3 py-2 text-right font-medium">% sem rastreio</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {data.byProduct.map((r, i) => {
+                      const pctSem = r.totalVendas > 0 ? ((r.vendasSemLead / r.totalVendas) * 100).toFixed(0) : '0'
+                      return (
+                        <tr key={i} className="hover:bg-muted/50">
+                          <td className="px-3 py-2 max-w-[240px] truncate font-medium" title={r.produto}>{r.produto}</td>
+                          <td className="px-3 py-2 text-right tabular-nums">{r.totalVendas.toLocaleString('pt-BR')}</td>
+                          <td className="px-3 py-2 text-right tabular-nums" style={{ color: CHART_COLORS[1] }}>{r.vendasComLead.toLocaleString('pt-BR')}</td>
+                          <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">{r.vendasSemLead.toLocaleString('pt-BR')}</td>
+                          <td className="px-3 py-2 text-right">
+                            <Badge variant={Number(pctSem) > 50 ? 'destructive' : 'outline'}>{pctSem}%</Badge>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </>
       )}
     </div>
   )
