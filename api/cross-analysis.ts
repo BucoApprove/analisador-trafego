@@ -146,18 +146,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const product = body.product ?? ''
     if (!product) return res.status(400).json({ error: 'product is required' })
 
-    const params: QueryParam[] = [{ name: 'product', value: product }, ...stClause.params, ...dateParams]
+    // Se nenhum status foi passado, força APROVADO e COMPLETO como padrão
+    const attrStatuses = statuses.length > 0 ? statuses : ['APROVADO', 'COMPLETO']
+    const attrStClause = statusSql(attrStatuses)
+    const params: QueryParam[] = [{ name: 'product', value: product }, ...attrStClause.params, ...dateParams]
 
     // For each UTM dimension: anyTime / lastBefore / origin attribution.
-    // Leads sem filtro de data — UTM histórico dos compradores (período se aplica só às vendas)
-    // Uma única query por dimensão retorna as 3 atribuições + contagens de leads
+    // leads_ranked usa histórico completo (sem filtro de data) para atribuição correta
+    // lead_counts usa filtro de período para mostrar leads captados no intervalo selecionado
     function utmAttrSql(utmCol: string): string {
       return `
         WITH
           buyers AS (
             SELECT DISTINCT LOWER(TRIM(E_mail_do_Comprador)) AS email
             FROM ${tVendas}
-            WHERE Nome_do_Produto = @product ${stClause.sql} AND E_mail_do_Comprador IS NOT NULL${saleDateFilter}
+            WHERE Nome_do_Produto = @product ${attrStClause.sql} AND E_mail_do_Comprador IS NOT NULL${saleDateFilter}
           ),
           -- todos os leads históricos dos compradores (sem filtro de data)
           buyer_leads_all AS (
@@ -165,7 +168,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             FROM ${tLeads}
             WHERE lead_email IS NOT NULL
           ),
-          -- leads com UTM preenchido, rankeados por comprador (histórico completo)
+          -- leads com UTM preenchido, rankeados por comprador (histórico completo — para atribuição)
           leads_ranked AS (
             SELECT
               LOWER(TRIM(lead_email)) AS email,
@@ -195,12 +198,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             FROM buyer_utms
             GROUP BY utm_raw
           ),
-          -- contagem de leads totais (histórico) por utm
+          -- contagem de leads captados NO PERÍODO por utm (não histórico)
           lead_counts AS (
             SELECT ${utmCol} AS utm_val, COUNT(DISTINCT lead_email) AS cnt
             FROM ${tLeads}
             WHERE lead_email IS NOT NULL
               AND ${utmCol} IS NOT NULL AND TRIM(${utmCol}) != ''
+              ${since && until ? `AND DATE(lead_register) BETWEEN @since AND @until` : ''}
             GROUP BY ${utmCol}
           ),
           buyers_no_utm AS (
@@ -234,7 +238,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const totalBuyersSql = `
       SELECT COUNT(DISTINCT LOWER(TRIM(E_mail_do_Comprador))) AS cnt
       FROM ${tVendas}
-      WHERE Nome_do_Produto = @product ${stClause.sql} AND E_mail_do_Comprador IS NOT NULL${saleDateFilter}
+      WHERE Nome_do_Produto = @product ${attrStClause.sql} AND E_mail_do_Comprador IS NOT NULL${saleDateFilter}
     `
 
     // Última tag do comprador antes da data da compra
@@ -245,7 +249,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             LOWER(TRIM(E_mail_do_Comprador)) AS email,
             MIN(COALESCE(Data_de_Aprova____o, Data_do_Pedido)) AS data_compra
           FROM ${tVendas}
-          WHERE Nome_do_Produto = @product ${stClause.sql} AND E_mail_do_Comprador IS NOT NULL${saleDateFilter}
+          WHERE Nome_do_Produto = @product ${attrStClause.sql} AND E_mail_do_Comprador IS NOT NULL${saleDateFilter}
           GROUP BY LOWER(TRIM(E_mail_do_Comprador))
         ),
         leads_before AS (
