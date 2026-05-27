@@ -238,7 +238,7 @@ const VIEWS_WITH_UTM = new Set(['etapa2', 'etapa4'])
 interface UtmCounts {
   leads:               Record<string, number>  // utm_campaign → leads únicos
   content:             Record<string, number>  // utm_campaign|||utm_medium|||utm_content → leads
-  vendas:              Record<string, number>  // utm_campaign → compradores únicos via UTM (any touch)
+  vendas:              Record<string, number>  // utm_campaign → compradores únicos via UTM (any touch) — todos os produtos
   vendasContent:       Record<string, number>  // utm_campaign|||utm_medium|||utm_content → compradores únicos (any touch)
   vendasPorAdId:       Record<string, number>  // ad_id numérico → compradores únicos (any touch)
   vendasLastCamp:      Record<string, number>  // utm_campaign → compradores únicos (last touch)
@@ -246,7 +246,12 @@ interface UtmCounts {
   vendasLastByAdId:    Record<string, number>  // ad_id numérico → compradores únicos (last touch)
   receita:             Record<string, number>  // utm_campaign → soma Valor_Pago_pelo_Comprador
   lagDias:             Record<string, number>  // utm_campaign → média de dias lead→compra
-  vendasTotais:        Record<string, number>  // utm_campaign → vendas do produto no período (sem join de lead)
+  vendasTotais:        Record<string, number>  // prefixo → vendas do produto no período (sem join de lead)
+  // por produto: chave = prefixo do produto, valor = mapa utm_campaign → count
+  vendasByProduto:     Record<string, Record<string, number>>
+  vendasLastByProduto: Record<string, Record<string, number>>
+  receitaByProduto:    Record<string, Record<string, number>>
+  lagDiasByProduto:    Record<string, Record<string, number>>
 }
 
 const ATTRIBUTION_WINDOW_DAYS = 30
@@ -449,7 +454,7 @@ async function fetchUtmCounts(since: string, until: string, produtoMap: ProdutoM
           `SELECT CAST(ID_do_Produto AS STRING) AS produto_id, COUNT(*) AS cnt
            FROM ${tVendas}
            WHERE DATE(Data_de_Aprova____o) BETWEEN @since AND @until
-             AND LOWER(TRIM(Status)) = 'aprovado'
+             AND Status IN ('APROVADO', 'COMPLETO')
            GROUP BY 1`,
           dateParams,
         )
@@ -519,7 +524,94 @@ async function fetchUtmCounts(since: string, until: string, produtoMap: ProdutoM
     vendasTotais[entry.prefixo] = total
   }
 
-  return { leads, content, vendas, vendasContent, vendasPorAdId, vendasLastCamp, vendasLastContent, vendasLastByAdId, receita, lagDias, vendasTotais }
+  // Queries por produto isolado — evita que vendas de produto A sejam atribuídas a campanhas de produto B
+  const vendasByProduto:     Record<string, Record<string, number>> = {}
+  const vendasLastByProduto: Record<string, Record<string, number>> = {}
+  const receitaByProduto:    Record<string, Record<string, number>> = {}
+  const lagDiasByProduto:    Record<string, Record<string, number>> = {}
+
+  if (produtoMap.length > 1) {
+    // Só executa queries isoladas quando há mais de 1 produto (se há só 1, vendas/receita/lagDias já estão corretos)
+    await Promise.all(produtoMap.map(async entry => {
+      const pFilter = `AND CAST(s.ID_do_Produto AS INT64) IN (${entry.produto_ids.join(', ')})`
+
+      const [pvRows, plRows, prRows] = await Promise.all([
+        bqQuery(
+          `SELECT ${decodeUtm('l.utm_campaign')} AS key,
+                  COUNT(DISTINCT LOWER(TRIM(l.lead_email))) AS cnt
+           FROM ${tLeads} l
+           INNER JOIN ${tVendas} s
+             ON LOWER(TRIM(l.lead_email)) = LOWER(TRIM(s.E_mail_do_Comprador))
+           WHERE l.utm_campaign IS NOT NULL AND l.utm_campaign != ''
+             AND DATE(l.lead_register) BETWEEN @since AND @until
+             AND DATE(s.Data_de_Aprova____o) BETWEEN @since AND @sales_until
+             ${pFilter}
+             ${statusFilter}
+           GROUP BY 1`,
+          dateParams,
+        ),
+        bqQuery(
+          `WITH ranked AS (
+             SELECT ${decodeUtm('l.utm_campaign')} AS campaign,
+                    LOWER(TRIM(l.lead_email)) AS email,
+                    ROW_NUMBER() OVER (
+                      PARTITION BY LOWER(TRIM(l.lead_email)), LOWER(TRIM(s.E_mail_do_Comprador))
+                      ORDER BY l.lead_register DESC
+                    ) AS rn
+             FROM ${tLeads} l
+             INNER JOIN ${tVendas} s
+               ON LOWER(TRIM(l.lead_email)) = LOWER(TRIM(s.E_mail_do_Comprador))
+             WHERE l.utm_campaign IS NOT NULL AND l.utm_campaign != ''
+               AND DATE(l.lead_register) BETWEEN @since AND @until
+               AND l.lead_register <= s.Data_de_Aprova____o
+               AND DATE(s.Data_de_Aprova____o) BETWEEN @since AND @sales_until
+               ${pFilter}
+               ${statusFilter}
+           )
+           SELECT campaign AS key, COUNT(DISTINCT email) AS cnt
+           FROM ranked WHERE rn = 1
+           GROUP BY 1`,
+          dateParams,
+        ),
+        bqQuery(
+          `SELECT ${decodeUtm('l.utm_campaign')} AS key,
+                  SUM(s.Valor_Pago_pelo_Comprador_Sem_Taxas_e_Impostos) AS receita,
+                  AVG(DATE_DIFF(s.Data_de_Aprova____o, DATE(l.lead_register), DAY)) AS lag_dias
+           FROM ${tLeads} l
+           INNER JOIN ${tVendas} s
+             ON LOWER(TRIM(l.lead_email)) = LOWER(TRIM(s.E_mail_do_Comprador))
+           WHERE l.utm_campaign IS NOT NULL AND l.utm_campaign != ''
+             AND DATE(l.lead_register) BETWEEN @since AND @until
+             AND DATE(s.Data_de_Aprova____o) BETWEEN @since AND @sales_until
+             ${pFilter}
+             ${statusFilter}
+           GROUP BY 1`,
+          dateParams,
+        ),
+      ])
+
+      const vMap: Record<string, number> = {}
+      for (const r of pvRows.rows) if (r.key) vMap[norm(r.key)] = parseInt(r.cnt ?? '0')
+      vendasByProduto[entry.prefixo] = vMap
+
+      const vlMap: Record<string, number> = {}
+      for (const r of plRows.rows) if (r.key) vlMap[norm(r.key)] = parseInt(r.cnt ?? '0')
+      vendasLastByProduto[entry.prefixo] = vlMap
+
+      const rMap: Record<string, number> = {}
+      const lMap: Record<string, number> = {}
+      for (const r of prRows.rows) {
+        if (r.key) {
+          rMap[norm(r.key)] = parseFloat(r.receita ?? '0')
+          lMap[norm(r.key)] = parseFloat(r.lag_dias ?? '0')
+        }
+      }
+      receitaByProduto[entry.prefixo]  = rMap
+      lagDiasByProduto[entry.prefixo]  = lMap
+    }))
+  }
+
+  return { leads, content, vendas, vendasContent, vendasPorAdId, vendasLastCamp, vendasLastContent, vendasLastByAdId, receita, lagDias, vendasTotais, vendasByProduto, vendasLastByProduto, receitaByProduto, lagDiasByProduto }
 }
 
 // ─── Tipo de linha do relatório ───────────────────────────────────────────────
@@ -956,7 +1048,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           const campAlc       = camp.adsets.reduce((s, r) => s + Number(r.reach ?? 0), 0)
           const campKey       = camp.name.toLowerCase().trim()
           const campLeads     = hasUtm ? (utmCounts.leads[campKey] ?? 0) : 0
-          const campVendas    = hasUtm ? (utmCounts.vendas[campKey] ?? 0) : 0
+          const campProdEntry = produtoMap.find(e => campKey.includes(e.prefixo))
+          const campPrefixo   = campProdEntry?.prefixo
+          // Se há múltiplos produtos e a campanha pertence a um produto específico, usa mapa isolado
+          const campVendasMap = campPrefixo && Object.keys(utmCounts.vendasByProduto).length > 0
+            ? (utmCounts.vendasByProduto[campPrefixo] ?? utmCounts.vendas)
+            : utmCounts.vendas
+          const campLastMap   = campPrefixo && Object.keys(utmCounts.vendasLastByProduto).length > 0
+            ? (utmCounts.vendasLastByProduto[campPrefixo] ?? utmCounts.vendasLastCamp)
+            : utmCounts.vendasLastCamp
+          const campReceitaMap = campPrefixo && Object.keys(utmCounts.receitaByProduto).length > 0
+            ? (utmCounts.receitaByProduto[campPrefixo] ?? utmCounts.receita)
+            : utmCounts.receita
+          const campLagMap    = campPrefixo && Object.keys(utmCounts.lagDiasByProduto).length > 0
+            ? (utmCounts.lagDiasByProduto[campPrefixo] ?? utmCounts.lagDias)
+            : utmCounts.lagDias
+          const campVendas    = hasUtm ? (campVendasMap[campKey] ?? 0) : 0
 
           let variacao: VariacaoPeriodo | undefined
           if (includeVariacao) {
@@ -1033,20 +1140,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             thumbnail_url:              '',
             landing_url_real:           '',
             formato_criativo:           '',
-            receita_reais:            (() => { const r = utmCounts.receita[campKey]; return r > 0 ? r.toFixed(2) : '' })(),
-            roas_real:                (() => { const r = utmCounts.receita[campKey]; return r > 0 && campSpend > 0 ? (r / campSpend).toFixed(2) : '' })(),
-            ticket_medio_real:        (() => { const r = utmCounts.receita[campKey]; const v = campVendas; return r > 0 && v > 0 ? (r / v).toFixed(2) : '' })(),
-            lag_dias_conversao_medio: (() => { const l = utmCounts.lagDias[campKey]; return l > 0 ? l.toFixed(1) : '' })(),
+            receita_reais:            (() => { const r = campReceitaMap[campKey]; return r > 0 ? r.toFixed(2) : '' })(),
+            roas_real:                (() => { const r = campReceitaMap[campKey]; return r > 0 && campSpend > 0 ? (r / campSpend).toFixed(2) : '' })(),
+            ticket_medio_real:        (() => { const r = campReceitaMap[campKey]; const v = campVendas; return r > 0 && v > 0 ? (r / v).toFixed(2) : '' })(),
+            lag_dias_conversao_medio: (() => { const l = campLagMap[campKey]; return l > 0 ? l.toFixed(1) : '' })(),
             leads_reais:            hasUtm ? String(campLeads) : '',
             cpl_real:               hasUtm && campLeads > 0 ? (campSpend / campLeads).toFixed(2) : '',
             vendas_reais:           hasUtm ? String(campVendas) : '',
             cpv_real:               hasUtm && campVendas > 0 ? (campSpend / campVendas).toFixed(2) : '',
-            vendas_totais_periodo:  (() => { const lower = camp.name.toLowerCase().trim(); const entry = produtoMap.find(e => lower.includes(e.prefixo)); if (!entry) return ''; const t = utmCounts.vendasTotais[entry.prefixo] ?? 0; return t > 0 ? String(t) : '' })(),
-            produto:                (() => { const lower = camp.name.toLowerCase().trim(); return produtoMap.find(e => lower.includes(e.prefixo))?.label ?? '' })(),
+            vendas_totais_periodo:  (() => { if (!campProdEntry) return ''; const t = utmCounts.vendasTotais[campProdEntry.prefixo] ?? 0; return t > 0 ? String(t) : '' })(),
+            produto:                campProdEntry?.label ?? '',
             vendas_any:             hasUtm ? String(campVendas) : '',
             cpv_any:                hasUtm && campVendas > 0 ? (campSpend / campVendas).toFixed(2) : '',
-            vendas_last:            (() => { const v = utmCounts.vendasLastCamp[campKey] ?? 0; return hasUtm ? String(v) : '' })(),
-            cpv_last:               (() => { const v = utmCounts.vendasLastCamp[campKey] ?? 0; return hasUtm && v > 0 ? (campSpend / v).toFixed(2) : '' })(),
+            vendas_last:            (() => { const v = campLastMap[campKey] ?? 0; return hasUtm ? String(v) : '' })(),
+            cpv_last:               (() => { const v = campLastMap[campKey] ?? 0; return hasUtm && v > 0 ? (campSpend / v).toFixed(2) : '' })(),
             variacao_periodo_anterior: variacao,
           })
         }
