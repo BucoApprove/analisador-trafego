@@ -300,11 +300,11 @@ async function fetchUtmCounts(since: string, until: string, produtoMap: ProdutoM
          ${decodeUtm('l.utm_content')}  AS content,
          TRIM(l.utm_content)            AS content_raw,
          CAST(s.ID_do_Produto AS INT64) AS produto_id,
-         s.ID_Transacao                 AS id_transacao,
+         LOWER(TRIM(s.E_mail_do_Comprador)) AS id_transacao,
          s.Valor_Pago_pelo_Comprador_Sem_Taxas_e_Impostos AS valor,
          DATE_DIFF(DATE(s.Data_de_Aprova____o), DATE(l.lead_register), DAY) AS lag_days,
          ROW_NUMBER() OVER (
-           PARTITION BY LOWER(TRIM(l.lead_email)), s.ID_Transacao
+           PARTITION BY LOWER(TRIM(l.lead_email)), LOWER(TRIM(s.E_mail_do_Comprador))
            ORDER BY l.lead_register DESC
          ) AS rn_last
        FROM ${tLeads} l
