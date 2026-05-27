@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
-import type { CrossAnalysisData, BehaviorTagResult, UtmAttributionData, UtmAttrRow, FunnelOverviewData } from './types'
+import type { CrossAnalysisData, BehaviorTagResult, UtmAttributionData, UtmAttrRow } from './types'
 import { KpiCard, SectionHeader, CHART_COLORS } from './components'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { Button } from '@/components/ui/button'
@@ -145,10 +145,11 @@ export default function TabAnalisesCruzadas({ token, enabled }: Props) {
   const [utmAttrSort, setUtmAttrSort] = useState<SortKey>('leads')
   const [utmAttrDesc, setUtmAttrDesc] = useState(true)
 
-  // Funnel overview
-  const [funnelOverview, setFunnelOverview] = useState<FunnelOverviewData | null>(null)
-  const [funnelRunning, setFunnelRunning] = useState(false)
-  const [funnelError, setFunnelError] = useState<string | null>(null)
+  // Visão Geral — produto próprio + dados de atribuição
+  const [overviewProduct, setOverviewProduct] = useState('')
+  const [overviewData, setOverviewData] = useState<UtmAttributionData | null>(null)
+  const [overviewRunning, setOverviewRunning] = useState(false)
+  const [overviewError, setOverviewError] = useState<string | null>(null)
 
   // Load product/status options once when tab becomes active
   useEffect(() => {
@@ -219,21 +220,22 @@ export default function TabAnalisesCruzadas({ token, enabled }: Props) {
     }
   }
 
-  async function handleRunFunnel() {
-    setFunnelRunning(true); setFunnelError(null); setFunnelOverview(null)
+  async function handleRunOverview() {
+    if (!overviewProduct) return
+    setOverviewRunning(true); setOverviewError(null); setOverviewData(null)
     try {
       const res = await fetch('/api/cross-analysis', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ type: 'funnel-overview', statuses: selectedStatuses, since, until }),
+        body: JSON.stringify({ type: 'utm-attribution', product: overviewProduct, statuses: selectedStatuses, since, until }),
       })
       if (res.status === 401) { sessionStorage.removeItem('dashboard-token'); window.location.reload(); return }
       if (!res.ok) throw new Error(`Erro ${res.status}: ${await res.text()}`)
-      setFunnelOverview(await res.json())
+      setOverviewData(await res.json())
     } catch (e) {
-      setFunnelError((e as Error).message)
+      setOverviewError((e as Error).message)
     } finally {
-      setFunnelRunning(false)
+      setOverviewRunning(false)
     }
   }
 
@@ -301,13 +303,16 @@ export default function TabAnalisesCruzadas({ token, enabled }: Props) {
         <TabsContent value="overview" className="space-y-4 mt-4">
           <FunnelOverviewPanel
             token={token}
+            products={products}
+            product={overviewProduct}
+            onProduct={p => { setOverviewProduct(p); setOverviewData(null) }}
             statuses={selectedStatuses}
             since={since}
             until={until}
-            data={funnelOverview}
-            running={funnelRunning}
-            error={funnelError}
-            onRun={handleRunFunnel}
+            data={overviewData}
+            running={overviewRunning}
+            error={overviewError}
+            onRun={handleRunOverview}
           />
         </TabsContent>
 
@@ -637,9 +642,10 @@ export default function TabAnalisesCruzadas({ token, enabled }: Props) {
 type OverviewRow = { name: string; leads: number; anyTime: number; lastBefore: number; origin: number }
 
 function TopTable({
-  title, rows, valueKey, color,
+  title, description, rows, valueKey, color,
 }: {
   title: string
+  description: string
   rows: OverviewRow[]
   valueKey: 'leads' | 'anyTime' | 'lastBefore' | 'origin'
   color: string
@@ -651,6 +657,7 @@ function TopTable({
     <div className="rounded-lg border bg-card overflow-hidden">
       <div className="px-4 py-2.5 border-b bg-muted/40">
         <p className="text-sm font-semibold">{title}</p>
+        <p className="text-xs text-muted-foreground">{description}</p>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-xs">
@@ -695,42 +702,48 @@ function TopTable({
 }
 
 function FunnelOverviewPanel({
-  data, running, error, onRun,
+  products, product, onProduct, data, running, error, onRun,
 }: {
-  token: string; statuses: string[]; since: string; until: string
-  data: FunnelOverviewData | null; running: boolean; error: string | null
+  token: string; products: string[]; product: string; onProduct: (p: string) => void
+  statuses: string[]; since: string; until: string
+  data: UtmAttributionData | null; running: boolean; error: string | null
   onRun: () => void
 }) {
-  // Mescla leads do período com atribuição de vendas por utm_content
   const contentRows: OverviewRow[] = useMemo(() => {
     if (!data) return []
-    const leadsMap = new Map(data.leadsByContent.map(r => [r.name, r.leads]))
-    const attrMap = new Map(data.byContent.map(r => [r.name, r]))
-    const allNames = new Set([...leadsMap.keys(), ...attrMap.keys()])
-    return [...allNames].map(name => ({
-      name,
-      leads:      leadsMap.get(name) ?? 0,
-      anyTime:    attrMap.get(name)?.anyTime    ?? 0,
-      lastBefore: attrMap.get(name)?.lastBefore ?? 0,
-      origin:     attrMap.get(name)?.origin     ?? 0,
+    return data.byContent.map(r => ({
+      name:       r.utm,
+      leads:      r.leads,
+      anyTime:    r.anyTime,
+      lastBefore: r.lastBefore,
+      origin:     r.origin,
     }))
   }, [data])
 
   return (
     <div className="space-y-5">
-      <div className="flex flex-wrap items-center gap-3">
-        <p className="text-sm text-muted-foreground">
-          Top 10 anúncios (utm_content) por tipo de atribuição — toda a conta, sem filtro de produto.
-        </p>
-        <Button type="button" size="sm" onClick={onRun} disabled={running}>
-          {running ? <><span className="mr-1 animate-spin">⟳</span>Buscando...</> : <><span className="mr-1">▶</span>Buscar Visão Geral</>}
+      {/* Seletor de produto + botão */}
+      <div className="flex flex-wrap items-end gap-3">
+        <div className="space-y-1 min-w-[240px]">
+          <p className="text-sm font-medium">Produto</p>
+          <select
+            className="w-full rounded border px-2 py-1.5 text-sm bg-background"
+            value={product}
+            onChange={e => onProduct(e.target.value)}
+          >
+            <option value="">Selecione um produto...</option>
+            {products.map(p => <option key={p} value={p}>{p}</option>)}
+          </select>
+        </div>
+        <Button type="button" size="sm" onClick={onRun} disabled={running || !product}>
+          {running ? <><span className="mr-1 animate-spin">⟳</span>Buscando...</> : <><span className="mr-1">▶</span>Buscar</>}
         </Button>
       </div>
 
       {error && <p className="text-sm text-destructive">{error}</p>}
 
       {!data && !running && (
-        <p className="text-sm text-muted-foreground">Clique em "Buscar Visão Geral" para carregar os dados.</p>
+        <p className="text-sm text-muted-foreground">Selecione um produto e clique em "Buscar" para ver os top 10 criativos.</p>
       )}
 
       {data && (
@@ -739,80 +752,44 @@ function FunnelOverviewPanel({
             <KpiCard label="Total compradores no período" value={data.totalBuyers.toLocaleString('pt-BR')} />
           </div>
 
-          {/* 4 quadrantes — igual BA25 */}
           <div>
-            <p className="text-xs font-semibold mb-2 text-muted-foreground uppercase tracking-wide">
-              Top 10 Anúncios — utm_content
+            <p className="text-xs font-semibold mb-1 text-muted-foreground uppercase tracking-wide">
+              Top 10 Criativos — utm_content · {product}
             </p>
             <p className="text-xs text-muted-foreground mb-3">
-              Leads = captados no período · Vendas variam por quadrante
+              Leads = histórico total do criativo na base · Vendas variam por tipo de atribuição
             </p>
             <div className="grid gap-4 lg:grid-cols-2">
               <TopTable
                 title="Por Leads Capturados"
+                description="Criativos que mais geraram leads na base"
                 rows={contentRows}
                 valueKey="leads"
                 color={CHART_COLORS[0]}
               />
               <TopTable
                 title="Por Vendas (Last-touch)"
+                description="Último criativo registrado antes da compra"
                 rows={contentRows}
                 valueKey="lastBefore"
                 color={CHART_COLORS[2]}
               />
               <TopTable
-                title="Por Vendas (First-touch / Origem)"
+                title="Por Vendas (First-touch)"
+                description="Primeiro criativo que trouxe o comprador para a base"
                 rows={contentRows}
                 valueKey="origin"
                 color={CHART_COLORS[1]}
               />
               <TopTable
                 title="Por Participação (Any-touch)"
+                description="Comprador teve esse criativo em algum momento"
                 rows={contentRows}
                 valueKey="anyTime"
                 color={CHART_COLORS[3]}
               />
             </div>
           </div>
-
-          {/* Cobertura por produto */}
-          {data.byProduct.length > 0 && (
-            <div className="space-y-3">
-              <p className="text-sm font-semibold">Cobertura por produto</p>
-              <p className="text-xs text-muted-foreground">
-                Compradores identificados na base de leads vs. sem rastreio.
-              </p>
-              <div className="overflow-x-auto rounded border">
-                <table className="w-full text-sm">
-                  <thead className="bg-muted">
-                    <tr>
-                      <th className="px-3 py-2 text-left font-medium">Produto</th>
-                      <th className="px-3 py-2 text-right font-medium">Total vendas</th>
-                      <th className="px-3 py-2 text-right font-medium">Com lead</th>
-                      <th className="px-3 py-2 text-right font-medium">Sem lead</th>
-                      <th className="px-3 py-2 text-right font-medium">% sem rastreio</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y">
-                    {data.byProduct.map((r, i) => {
-                      const pctSem = r.totalVendas > 0 ? ((r.vendasSemLead / r.totalVendas) * 100).toFixed(0) : '0'
-                      return (
-                        <tr key={i} className="hover:bg-muted/50">
-                          <td className="px-3 py-2 max-w-[240px] truncate font-medium" title={r.produto}>{r.produto}</td>
-                          <td className="px-3 py-2 text-right tabular-nums">{r.totalVendas.toLocaleString('pt-BR')}</td>
-                          <td className="px-3 py-2 text-right tabular-nums" style={{ color: CHART_COLORS[1] }}>{r.vendasComLead.toLocaleString('pt-BR')}</td>
-                          <td className="px-3 py-2 text-right tabular-nums text-muted-foreground">{r.vendasSemLead.toLocaleString('pt-BR')}</td>
-                          <td className="px-3 py-2 text-right">
-                            <Badge variant={Number(pctSem) > 50 ? 'destructive' : 'outline'}>{pctSem}%</Badge>
-                          </td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
         </>
       )}
     </div>
