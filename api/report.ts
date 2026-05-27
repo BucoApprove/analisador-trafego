@@ -304,7 +304,7 @@ async function fetchUtmCounts(since: string, until: string, produtoMap: ProdutoM
          s.Valor_Pago_pelo_Comprador_Sem_Taxas_e_Impostos AS valor,
          DATE_DIFF(DATE(s.Data_de_Aprova____o), DATE(l.lead_register), DAY) AS lag_days,
          ROW_NUMBER() OVER (
-           PARTITION BY LOWER(TRIM(l.lead_email)), LOWER(TRIM(s.E_mail_do_Comprador))
+           PARTITION BY LOWER(TRIM(l.lead_email)), s.ID_Transa___o
            ORDER BY l.lead_register DESC
          ) AS rn_last
        FROM ${tLeads} l
