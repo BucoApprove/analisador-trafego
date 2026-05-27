@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
 import type { CrossAnalysisData, BehaviorTagResult, UtmAttributionData, UtmAttrRow, FunnelOverviewData } from './types'
-import { KpiCard, SectionHeader, CHART_COLORS, UtmTable } from './components'
+import { KpiCard, SectionHeader, CHART_COLORS } from './components'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
