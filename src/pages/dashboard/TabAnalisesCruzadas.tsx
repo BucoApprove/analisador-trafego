@@ -634,6 +634,66 @@ export default function TabAnalisesCruzadas({ token, enabled }: Props) {
 
 // ─── Funnel Overview panel ────────────────────────────────────────────────────
 
+type OverviewRow = { name: string; leads: number; anyTime: number; lastBefore: number; origin: number }
+
+function TopTable({
+  title, rows, valueKey, color,
+}: {
+  title: string
+  rows: OverviewRow[]
+  valueKey: 'leads' | 'anyTime' | 'lastBefore' | 'origin'
+  color: string
+}) {
+  const sorted = [...rows].sort((a, b) => b[valueKey] - a[valueKey]).slice(0, 10)
+  const max = Math.max(...sorted.map(r => r[valueKey]), 1)
+
+  return (
+    <div className="rounded-lg border bg-card overflow-hidden">
+      <div className="px-4 py-2.5 border-b bg-muted/40">
+        <p className="text-sm font-semibold">{title}</p>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs">
+          <thead className="bg-muted/60">
+            <tr>
+              <th className="px-2 py-1.5 text-center font-medium w-6">#</th>
+              <th className="px-3 py-1.5 text-left font-medium">Anúncio</th>
+              <th className="px-3 py-1.5 text-right font-medium">Leads</th>
+              <th className="px-3 py-1.5 text-right font-medium">Vendas</th>
+              <th className="px-3 py-1.5 w-20"></th>
+            </tr>
+          </thead>
+          <tbody className="divide-y">
+            {sorted.map((r, i) => {
+              const val = r[valueKey]
+              return (
+                <tr key={r.name} className="hover:bg-muted/40">
+                  <td className="px-2 py-1.5 text-center text-muted-foreground">{i + 1}°</td>
+                  <td className="px-3 py-1.5 truncate max-w-[200px] font-medium" title={r.name}>{r.name}</td>
+                  <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">
+                    {r.leads > 0 ? r.leads.toLocaleString('pt-BR') : '—'}
+                  </td>
+                  <td className="px-3 py-1.5 text-right tabular-nums font-semibold" style={{ color: val > 0 ? color : undefined }}>
+                    {val > 0 ? val : '—'}
+                  </td>
+                  <td className="px-3 py-1.5">
+                    <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+                      <div className="h-full rounded-full" style={{ width: `${(val / max) * 100}%`, backgroundColor: color }} />
+                    </div>
+                  </td>
+                </tr>
+              )
+            })}
+            {sorted.length === 0 && (
+              <tr><td colSpan={5} className="px-3 py-3 text-center text-muted-foreground">Sem dados.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
 function FunnelOverviewPanel({
   data, running, error, onRun,
 }: {
@@ -641,18 +701,26 @@ function FunnelOverviewPanel({
   data: FunnelOverviewData | null; running: boolean; error: string | null
   onRun: () => void
 }) {
-  const DIMS: { key: keyof Pick<FunnelOverviewData, 'bySource' | 'byCampaign' | 'byMedium' | 'byContent'>; leadsKey: keyof Pick<FunnelOverviewData, 'leadsBySource' | 'leadsByCampaign' | 'leadsByMedium' | 'leadsByContent'>; label: string; color: string }[] = [
-    { key: 'bySource',   leadsKey: 'leadsBySource',   label: 'Fonte (utm_source)',      color: CHART_COLORS[0] },
-    { key: 'byMedium',   leadsKey: 'leadsByMedium',   label: 'Público (utm_medium)',    color: CHART_COLORS[2] },
-    { key: 'byCampaign', leadsKey: 'leadsByCampaign', label: 'Campanha (utm_campaign)', color: CHART_COLORS[1] },
-    { key: 'byContent',  leadsKey: 'leadsByContent',  label: 'Criativo (utm_content)',  color: CHART_COLORS[3] },
-  ]
+  // Mescla leads do período com atribuição de vendas por utm_content
+  const contentRows: OverviewRow[] = useMemo(() => {
+    if (!data) return []
+    const leadsMap = new Map(data.leadsByContent.map(r => [r.name, r.leads]))
+    const attrMap = new Map(data.byContent.map(r => [r.name, r]))
+    const allNames = new Set([...leadsMap.keys(), ...attrMap.keys()])
+    return [...allNames].map(name => ({
+      name,
+      leads:      leadsMap.get(name) ?? 0,
+      anyTime:    attrMap.get(name)?.anyTime    ?? 0,
+      lastBefore: attrMap.get(name)?.lastBefore ?? 0,
+      origin:     attrMap.get(name)?.origin     ?? 0,
+    }))
+  }, [data])
 
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-center gap-3">
         <p className="text-sm text-muted-foreground">
-          Analisa performance de UTMs em toda a conta no período selecionado, sem filtro de produto.
+          Top 10 anúncios (utm_content) por tipo de atribuição — toda a conta, sem filtro de produto.
         </p>
         <Button type="button" size="sm" onClick={onRun} disabled={running}>
           {running ? <><span className="mr-1 animate-spin">⟳</span>Buscando...</> : <><span className="mr-1">▶</span>Buscar Visão Geral</>}
@@ -667,34 +735,47 @@ function FunnelOverviewPanel({
 
       {data && (
         <>
-          <div className="flex items-center gap-3">
-            <KpiCard label="Total compradores" value={data.totalBuyers.toLocaleString('pt-BR')} />
+          <div className="grid gap-3 sm:grid-cols-2">
+            <KpiCard label="Total compradores no período" value={data.totalBuyers.toLocaleString('pt-BR')} />
           </div>
 
-          {/* Seção 1 — Tabelas UTM */}
-          <div className="space-y-3">
-            <p className="text-sm font-semibold">Atribuição por dimensão UTM</p>
-            <p className="text-xs text-muted-foreground">
-              Leads = captados no período · Vendas = <strong>Todos</strong> / <strong>Última UTM</strong> / <strong>Origem</strong>
+          {/* 4 quadrantes — igual BA25 */}
+          <div>
+            <p className="text-xs font-semibold mb-2 text-muted-foreground uppercase tracking-wide">
+              Top 10 Anúncios — utm_content
             </p>
-            {DIMS.map(dim => {
-              const leadsRows = (data[dim.leadsKey] as { name: string; leads: number }[]).map(r => ({ name: r.name, value: r.leads }))
-              const totalLeads = leadsRows.reduce((s, r) => s + r.value, 0)
-              return (
-                <UtmTable
-                  key={dim.key}
-                  title={dim.label}
-                  rows={leadsRows}
-                  total={totalLeads}
-                  color={dim.color}
-                  salesRows={data[dim.key]}
-                  totalBuyers={data.totalBuyers}
-                />
-              )
-            })}
+            <p className="text-xs text-muted-foreground mb-3">
+              Leads = captados no período · Vendas variam por quadrante
+            </p>
+            <div className="grid gap-4 lg:grid-cols-2">
+              <TopTable
+                title="Por Leads Capturados"
+                rows={contentRows}
+                valueKey="leads"
+                color={CHART_COLORS[0]}
+              />
+              <TopTable
+                title="Por Vendas (Last-touch)"
+                rows={contentRows}
+                valueKey="lastBefore"
+                color={CHART_COLORS[2]}
+              />
+              <TopTable
+                title="Por Vendas (First-touch / Origem)"
+                rows={contentRows}
+                valueKey="origin"
+                color={CHART_COLORS[1]}
+              />
+              <TopTable
+                title="Por Participação (Any-touch)"
+                rows={contentRows}
+                valueKey="anyTime"
+                color={CHART_COLORS[3]}
+              />
+            </div>
           </div>
 
-          {/* Seção 2 — Cobertura por produto */}
+          {/* Cobertura por produto */}
           {data.byProduct.length > 0 && (
             <div className="space-y-3">
               <p className="text-sm font-semibold">Cobertura por produto</p>
