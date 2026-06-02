@@ -165,22 +165,39 @@ export default function TabAnalisesCruzadas({ token, enabled }: Props) {
 
   async function handleRun() {
     if (!selectedProduct) return
+    // Sincroniza produto da Visão Geral com o produto principal e dispara em paralelo
+    setOverviewProduct(selectedProduct)
+    setOverviewData(null); setOverviewError(null)
+    setOverviewRunning(true)
     setRunning(true); setRunError(null); setResult(null)
     try {
-      const res = await fetch('/api/cross-analysis', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ type: 'all', product: selectedProduct, statuses: selectedStatuses, since, until }),
-      })
+      const [res, ovRes] = await Promise.all([
+        fetch('/api/cross-analysis', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ type: 'all', product: selectedProduct, statuses: selectedStatuses, since, until }),
+        }),
+        fetch('/api/cross-analysis', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ type: 'utm-attribution', product: selectedProduct, statuses: selectedStatuses, since, until }),
+        }),
+      ])
       if (res.status === 401) { sessionStorage.removeItem('dashboard-token'); window.location.reload(); return }
       if (!res.ok) throw new Error(`Erro ${res.status}: ${await res.text()}`)
       const data: CrossAnalysisData = await res.json()
       setResult(data)
       if (data.availableTags.length > 0) setSelectedTag(data.availableTags[0])
+      if (ovRes.ok) {
+        setOverviewData(await ovRes.json())
+      } else {
+        setOverviewError(`Erro ${ovRes.status}: ${await ovRes.text()}`)
+      }
     } catch (e) {
       setRunError((e as Error).message)
     } finally {
       setRunning(false)
+      setOverviewRunning(false)
     }
   }
 
