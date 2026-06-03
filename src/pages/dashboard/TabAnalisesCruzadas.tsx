@@ -156,7 +156,7 @@ export default function TabAnalisesCruzadas({ token, enabled }: Props) {
     if (!enabled || loaded) return
     setLoaded(true)
     setLoadingOpts(true)
-    fetch('/api/cruzamento', { headers: { Authorization: `Bearer ${token}` } })
+    fetch(`/api/cruzamento?_=${Date.now()}`, { headers: { Authorization: `Bearer ${token}` } })
       .then(r => r.ok ? r.json() : r.text().then(t => Promise.reject(new Error(`${r.status}: ${t}`))))
       .then(d => { setProducts(d.products ?? []); setStatuses(d.statuses ?? []) })
       .catch(e => { setLoadError((e as Error).message); setLoaded(false) })

@@ -32,7 +32,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   // GET /api/cruzamento?mode=products
   if (req.method === 'GET') {
-    res.setHeader('Cache-Control', 's-maxage=60, stale-while-revalidate=30')
+    res.setHeader('Cache-Control', 'no-store')
     try {
       const [rProducts, rStatuses] = await Promise.all([
         bqQuery(`SELECT DISTINCT Nome_do_Produto AS p FROM ${tVendas} WHERE Nome_do_Produto IS NOT NULL ORDER BY p`),
