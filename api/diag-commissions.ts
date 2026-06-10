@@ -105,7 +105,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // Agrupa por product.id pelos dois métodos
-    type Row = { produto: string; vendas: number; liqCommissions: number; liqHeuristica: number; semCommission: number }
+    type Row = { produto: string; productId: number; hotmartName: string; vendas: number; liqCommissions: number; liqHeuristica: number; semCommission: number }
     const byProduct = new Map<number, Row>()
     const bucoOffers = new Map<string, { vendas: number; liq: number }>()
     let totalComm = 0, totalHeur = 0, txSemComm = 0
@@ -129,7 +129,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const liqB = baseV - fee - extra
 
       const nome = PRODUTOS[pid] ?? `(não mapeado ${pid})`
-      const row = byProduct.get(pid) ?? { produto: nome, vendas: 0, liqCommissions: 0, liqHeuristica: 0, semCommission: 0 }
+      const row = byProduct.get(pid) ?? { produto: nome, productId: pid, hotmartName: it.product?.name ?? '?', vendas: 0, liqCommissions: 0, liqHeuristica: 0, semCommission: 0 }
       row.vendas++; row.liqCommissions += liqA; row.liqHeuristica += liqB
       if (comm === undefined) row.semCommission++
       byProduct.set(pid, row)
@@ -151,11 +151,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       diff: round(r.liqCommissions - r.liqHeuristica),
     })).sort((a, b) => b.liqCommissions - a.liqCommissions)
 
+    // Destaque: IDs que faltam no mapa canônico, com o nome Hotmart para classificar.
+    const naoMapeados = produtos
+      .filter(p => p.produto.startsWith('(não mapeado'))
+      .map(p => ({ productId: p.productId, hotmartName: p.hotmartName, vendas: p.vendas, liquido: p.liqCommissions }))
+
     res.json({
       month: `${y}-${String(m).padStart(2, '0')}`,
       totalTransactions: hist.length,
       totalLiquido: { commissions: round(totalComm), heuristica: round(totalHeur), diff: round(totalComm - totalHeur) },
       transacoesSemCommissionPRODUCER: txSemComm,
+      naoMapeados,
       produtos,
       bucoOfertas: [...bucoOffers.entries()].map(([k, v]) => ({ oferta: k, vendas: v.vendas, liquido: round(v.liq) })).sort((a, b) => b.liquido - a.liquido),
     })
