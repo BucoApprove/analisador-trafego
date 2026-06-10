@@ -8,7 +8,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { createClient } from '@supabase/supabase-js'
 import { authUser } from './_supabase-auth.js'
-import { fetchMonthlyGoals, PRODUTOS_FIXOS } from './_goals.js'
+import { fetchMonthlyGoals, fetchProductMappings, PRODUTOS_FIXOS } from './_goals.js'
 
 // ─── Mapeamento Hotmart → Planilha (igual ao frontend) ───────────────────────
 
@@ -23,7 +23,9 @@ const PRODUCT_MAP: Record<string, string[]> = {
   'Outros':        [],
 }
 
-function matchHotmart(hotmartName: string): string {
+function matchHotmart(hotmartName: string, overrides: Record<string, string>): string {
+  // Override manual (nome exato) tem prioridade sobre os keywords.
+  if (overrides[hotmartName]) return overrides[hotmartName]
   const lower = hotmartName.toLowerCase().trim()
   for (const [planilhaName, keywords] of Object.entries(PRODUCT_MAP)) {
     if (planilhaName === 'Outros') continue
@@ -63,7 +65,7 @@ interface HotmartItem {
   transaction?: string
 }
 
-async function fetchHotmartSales(month: string): Promise<{ byProduct: Record<string, number>; grandTotal: number; totalTransactions: number }> {
+async function fetchHotmartSales(month: string, overrides: Record<string, string>): Promise<{ byProduct: Record<string, number>; grandTotal: number; totalTransactions: number }> {
   const [y, m] = month.split('-').map(Number)
   const startMs = new Date(y, m - 1, 1, 0, 0, 0, 0).getTime()
   const endMs   = new Date(y, m, 0, 23, 59, 59, 999).getTime()
@@ -108,7 +110,7 @@ async function fetchHotmartSales(month: string): Promise<{ byProduct: Record<str
     const nameLower = name.toLowerCase()
     const hasExtraFee = !nameLower.includes('pack') && !nameLower.includes('mentoria') && !nameLower.includes('renova')
     const value = base - fee - (hasExtraFee ? 2.19 : 0)
-    const planilhaName = matchHotmart(name)
+    const planilhaName = matchHotmart(name, overrides)
     byProduct[planilhaName] = (byProduct[planilhaName] ?? 0) + value
   }
 
@@ -156,9 +158,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
 
   try {
+    const overrides = await fetchProductMappings()
     const [goalsResult, salesResult] = await Promise.all([
       fetchMonthlyGoals(month),
-      fetchHotmartSales(month),
+      fetchHotmartSales(month, overrides),
     ])
 
     const { goals, totalMeta, configured } = goalsResult

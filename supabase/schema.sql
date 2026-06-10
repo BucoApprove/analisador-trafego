@@ -114,3 +114,16 @@ create table if not exists monthly_goals (
 );
 create index if not exists idx_monthly_goals_month on monthly_goals(month);
 alter table monthly_goals disable row level security;
+
+-- ─────────────────────────────────────────────────────────────────────────────
+
+-- Agrupamento manual de produtos Hotmart → produto-meta (definido pela UI).
+-- Override por NOME EXATO do produto no Hotmart, vale para todos os meses.
+-- Tem prioridade sobre o PRODUCT_MAP de keywords hardcoded.
+-- Chave: hotmart_name ex: ('Imersão ENARE - 22, 23 e 24/06')
+create table if not exists product_mappings (
+  hotmart_name text primary key,
+  product_name text not null,
+  updated_at   timestamptz not null default now()
+);
+alter table product_mappings disable row level security;

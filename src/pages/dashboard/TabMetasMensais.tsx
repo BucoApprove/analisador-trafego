@@ -649,8 +649,30 @@ export default function TabMetasMensais({ token, enabled }: Props) {
   const [activitiesProduct, setActivitiesProduct] = useState<string | null>(null)
   const [cacheStatus, setCacheStatus] = useState<'idle' | 'loading' | 'ok' | 'error'>('idle')
   const [cacheMsg, setCacheMsg] = useState<string | null>(null)
+  // Override manual: nome exato do produto Hotmart → produto-meta.
+  const [mappings, setMappings] = useState<Record<string, string>>({})
 
   const headers = { Authorization: `Bearer ${token}` }
+
+  const loadMappings = useCallback(async () => {
+    const { data } = await supabase.from('product_mappings').select('hotmart_name, product_name')
+    const map: Record<string, string> = {}
+    for (const r of data ?? []) map[r.hotmart_name] = r.product_name
+    setMappings(map)
+  }, [])
+
+  // Salva (ou remove) o agrupamento de um produto Hotmart e atualiza o estado local.
+  const assignMapping = useCallback(async (hotmartName: string, productName: string) => {
+    if (productName === '') {
+      await supabase.from('product_mappings').delete().eq('hotmart_name', hotmartName)
+      setMappings(prev => { const next = { ...prev }; delete next[hotmartName]; return next })
+    } else {
+      await supabase.from('product_mappings').upsert({
+        hotmart_name: hotmartName, product_name: productName, updated_at: new Date().toISOString(),
+      })
+      setMappings(prev => ({ ...prev, [hotmartName]: productName }))
+    }
+  }, [])
 
   const load = useCallback(async (m: string) => {
     setLoading(true)
@@ -673,6 +695,7 @@ export default function TabMetasMensais({ token, enabled }: Props) {
   }, [token])
 
   useEffect(() => { if (enabled) load(month) }, [enabled, month, load])
+  useEffect(() => { if (enabled) loadMappings() }, [enabled, loadMappings])
 
   // Atualiza a meta de um produto localmente após salvar no Supabase.
   const updateGoalLocal = useCallback((product: string, newMeta: number) => {
@@ -708,7 +731,8 @@ export default function TabMetasMensais({ token, enabled }: Props) {
 
   if (hotmartData) {
     for (const p of hotmartData.products) {
-      const planilhaName = matchHotmart(p.name)
+      // Override manual (nome exato) tem prioridade; depois keywords; senão não-mapeado.
+      const planilhaName = mappings[p.name] ?? matchHotmart(p.name)
       if (planilhaName) {
         faturadoMap[planilhaName] = (faturadoMap[planilhaName] ?? 0) + p.total
         sourcesMap[planilhaName] = [...(sourcesMap[planilhaName] ?? []), p]
@@ -879,6 +903,7 @@ export default function TabMetasMensais({ token, enabled }: Props) {
                     <th className="text-left px-4 py-2 font-medium">Nome no Hotmart</th>
                     <th className="text-right px-4 py-2 font-medium">Faturado</th>
                     <th className="text-right px-4 py-2 font-medium">Vendas</th>
+                    <th className="text-left px-4 py-2 font-medium">Agrupar em</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -887,6 +912,18 @@ export default function TabMetasMensais({ token, enabled }: Props) {
                       <td className="px-4 py-2 text-muted-foreground">{p.name}</td>
                       <td className="px-4 py-2 text-right">{fmtBRL(p.total)}</td>
                       <td className="px-4 py-2 text-right">{p.count}</td>
+                      <td className="px-4 py-2">
+                        <select
+                          value={mappings[p.name] ?? ''}
+                          onChange={e => assignMapping(p.name, e.target.value)}
+                          className="text-xs border rounded px-2 py-1 bg-background"
+                        >
+                          <option value="">— não agrupado —</option>
+                          {goals.map(g => (
+                            <option key={g.name} value={g.name}>{g.name}</option>
+                          ))}
+                        </select>
+                      </td>
                     </tr>
                   ))}
                 </tbody>

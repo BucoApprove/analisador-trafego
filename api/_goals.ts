@@ -60,3 +60,20 @@ export async function fetchMonthlyGoals(month: string): Promise<MonthlyGoals> {
 
   return { goals, totalMeta, configured: rows.length > 0 }
 }
+
+/**
+ * Lê os overrides manuais de agrupamento (tabela product_mappings):
+ * nome exato do produto Hotmart → produto-meta. Vale para todos os meses.
+ */
+export async function fetchProductMappings(): Promise<Record<string, string>> {
+  const supabase = serviceClient()
+  const { data, error } = await supabase
+    .from('product_mappings')
+    .select('hotmart_name, product_name')
+
+  if (error) throw new Error(`product_mappings query failed: ${error.message}`)
+
+  const map: Record<string, string> = {}
+  for (const r of data ?? []) map[r.hotmart_name] = r.product_name
+  return map
+}

@@ -44,3 +44,9 @@ export interface MonthlyGoal {
   meta: number
   updated_at: string
 }
+
+export interface ProductMapping {
+  hotmart_name: string
+  product_name: string
+  updated_at: string
+}
