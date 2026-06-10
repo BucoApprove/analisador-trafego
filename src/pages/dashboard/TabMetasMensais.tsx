@@ -1,5 +1,5 @@
-import { useState, useCallback, useEffect } from 'react'
-import { RefreshCw, ChevronDown, ChevronUp, ClipboardList, X, ExternalLink, MessageSquare, Plus, Link2, FileText, ChevronRight, Loader2, Trash2 } from 'lucide-react'
+import { useState, useCallback, useEffect, useRef } from 'react'
+import { RefreshCw, ChevronDown, ChevronUp, ClipboardList, X, ExternalLink, MessageSquare, Plus, Link2, FileText, ChevronRight, Loader2, Trash2, Pencil } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import type { Activity, ActivityLink, ActivityComment } from '@/lib/supabase'
 
@@ -565,6 +565,78 @@ function daysLeftInMonth(month: string) {
   return Math.max(lastDay - todayDay + 1, 1)
 }
 
+// ─── Célula de meta editável ──────────────────────────────────────────────────
+
+function EditableMetaCell({ month, product, meta, onSaved }: {
+  month: string
+  product: string
+  meta: number
+  onSaved: (newMeta: number) => void
+}) {
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState('')
+  const [saving, setSaving] = useState(false)
+  const savedRef = useRef(false)
+
+  function startEdit() {
+    setDraft(meta > 0 ? String(meta) : '')
+    savedRef.current = false
+    setEditing(true)
+  }
+
+  async function save() {
+    if (savedRef.current) return  // evita double-save (Enter + onBlur)
+    savedRef.current = true
+    const parsed = parseFloat(draft.replace(/\./g, '').replace(',', '.').trim()) || 0
+    setSaving(true)
+    const { error } = await supabase
+      .from('monthly_goals')
+      .upsert({ month, product_name: product, meta: parsed, updated_at: new Date().toISOString() })
+    setSaving(false)
+    if (error) { savedRef.current = false; return }
+    onSaved(parsed)
+    setEditing(false)
+  }
+
+  if (editing) {
+    return (
+      <td className="px-4 py-2.5 text-right">
+        <div className="flex items-center justify-end gap-1">
+          <span className="text-xs text-muted-foreground">R$</span>
+          <input
+            autoFocus
+            type="text"
+            inputMode="decimal"
+            value={draft}
+            onChange={e => setDraft(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === 'Enter') save()
+              if (e.key === 'Escape') { savedRef.current = true; setEditing(false) }
+            }}
+            onBlur={save}
+            disabled={saving}
+            className="w-24 text-right text-sm border rounded px-1.5 py-0.5 bg-background disabled:opacity-50"
+          />
+          {saving && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />}
+        </div>
+      </td>
+    )
+  }
+
+  return (
+    <td
+      onClick={startEdit}
+      title="Clique para editar a meta"
+      className="px-4 py-2.5 text-right text-muted-foreground cursor-pointer hover:bg-muted/40 hover:text-foreground transition-colors group/meta"
+    >
+      <span className="inline-flex items-center gap-1">
+        {meta > 0 ? fmtBRL(meta) : <span className="italic opacity-60">definir</span>}
+        <Pencil className="h-3 w-3 opacity-0 group-hover/meta:opacity-60 transition-opacity" />
+      </span>
+    </td>
+  )
+}
+
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export default function TabMetasMensais({ token, enabled }: Props) {
@@ -601,6 +673,16 @@ export default function TabMetasMensais({ token, enabled }: Props) {
   }, [token])
 
   useEffect(() => { if (enabled) load(month) }, [enabled, month, load])
+
+  // Atualiza a meta de um produto localmente após salvar no Supabase.
+  const updateGoalLocal = useCallback((product: string, newMeta: number) => {
+    setGoalsData(prev => {
+      if (!prev) return prev
+      const goals = prev.goals.map(g => g.name === product ? { ...g, meta: newMeta } : g)
+      const totalMeta = goals.reduce((s, g) => s + g.meta, 0)
+      return { ...prev, goals, totalMeta, configured: true }
+    })
+  }, [])
 
   const refreshMonthlyCache = useCallback(async () => {
     setCacheStatus('loading')
@@ -697,7 +779,7 @@ export default function TabMetasMensais({ token, enabled }: Props) {
 
       {!goalsData?.configured && goalsData && (
         <div className="rounded-md bg-yellow-50 border border-yellow-200 px-4 py-3 text-sm text-yellow-800">
-          Planilha de metas não configurada para {month}. Configure <code>GOALS_SHEET_GIDS</code> no Vercel.
+          Nenhuma meta cadastrada para {month}. Clique na coluna <strong>Meta</strong> de cada produto na tabela abaixo para definir os valores.
         </div>
       )}
 
@@ -745,7 +827,7 @@ export default function TabMetasMensais({ token, enabled }: Props) {
                 return (
                   <ExpandableRow key={g.name} stripe={i % 2 !== 0} sources={sourcesMap[g.name] ?? []} onActivities={() => setActivitiesProduct(g.name)}>
                     <td className="px-4 py-2.5 font-medium">{g.name}</td>
-                    <td className="px-4 py-2.5 text-right text-muted-foreground">{g.meta > 0 ? fmtBRL(g.meta) : '—'}</td>
+                    <EditableMetaCell month={month} product={g.name} meta={g.meta} onSaved={m => updateGoalLocal(g.name, m)} />
                     <td className="px-4 py-2.5 text-right font-semibold">{fat > 0 ? fmtBRL(fat) : '—'}</td>
                     <td className={`px-4 py-2.5 text-right ${restante > 0 ? 'text-orange-600' : 'text-green-600'}`}>{g.meta > 0 ? fmtBRL(restante) : '—'}</td>
                     <td className="px-4 py-2.5 text-right text-muted-foreground">{g.meta > 0 && metaDia > 0 ? fmtBRL(metaDia) : '—'}</td>

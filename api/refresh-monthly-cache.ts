@@ -8,6 +8,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { createClient } from '@supabase/supabase-js'
 import { authUser } from './_supabase-auth.js'
+import { fetchMonthlyGoals, PRODUTOS_FIXOS } from './_goals.js'
 
 // ─── Mapeamento Hotmart → Planilha (igual ao frontend) ───────────────────────
 
@@ -21,8 +22,6 @@ const PRODUCT_MAP: Record<string, string[]> = {
   'Low tickets':   ['low ticket', 'bucoapp', 'pack', 'livro digital', 'libro digital', 'treino intensivo', 'etapa final do sistema', 'resumo:', 'questões comentadas', '500 questões'],
   'Outros':        [],
 }
-
-const PRODUTOS_FIXOS = Object.keys(PRODUCT_MAP)
 
 function matchHotmart(hotmartName: string): string {
   const lower = hotmartName.toLowerCase().trim()
@@ -115,68 +114,6 @@ async function fetchHotmartSales(month: string): Promise<{ byProduct: Record<str
 
   const grandTotal = Object.values(byProduct).reduce((s, v) => s + v, 0)
   return { byProduct, grandTotal: Math.round(grandTotal * 100) / 100, totalTransactions: all.length }
-}
-
-// ─── Google Sheets metas ──────────────────────────────────────────────────────
-
-function parseCSV(text: string): string[][] {
-  const rows: string[][] = []
-  for (const line of text.split('\n')) {
-    if (!line.trim()) continue
-    const cols: string[] = []
-    let current = ''
-    let inQuotes = false
-    for (const ch of line) {
-      if (ch === '"') { inQuotes = !inQuotes }
-      else if (ch === ',' && !inQuotes) { cols.push(current.trim()); current = '' }
-      else { current += ch }
-    }
-    cols.push(current.trim())
-    rows.push(cols)
-  }
-  return rows
-}
-
-function parseBRL(val: string): number {
-  if (!val) return 0
-  return parseFloat(val.replace(/R\$\s*/g, '').replace(/\./g, '').replace(',', '.').trim()) || 0
-}
-
-async function fetchMonthlyGoals(month: string): Promise<{ goals: Record<string, number>; totalMeta: number; configured: boolean }> {
-  const sheetId = process.env.GOALS_SHEET_ID ?? '2PACX-1vRPO_lWvVNkOao5LF3BYLTUFeJqBOdDC9zx2sXgWR37R2MPKK3oGGfc8X63EDCVJz6JN-HqN6JIuSO2'
-  const gidsRaw = process.env.GOALS_SHEET_GIDS ?? '{}'
-  let gids: Record<string, string> = {}
-  try { gids = JSON.parse(gidsRaw) } catch { /* usa vazio */ }
-
-  const gid = gids[month]
-  if (!gid && gid !== '0') {
-    return { goals: {}, totalMeta: 0, configured: false }
-  }
-
-  const csvUrl = `https://docs.google.com/spreadsheets/d/e/${sheetId}/pub?output=csv&gid=${gid}`
-  const response = await fetch(csvUrl)
-  if (!response.ok) throw new Error(`Sheet fetch failed: ${response.status}`)
-  const text = await response.text()
-  const rows = parseCSV(text)
-
-  const goalsMap: Record<string, number> = {}
-  let headerFound = false
-  for (const row of rows) {
-    const first = row[0]?.trim().toUpperCase()
-    if (!headerFound) { if (first === 'PRODUTO') { headerFound = true } continue }
-    if (!first || first === 'TOTAL') continue
-    const prodName = row[0]?.trim()
-    const metaVal  = parseBRL(row[1] ?? '')
-    if (prodName) goalsMap[prodName] = metaVal
-  }
-
-  const goals: Record<string, number> = {}
-  let totalMeta = 0
-  for (const name of PRODUTOS_FIXOS) {
-    goals[name] = goalsMap[name] ?? 0
-    totalMeta += goals[name]
-  }
-  return { goals, totalMeta, configured: true }
 }
 
 // ─── Formatação ───────────────────────────────────────────────────────────────

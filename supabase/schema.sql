@@ -99,3 +99,18 @@ create table if not exists etapa_filters (
   primary key (account, view)
 );
 alter table etapa_filters disable row level security;
+
+-- ─────────────────────────────────────────────────────────────────────────────
+
+-- Metas mensais por produto (substitui a planilha Google Sheets)
+-- Chave: (month, product_name) ex: ('2026-06', 'Buco Approve')
+-- month no formato "YYYY-MM". meta em R$ (numeric).
+create table if not exists monthly_goals (
+  month        text not null,
+  product_name text not null,
+  meta         numeric not null default 0,
+  updated_at   timestamptz not null default now(),
+  primary key (month, product_name)
+);
+create index if not exists idx_monthly_goals_month on monthly_goals(month);
+alter table monthly_goals disable row level security;

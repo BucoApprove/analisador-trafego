@@ -37,3 +37,10 @@ export interface ActivityComment {
   text: string
   created_at: string
 }
+
+export interface MonthlyGoal {
+  month: string
+  product_name: string
+  meta: number
+  updated_at: string
+}

@@ -38,3 +38,6 @@ dist-ssr
 
 .vercel
 .env*.local
+
+# Claude Code internal memory
+memory/
