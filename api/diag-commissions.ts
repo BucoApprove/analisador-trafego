@@ -14,22 +14,7 @@
  */
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { authUser } from './_supabase-auth.js'
-
-const BUCO_PID = 2016048
-const INTENSIVO_OFFERS = new Set(['wgmh3qg1', '32ypw9pk'])
-
-// Mapa canônico por product.id (do prompt do sócio).
-const PRODUTOS: Record<number, string> = {
-  2016048: 'BucoApprove',
-  3811518: 'Mentoria CTBMF',
-  5694443: 'Pós Patologia',
-  6115663: 'Pós Anatomia',
-  6739963: 'Planejamento ImpulsoR+',
-  3510472: 'Renovação de acesso',
-  4739673: 'Rota Enare',
-  2286372: 'BucoApp',
-  7737553: 'Imersão ENARE',
-}
+import { classifyProduto, BUCO_PID, INTENSIVO_OFFERS } from './_produtos-canonicos.js'
 
 async function getToken(): Promise<string> {
   const cid = process.env.HOTMART_CLIENT_ID ?? ''
@@ -104,9 +89,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       hist.push(it)
     }
 
-    // Agrupa por product.id pelos dois métodos
-    type Row = { produto: string; productId: number; hotmartName: string; vendas: number; liqCommissions: number; liqHeuristica: number; semCommission: number }
-    const byProduct = new Map<number, Row>()
+    // Agrupa pelo NOME canônico (classifyProduto), comparando os dois métodos de líquido.
+    type Row = { produto: string; categoria: string; vendas: number; liqCommissions: number; liqHeuristica: number }
+    const byCanon = new Map<string, Row>()
     const bucoOffers = new Map<string, { vendas: number; liq: number }>()
     let totalComm = 0, totalHeur = 0, txSemComm = 0
 
@@ -128,11 +113,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const extra = !nl.includes('pack') && !nl.includes('mentoria') && !nl.includes('renova') ? 2.19 : 0
       const liqB = baseV - fee - extra
 
-      const nome = PRODUTOS[pid] ?? `(não mapeado ${pid})`
-      const row = byProduct.get(pid) ?? { produto: nome, productId: pid, hotmartName: it.product?.name ?? '?', vendas: 0, liqCommissions: 0, liqHeuristica: 0, semCommission: 0 }
+      // Classificação canônica final (id + oferta). Agrupa pelo NOME canônico.
+      const canon = classifyProduto(pid, it.purchase?.offer?.code)
+      const key = canon.nome
+      const row = byCanon.get(key) ?? { produto: canon.nome, categoria: canon.categoria, vendas: 0, liqCommissions: 0, liqHeuristica: 0 }
       row.vendas++; row.liqCommissions += liqA; row.liqHeuristica += liqB
-      if (comm === undefined) row.semCommission++
-      byProduct.set(pid, row)
+      byCanon.set(key, row)
 
       totalComm += liqA; totalHeur += liqB
 
@@ -146,22 +132,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const round = (n: number) => Math.round(n * 100) / 100
-    const produtos = [...byProduct.values()].map(r => ({
+    const produtos = [...byCanon.values()].map(r => ({
       ...r, liqCommissions: round(r.liqCommissions), liqHeuristica: round(r.liqHeuristica),
       diff: round(r.liqCommissions - r.liqHeuristica),
     })).sort((a, b) => b.liqCommissions - a.liqCommissions)
-
-    // Destaque: IDs que faltam no mapa canônico, com o nome Hotmart para classificar.
-    const naoMapeados = produtos
-      .filter(p => p.produto.startsWith('(não mapeado'))
-      .map(p => ({ productId: p.productId, hotmartName: p.hotmartName, vendas: p.vendas, liquido: p.liqCommissions }))
 
     res.json({
       month: `${y}-${String(m).padStart(2, '0')}`,
       totalTransactions: hist.length,
       totalLiquido: { commissions: round(totalComm), heuristica: round(totalHeur), diff: round(totalComm - totalHeur) },
       transacoesSemCommissionPRODUCER: txSemComm,
-      naoMapeados,
       produtos,
       bucoOfertas: [...bucoOffers.entries()].map(([k, v]) => ({ oferta: k, vendas: v.vendas, liquido: round(v.liq) })).sort((a, b) => b.liquido - a.liquido),
     })
