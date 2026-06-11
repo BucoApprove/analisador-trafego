@@ -63,5 +63,16 @@ export interface Lancamento {
   carrinho_inicio: string | null
   carrinho_fim: string | null
   ordem: number
+  produto_venda: string
+  survey_sheet_id: string
+  meta_leads_trafico: number
+  meta_leads_organico: number
+  meta_leads_manychat: number
+  orcamento_total: number
+  orcamento_captura: number
+  orcamento_descoberta: number
+  orcamento_aquecimento: number
+  orcamento_lembrete: number
+  orcamento_remarketing: number
   created_at: string
 }

@@ -17,6 +17,10 @@ function fmtDate(d: string | null): string {
 const emptyForm = {
   nome: '', prefixo: '', spend_filter: '', or_filter: '',
   data_inicio: '', captura_inicio: '', captura_fim: '', carrinho_inicio: '', carrinho_fim: '',
+  produto_venda: '', survey_sheet_id: '',
+  meta_leads_trafico: '', meta_leads_organico: '', meta_leads_manychat: '',
+  orcamento_total: '', orcamento_captura: '', orcamento_descoberta: '',
+  orcamento_aquecimento: '', orcamento_lembrete: '', orcamento_remarketing: '',
 }
 type FormState = typeof emptyForm
 
@@ -27,10 +31,15 @@ function LancamentoModal({ initial, onClose, onSaved }: {
   onClose: () => void
   onSaved: () => void
 }) {
+  const numStr = (n: number | undefined) => (n && n > 0 ? String(n) : '')
   const [form, setForm] = useState<FormState>(initial ? {
     nome: initial.nome, prefixo: initial.prefixo, spend_filter: initial.spend_filter, or_filter: initial.or_filter,
     data_inicio: initial.data_inicio ?? '', captura_inicio: initial.captura_inicio ?? '', captura_fim: initial.captura_fim ?? '',
     carrinho_inicio: initial.carrinho_inicio ?? '', carrinho_fim: initial.carrinho_fim ?? '',
+    produto_venda: initial.produto_venda ?? '', survey_sheet_id: initial.survey_sheet_id ?? '',
+    meta_leads_trafico: numStr(initial.meta_leads_trafico), meta_leads_organico: numStr(initial.meta_leads_organico), meta_leads_manychat: numStr(initial.meta_leads_manychat),
+    orcamento_total: numStr(initial.orcamento_total), orcamento_captura: numStr(initial.orcamento_captura), orcamento_descoberta: numStr(initial.orcamento_descoberta),
+    orcamento_aquecimento: numStr(initial.orcamento_aquecimento), orcamento_lembrete: numStr(initial.orcamento_lembrete), orcamento_remarketing: numStr(initial.orcamento_remarketing),
   } : emptyForm)
   const [saving, setSaving] = useState(false)
 
@@ -39,6 +48,8 @@ function LancamentoModal({ initial, onClose, onSaved }: {
   async function save() {
     if (!form.nome.trim()) return
     setSaving(true)
+    const num = (s: string) => parseFloat(s.replace(/\./g, '').replace(',', '.').trim()) || 0
+    const int = (s: string) => parseInt(s.trim(), 10) || 0
     const payload = {
       nome: form.nome.trim(),
       prefixo: form.prefixo.trim(),
@@ -49,6 +60,17 @@ function LancamentoModal({ initial, onClose, onSaved }: {
       captura_fim: form.captura_fim || null,
       carrinho_inicio: form.carrinho_inicio || null,
       carrinho_fim: form.carrinho_fim || null,
+      produto_venda: form.produto_venda.trim(),
+      survey_sheet_id: form.survey_sheet_id.trim(),
+      meta_leads_trafico: int(form.meta_leads_trafico),
+      meta_leads_organico: int(form.meta_leads_organico),
+      meta_leads_manychat: int(form.meta_leads_manychat),
+      orcamento_total: num(form.orcamento_total),
+      orcamento_captura: num(form.orcamento_captura),
+      orcamento_descoberta: num(form.orcamento_descoberta),
+      orcamento_aquecimento: num(form.orcamento_aquecimento),
+      orcamento_lembrete: num(form.orcamento_lembrete),
+      orcamento_remarketing: num(form.orcamento_remarketing),
     }
     const { error } = initial
       ? await supabase.from('lancamentos').update(payload).eq('id', initial.id)
@@ -61,6 +83,13 @@ function LancamentoModal({ initial, onClose, onSaved }: {
     <label className="flex flex-col gap-1">
       <span className="text-xs text-muted-foreground">{label}</span>
       <input type="date" value={form[k]} onChange={e => set(k, e.target.value)} className="text-sm border rounded px-2 py-1.5 bg-background" />
+    </label>
+  )
+
+  const textField = (label: string, k: keyof FormState, ph = '') => (
+    <label className="flex flex-col gap-1">
+      <span className="text-xs text-muted-foreground">{label}</span>
+      <input value={form[k]} onChange={e => set(k, e.target.value)} placeholder={ph} className="text-sm border rounded px-2 py-1.5 bg-background" inputMode="decimal" />
     </label>
   )
 
@@ -106,6 +135,41 @@ function LancamentoModal({ initial, onClose, onSaved }: {
               {dateField('Fechamento do carrinho', 'carrinho_fim')}
             </div>
             <p className="text-[11px] text-muted-foreground mt-2">A janela de dados do detalhe vai de <strong>início da captura</strong> a <strong>fechamento do carrinho</strong>.</p>
+          </div>
+
+          <div className="border-t pt-4">
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Config do detalhe (opcional)</p>
+            <div className="grid grid-cols-2 gap-3">
+              <label className="flex flex-col gap-1">
+                <span className="text-xs text-muted-foreground">Filtro do produto de venda</span>
+                <input value={form.produto_venda} onChange={e => set('produto_venda', e.target.value)} placeholder="%buco%approve%" className="text-sm border rounded px-2 py-1.5 bg-background font-mono" />
+              </label>
+              <label className="flex flex-col gap-1">
+                <span className="text-xs text-muted-foreground">ID planilha de pesquisa</span>
+                <input value={form.survey_sheet_id} onChange={e => set('survey_sheet_id', e.target.value)} placeholder="ID do Google Sheets" className="text-sm border rounded px-2 py-1.5 bg-background font-mono" />
+              </label>
+            </div>
+          </div>
+
+          <div className="border-t pt-4">
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Metas de leads</p>
+            <div className="grid grid-cols-3 gap-3">
+              {textField('Tráfego', 'meta_leads_trafico')}
+              {textField('Orgânico', 'meta_leads_organico')}
+              {textField('ManyChat', 'meta_leads_manychat')}
+            </div>
+          </div>
+
+          <div className="border-t pt-4">
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Orçamento por fase (R$)</p>
+            <div className="grid grid-cols-3 gap-3">
+              {textField('Total', 'orcamento_total')}
+              {textField('Captura', 'orcamento_captura')}
+              {textField('Descoberta', 'orcamento_descoberta')}
+              {textField('Aquecimento', 'orcamento_aquecimento')}
+              {textField('Lembrete', 'orcamento_lembrete')}
+              {textField('Remarketing', 'orcamento_remarketing')}
+            </div>
           </div>
         </div>
 

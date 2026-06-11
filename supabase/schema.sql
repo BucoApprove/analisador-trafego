@@ -149,6 +149,18 @@ create table if not exists lancamentos (
   carrinho_inicio date,                            -- abertura do carrinho
   carrinho_fim    date,                            -- fechamento do carrinho
   ordem           int not null default 0,          -- ordenação dos cards
+  -- Config do detalhe (substitui o goals-data fixo da planilha do BA25):
+  produto_venda        text not null default '',   -- filtro LIKE p/ Nome_do_Produto (ex: %buco%approve%)
+  survey_sheet_id      text not null default '',   -- planilha de pesquisa de boas-vindas
+  meta_leads_trafico   int  not null default 0,
+  meta_leads_organico  int  not null default 0,
+  meta_leads_manychat  int  not null default 0,
+  orcamento_total      numeric not null default 0,
+  orcamento_captura    numeric not null default 0,
+  orcamento_descoberta numeric not null default 0,
+  orcamento_aquecimento numeric not null default 0,
+  orcamento_lembrete   numeric not null default 0,
+  orcamento_remarketing numeric not null default 0,
   created_at      timestamptz not null default now()
 );
 alter table lancamentos disable row level security;
