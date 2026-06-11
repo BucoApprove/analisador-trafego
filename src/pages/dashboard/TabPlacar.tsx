@@ -212,6 +212,9 @@ function ProdutoRow({ p, stripe, month, onMeta }: { p: Produto; stripe: boolean;
           ) : '—'}
         </td>
         <GastoCell gasto={p.gasto} etapas={p.gastoEtapas} />
+        <td className="px-4 py-2.5 text-right text-muted-foreground">
+          {p.gasto > 0 && p.vendas > 0 ? fmtBRL(p.gasto / p.vendas) : '—'}
+        </td>
         <td className="px-4 py-2.5 text-right">
           {p.roas !== null ? (
             <span className={p.roas >= 1 ? 'text-green-600 font-medium' : 'text-red-600'}>{p.roas.toFixed(2)}x</span>
@@ -225,7 +228,7 @@ function ProdutoRow({ p, stripe, month, onMeta }: { p: Produto; stripe: boolean;
           </td>
           <td className="px-4 py-1.5 text-right">{o.vendas}</td>
           <td className="px-4 py-1.5 text-right">{fmtBRL(o.liquido)}</td>
-          <td colSpan={4} />
+          <td colSpan={5} />
         </tr>
       ))}
     </>
@@ -490,6 +493,7 @@ export default function TabPlacar({ token, enabled }: Props) {
                 <th className="text-right px-4 py-2.5 font-medium">Meta</th>
                 <th className="text-right px-4 py-2.5 font-medium">% Meta</th>
                 <th className="text-right px-4 py-2.5 font-medium">Gasto</th>
+                <th className="text-right px-4 py-2.5 font-medium">CPA</th>
                 <th className="text-right px-4 py-2.5 font-medium">ROAS</th>
               </tr>
             </thead>
@@ -506,6 +510,9 @@ export default function TabPlacar({ token, enabled }: Props) {
                   {pctMeta !== null ? <span className={pctMeta >= 100 ? 'text-green-600' : ''}>{pctMeta.toFixed(0)}%</span> : '—'}
                 </td>
                 <td className="px-4 py-2.5 text-right">{gastoProdutos > 0 ? fmtBRL(gastoProdutos) : '—'}</td>
+                <td className="px-4 py-2.5 text-right">
+                  {gastoProdutos > 0 && (data?.totalVendas ?? 0) > 0 ? fmtBRL(gastoProdutos / (data?.totalVendas ?? 1)) : '—'}
+                </td>
                 <td className="px-4 py-2.5 text-right">
                   {gastoProdutos > 0 ? <span className={totalLiquido / gastoProdutos >= 1 ? 'text-green-600' : 'text-red-600'}>{(totalLiquido / gastoProdutos).toFixed(2)}x</span> : '—'}
                 </td>
