@@ -1143,7 +1143,8 @@ export default function TabBA25({
                   description={`Planilha de metas: ${goals.inicioCaptacao} → ${goals.finalCaptacao} · ${diasRestantes} dia(s) restante(s)`}
                 />
 
-                {/* Leads: metas gerais */}
+                {/* Leads: metas gerais — ocultas no lançamento pago (foco em venda) */}
+                {tipo !== 'pago' && (
                 <div className="rounded-lg border bg-card overflow-hidden">
                   <div className="px-4 py-2 border-b bg-muted/40">
                     <p className="text-xs font-semibold">Metas de Leads</p>
@@ -1188,6 +1189,10 @@ export default function TabBA25({
                     </tbody>
                   </table>
                 </div>
+                )}
+
+                {/* Vendas dos produtos do lançamento (antes do orçamento por fase) */}
+                {slotAfterMetas}
 
                 {/* Orçamento por fase */}
                 <div className="rounded-lg border bg-card overflow-hidden">
@@ -1255,9 +1260,6 @@ export default function TabBA25({
               </div>
             )
           })()}
-
-          {/* Slot: metas/vendas dos produtos do lançamento (vem do TabLancamentos) */}
-          {slotAfterMetas}
 
           {/* Distribuição de vendas por UTM (gráficos de pizza) */}
           {salesUtmData && salesUtmData.totalBuyers > 0 && (
