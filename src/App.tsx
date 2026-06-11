@@ -5,8 +5,9 @@ function App() {
   return (
     <BrowserRouter>
       <Routes>
-        <Route path="/dashboard" element={<Dashboard />} />
-        <Route path="*" element={<Navigate to="/dashboard" replace />} />
+        <Route path="/dashboard" element={<Navigate to="/dashboard/perpetuo" replace />} />
+        <Route path="/dashboard/:tab" element={<Dashboard />} />
+        <Route path="*" element={<Navigate to="/dashboard/perpetuo" replace />} />
       </Routes>
     </BrowserRouter>
   )

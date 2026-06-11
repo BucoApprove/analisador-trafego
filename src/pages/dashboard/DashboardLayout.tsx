@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useParams, useNavigate } from 'react-router-dom'
 import { Tabs, TabsContent } from '@/components/ui/tabs'
 import {
   LogOut, BarChart2, TrendingUp, Users, Camera, Mail,
@@ -205,10 +206,15 @@ function Sidebar({
 // ─── Dashboard Layout ─────────────────────────────────────────────────────────
 
 export default function DashboardLayout({ token, role, userName, onLogout }: DashboardLayoutProps) {
-  const [activeTab, setActiveTab]   = useState('perpetuo')
+  const { tab } = useParams<{ tab?: string }>()
+  const navigate = useNavigate()
   const [sidebarOpen, setSidebarOpen] = useState(false)
 
   const allNav     = [...USER_NAV, ...(role === 'admin' ? ADMIN_NAV : [])]
+  const DEFAULT_TAB = 'perpetuo'
+  // Aba ativa = segmento da URL, se válido e acessível; senão o default.
+  const activeTab = tab && allNav.some(n => n.id === tab) ? tab : DEFAULT_TAB
+  const setActiveTab = (id: string) => navigate(`/dashboard/${id}`)
   const currentPage = allNav.find(n => n.id === activeTab)
 
   return (
