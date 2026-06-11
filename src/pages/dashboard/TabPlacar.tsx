@@ -148,7 +148,7 @@ function GastoCell({ gasto, etapas }: { gasto: number; etapas: EtapaGasto | null
     <td className="px-4 py-2.5 text-right text-muted-foreground relative group/gasto">
       <span className="cursor-help border-b border-dotted border-muted-foreground/40">{fmtBRL(gasto)}</span>
       {linhas.length > 0 && (
-        <div className="invisible group-hover/gasto:visible absolute right-4 top-full z-20 mt-1 w-52 rounded-md border bg-popover shadow-lg p-2 text-left">
+        <div className="invisible group-hover/gasto:visible absolute right-4 top-full z-30 mt-1 w-52 rounded-md border bg-white dark:bg-zinc-900 shadow-xl p-2 text-left">
           <p className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Gasto por etapa</p>
           {linhas.map(([etapa, v]) => (
             <div key={etapa} className="flex justify-between text-xs py-0.5">
