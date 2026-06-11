@@ -15,6 +15,7 @@ import TabEmailCampaigns from './TabEmailCampaigns'
 import TabPaidTraffic from './TabPaidTraffic'
 import TabPesquisa from './TabPesquisa'
 import TabMetasMensais from './TabMetasMensais'
+import TabPlacar from './TabPlacar'
 import TabInstagramGestor from './TabInstagramGestor'
 import TabVendas from './TabVendas'
 import TabCruzamento from './TabCruzamento'
@@ -61,6 +62,7 @@ const USER_NAV: NavItem[] = [
 ]
 
 const ADMIN_NAV: NavItem[] = [
+  { id: 'placar',           label: 'Placar 🎯',        icon: Target   },
   { id: 'metas-mensais',    label: 'Metas Mensais',    icon: Target   },
   { id: 'instagram-gestor', label: 'Instagram Gestor', icon: Settings },
   { id: 'config-produtos',  label: 'Produtos/Campanhas', icon: ShoppingCart },
@@ -316,6 +318,9 @@ export default function DashboardLayout({ token, role, userName, onLogout }: Das
             </TabsContent>
             {role === 'admin' && (
               <>
+                <TabsContent value="placar" className="mt-0">
+                  <TabPlacar token={token} enabled={activeTab === 'placar'} />
+                </TabsContent>
                 <TabsContent value="metas-mensais" className="mt-0">
                   <TabMetasMensais token={token} enabled={activeTab === 'metas-mensais'} />
                 </TabsContent>

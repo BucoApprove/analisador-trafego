@@ -55,3 +55,21 @@ export function classifyProduto(productId: number, offerCode?: string): ProdutoC
   }
   return PRODUTOS_CORE[productId] ?? { nome: LOW_TICKET, categoria: 'low' }
 }
+
+/**
+ * De/para: nome canônico (Placar) → product_name na tabela monthly_goals.
+ * Permite reaproveitar as metas já cadastradas na aba Metas Mensais.
+ * Produtos sem entrada aqui ainda não têm meta correspondente (mostra "—").
+ *
+ * Nota: "Buco Approve" canônico casa com a meta "Buco Approve"; "Intensivo ENARE"
+ * fica sem meta própria (a meta antiga não separava ofertas).
+ */
+export const GOAL_NAME_BY_CANON: Record<string, string> = {
+  'Buco Approve':            'Buco Approve',
+  'Renovação de acesso':     'Renovação BA',
+  'Mentoria CTBMF':          'Mentoria',
+  'Planejamento ImpulsoR+':  'Planejamento',
+  'Pós Patologia':           'Pós Pato',
+  'Pós Anatomia':            'Pós Anato',
+  'Low ticket':              'Low tickets',
+}
