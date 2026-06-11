@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
-import { RefreshCw, ChevronDown, ChevronUp, Pencil, Loader2, X, Plus, Trash2, Settings } from 'lucide-react'
+import { RefreshCw, ChevronDown, ChevronUp, Pencil, Loader2 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -211,100 +211,6 @@ function ProdutoRow({ p, stripe, month, onMeta }: { p: Produto; stripe: boolean;
   )
 }
 
-// ─── Modal de matching campanha → produto ────────────────────────────────────
-
-interface Mapping { keyword: string; product_name: string }
-
-function CampaignMappingsModal({ token, produtos, onClose, onChanged }: {
-  token: string
-  produtos: string[]
-  onClose: () => void
-  onChanged: () => void
-}) {
-  const [mappings, setMappings] = useState<Mapping[]>([])
-  const [loading, setLoading] = useState(true)
-  const [newKw, setNewKw] = useState('')
-  const [newProd, setNewProd] = useState('')
-  const [saving, setSaving] = useState(false)
-
-  const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }
-
-  const load = useCallback(async () => {
-    setLoading(true)
-    const r = await fetch('/api/campaign-mappings', { headers: { Authorization: `Bearer ${token}` } })
-    const j = await r.json().catch(() => ({ mappings: [] }))
-    setMappings(j.mappings ?? [])
-    setLoading(false)
-  }, [token])
-
-  useEffect(() => { load() }, [load])
-
-  async function add() {
-    if (!newKw.trim() || !newProd) return
-    setSaving(true)
-    await fetch('/api/campaign-mappings', { method: 'POST', headers, body: JSON.stringify({ keyword: newKw.trim(), product_name: newProd }) })
-    setNewKw(''); setNewProd('')
-    setSaving(false)
-    await load(); onChanged()
-  }
-
-  async function remove(keyword: string) {
-    await fetch(`/api/campaign-mappings?keyword=${encodeURIComponent(keyword)}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } })
-    await load(); onChanged()
-  }
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={onClose}>
-      <div className="absolute inset-0 bg-black/40" />
-      <div className="relative z-10 bg-background rounded-xl shadow-2xl w-full max-w-lg max-h-[85vh] flex flex-col border" onClick={e => e.stopPropagation()}>
-        <div className="flex items-center justify-between px-5 py-4 border-b">
-          <div>
-            <h3 className="font-semibold">Matching de campanhas → produto</h3>
-            <p className="text-xs text-muted-foreground">Trecho do nome da campanha define o produto. Sem regra → vai para {`"${produtos[0] ?? 'Buco Approve'}"`}.</p>
-          </div>
-          <button onClick={onClose} className="text-muted-foreground hover:text-foreground"><X className="h-4 w-4" /></button>
-        </div>
-
-        <div className="px-5 py-3 border-b bg-muted/20 space-y-2">
-          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Nova regra</p>
-          <div className="flex gap-2">
-            <input
-              className="flex-1 text-sm border rounded px-2.5 py-1.5 bg-background"
-              placeholder="trecho do nome (ex: intensiv)"
-              value={newKw}
-              onChange={e => setNewKw(e.target.value)}
-            />
-            <select className="text-sm border rounded px-2 py-1.5 bg-background" value={newProd} onChange={e => setNewProd(e.target.value)}>
-              <option value="">produto…</option>
-              {produtos.map(p => <option key={p} value={p}>{p}</option>)}
-            </select>
-            <button onClick={add} disabled={saving || !newKw.trim() || !newProd} className="text-xs px-3 py-1.5 rounded bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 flex items-center gap-1">
-              {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
-            </button>
-          </div>
-        </div>
-
-        <div className="overflow-y-auto flex-1 p-2">
-          {loading && <div className="flex justify-center py-8 text-muted-foreground"><Loader2 className="h-5 w-5 animate-spin" /></div>}
-          {!loading && mappings.length === 0 && (
-            <p className="text-sm text-muted-foreground text-center py-8">Nenhuma regra. Tudo cai em {`"${produtos[0] ?? 'Buco Approve'}"`}.</p>
-          )}
-          {mappings.map(m => (
-            <div key={m.keyword} className="flex items-center gap-2 px-3 py-2 rounded hover:bg-muted/40 group">
-              <code className="text-xs bg-muted px-1.5 py-0.5 rounded">{m.keyword}</code>
-              <span className="text-muted-foreground text-xs">→</span>
-              <span className="text-sm flex-1">{m.product_name}</span>
-              <button onClick={() => remove(m.keyword)} className="opacity-0 group-hover:opacity-100 p-1 text-muted-foreground hover:text-destructive transition-all">
-                <Trash2 className="h-3.5 w-3.5" />
-              </button>
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  )
-}
-
 // ─── Main ────────────────────────────────────────────────────────────────────
 
 export default function TabPlacar({ token, enabled }: Props) {
@@ -312,7 +218,6 @@ export default function TabPlacar({ token, enabled }: Props) {
   const [data, setData] = useState<PlacarResp | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
-  const [showMappings, setShowMappings] = useState(false)
 
   const load = useCallback(async (m: string) => {
     setLoading(true)
@@ -375,10 +280,6 @@ export default function TabPlacar({ token, enabled }: Props) {
           <select value={month} onChange={e => setMonth(e.target.value)} className="text-sm border rounded px-2 py-1.5 bg-background">
             {monthOptions.map(m => <option key={m} value={m}>{m}</option>)}
           </select>
-          <button onClick={() => setShowMappings(true)} className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded border bg-background hover:bg-muted transition-colors" title="Configurar matching de campanhas">
-            <Settings className="h-3.5 w-3.5" />
-            Campanhas
-          </button>
           <button onClick={() => load(month)} disabled={loading} className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded border bg-background hover:bg-muted transition-colors disabled:opacity-50">
             <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
             Atualizar
@@ -386,17 +287,8 @@ export default function TabPlacar({ token, enabled }: Props) {
         </div>
       </div>
 
-      {showMappings && (
-        <CampaignMappingsModal
-          token={token}
-          produtos={produtos.map(p => p.nome)}
-          onClose={() => setShowMappings(false)}
-          onChanged={() => load(month)}
-        />
-      )}
-
       <div className="rounded-md bg-blue-50 border border-blue-200 px-4 py-2 text-xs text-blue-800">
-        ⚙️ Aba em construção (fase 1: vendas + faturamento líquido). Gasto Meta, ROAS, leads e alertas chegam nas próximas fases.
+        ⚙️ Aba em construção. O gasto de cada campanha é atribuído ao produto pela aba <strong>Produtos/Campanhas</strong> (prefixo → produto). Campanha sem regra cai em <strong>Buco Approve</strong>.
       </div>
 
       {error && <div className="rounded-md bg-destructive/10 border border-destructive/20 px-4 py-3 text-sm text-destructive">{error}</div>}

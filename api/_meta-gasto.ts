@@ -1,23 +1,31 @@
 /**
- * Gasto Meta Ads das DUAS contas do negócio, atribuído a produto + etapa.
+ * Gasto Meta Ads das contas do negócio, atribuído a produto + etapa.
  *
  * Contas (env META_AD_ACCOUNTS = CSV de account_ids; fallback p/ META_AD_ACCOUNT_ID):
- *   1082683452063319 — GBS Launch
- *   565958430809772  — GBS Pós-graduações
+ *   1082683452063319 — GBS Launch (conta1)
+ *   565958430809772  — GBS Pós-graduações (conta2)
  *
- * Atribuição de PRODUTO: por keyword no nome da campanha (tabela
- * campaign_mappings, editável na UI). A primeira keyword que casar vence.
- * Campanha que não casa com nenhuma regra → "Buco Approve" (fallback total).
+ * Atribuição de PRODUTO: reusa a tabela campaign_produto_map (prefixo →
+ * produto_ids[], por conta) — a mesma editada em "Produtos/Campanhas". O prefixo
+ * casa por includes no nome da campanha; o 1º produto_id é convertido no nome
+ * canônico via classifyProduto. Campanha que não casa → "Buco Approve".
  *
- * Atribuição de ETAPA: derivada do nome da campanha por palavra-chave fixa
+ * Atribuição de ETAPA: derivada do nome por palavra-chave fixa
  * (conversão / remarketing / descoberta / relacionamento). Default: conversão.
  */
 import { createClient } from '@supabase/supabase-js'
+import { classifyProduto } from './_produtos-canonicos.js'
 
 export type Etapa = 'conversão' | 'remarketing' | 'descoberta' | 'relacionamento'
 export const ETAPAS: Etapa[] = ['conversão', 'remarketing', 'descoberta', 'relacionamento']
 
 export const FALLBACK_PRODUTO = 'Buco Approve'
+
+// account_id Meta → chave de conta usada na campaign_produto_map.
+const META_ACCOUNT_TO_CONTA: Record<string, string> = {
+  '1082683452063319': 'conta1', // GBS Launch
+  '565958430809772':  'conta2', // GBS Pós-graduações
+}
 
 export interface CampanhaGasto {
   campaign: string
@@ -29,14 +37,12 @@ export interface CampanhaGasto {
 
 export interface MetaGasto {
   campanhas: CampanhaGasto[]
-  // gasto[produto] = total; gastoPorEtapa[produto][etapa] = split p/ tooltip
   gastoPorProduto: Record<string, number>
   gastoPorEtapa: Record<string, Record<Etapa, number>>
   totalGasto: number          // soma real das contas (fechamento)
-  totalClassificado: number   // soma do que foi atribuído a campanhas
+  totalClassificado: number   // soma atribuída a campanhas
 }
 
-// Detecção de etapa por palavra-chave no nome (primeira que casar). Default: conversão.
 const ETAPA_KEYWORDS: Array<[string, Etapa]> = [
   ['remarketing', 'remarketing'],
   ['rmkt', 'remarketing'],
@@ -66,22 +72,35 @@ function accountIds(): string[] {
   return single ? [single.replace(/^act_/, '')] : []
 }
 
-async function fetchCampaignMappings(): Promise<Array<{ keyword: string; product: string }>> {
+interface Regra { prefixo: string; produtoCanonico: string }
+
+/** Carrega regras prefixo→produto canônico da campaign_produto_map para uma conta. */
+async function fetchRegras(conta: string): Promise<Regra[]> {
   const sb = createClient(process.env.SUPABASE_URL ?? '', process.env.SUPABASE_SERVICE_KEY ?? '', {
     auth: { persistSession: false },
   })
-  const { data, error } = await sb.from('campaign_mappings').select('keyword, product_name')
-  if (error) throw new Error(`campaign_mappings query failed: ${error.message}`)
-  // keywords mais longas primeiro: regra mais específica vence
-  return (data ?? [])
-    .map(r => ({ keyword: r.keyword.toLowerCase(), product: r.product_name }))
-    .sort((a, b) => b.keyword.length - a.keyword.length)
+  const { data, error } = await sb
+    .from('campaign_produto_map')
+    .select('prefixo, produto_ids')
+    .eq('account', conta)
+  if (error) throw new Error(`campaign_produto_map query failed: ${error.message}`)
+
+  const regras: Regra[] = []
+  for (const r of data ?? []) {
+    const ids = (r.produto_ids as number[]) ?? []
+    if (ids.length === 0 || !r.prefixo) continue
+    // 1º produto_id → nome canônico (sem oferta: ofertas só importam dentro do Buco)
+    const produtoCanonico = classifyProduto(Number(ids[0])).nome
+    regras.push({ prefixo: String(r.prefixo).toLowerCase().trim(), produtoCanonico })
+  }
+  // prefixo mais longo primeiro: regra mais específica vence
+  return regras.sort((a, b) => b.prefixo.length - a.prefixo.length)
 }
 
-function matchProduto(nome: string, regras: Array<{ keyword: string; product: string }>): string {
+function matchProduto(nome: string, regras: Regra[]): string {
   const n = nome.toLowerCase()
   for (const r of regras) {
-    if (r.keyword && n.includes(r.keyword)) return r.product
+    if (r.prefixo && n.includes(r.prefixo)) return r.produtoCanonico
   }
   return FALLBACK_PRODUTO
 }
@@ -100,8 +119,6 @@ export async function fetchMetaGasto(month: string): Promise<MetaGasto> {
     throw new Error('META_ACCESS_TOKEN ou META_AD_ACCOUNTS/META_AD_ACCOUNT_ID não configurado')
   }
 
-  const regras = await fetchCampaignMappings()
-
   const [y, m] = month.split('-').map(Number)
   const since = `${month}-01`
   const until = new Date(y, m, 0).toISOString().slice(0, 10)
@@ -112,7 +129,14 @@ export async function fetchMetaGasto(month: string): Promise<MetaGasto> {
   const gastoPorEtapa: Record<string, Record<Etapa, number>> = {}
   let totalGasto = 0
 
+  // cache de regras por conta (evita refetch se a mesma conta repetir)
+  const regrasCache = new Map<string, Regra[]>()
+
   for (const aid of accounts) {
+    const conta = META_ACCOUNT_TO_CONTA[aid] ?? 'conta1'
+    let regras = regrasCache.get(conta)
+    if (!regras) { regras = await fetchRegras(conta); regrasCache.set(conta, regras) }
+
     const campUrl = new URL(`https://graph.facebook.com/v21.0/act_${aid}/insights`)
     campUrl.searchParams.set('level', 'campaign')
     campUrl.searchParams.set('fields', 'campaign_name,spend')
@@ -130,7 +154,7 @@ export async function fetchMetaGasto(month: string): Promise<MetaGasto> {
       const nome = row.campaign_name ?? '(sem nome)'
       const produto = matchProduto(nome, regras)
       const etapa = detectarEtapa(nome)
-      campanhas.push({ campaign: nome, conta: aid, spend: round(spend), produto, etapa })
+      campanhas.push({ campaign: nome, conta, spend: round(spend), produto, etapa })
 
       gastoPorProduto[produto] = (gastoPorProduto[produto] ?? 0) + spend
       ;(gastoPorEtapa[produto] ??= emptyEtapas())[etapa] += spend
