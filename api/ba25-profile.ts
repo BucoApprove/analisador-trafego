@@ -16,8 +16,8 @@ import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { bqQuery, tableLeads, tableVendas } from './_bq.js'
 import { authUser } from './_supabase-auth.js'
 
-const SURVEY_SHEET_ID = '1yDxS-O0BnPk8jH8dqHZpyL1sXdxp1ABl'
-const SURVEY_CSV_URL  = `https://docs.google.com/spreadsheets/d/${SURVEY_SHEET_ID}/export?format=csv`
+const DEFAULT_SURVEY_SHEET_ID = '1yDxS-O0BnPk8jH8dqHZpyL1sXdxp1ABl'
+const DEFAULT_PRODUCT_FILTER  = '%buco%approve%'
 
 function todayStr() { return new Date().toISOString().split('T')[0] }
 
@@ -65,6 +65,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const tLeads   = tableLeads()
   const tVendas  = tableVendas()
 
+  // Parametrizável por lançamento (defaults reproduzem o BA25/BucoApprove)
+  const productFilter = typeof req.query.productFilter === 'string' && req.query.productFilter
+    ? req.query.productFilter : DEFAULT_PRODUCT_FILTER
+  const surveySheetId = typeof req.query.surveySheetId === 'string' && req.query.surveySheetId
+    ? req.query.surveySheetId : DEFAULT_SURVEY_SHEET_ID
+  const SURVEY_CSV_URL = `https://docs.google.com/spreadsheets/d/${surveySheetId}/export?format=csv`
+
   res.setHeader('Cache-Control', 's-maxage=300, stale-while-revalidate=60')
 
   try {
@@ -72,6 +79,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const params = [
       { name: 'since', value: since },
       { name: 'until', value: until },
+      { name: 'productFilter', value: productFilter },
     ]
 
     const [revenueResult, utmResult, surveyRes] = await Promise.all([
@@ -88,7 +96,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           ) / 100.0 AS total_revenue
         FROM ${tVendas}
         WHERE Status IN ('COMPLETO', 'APROVADO')
-          AND LOWER(TRIM(Nome_do_Produto)) = 'bucoapprove'
+          AND LOWER(TRIM(Nome_do_Produto)) LIKE @productFilter
           AND \`${emailCol}\` IS NOT NULL
           AND TRIM(\`${emailCol}\`) <> ''
           AND \`${dateCol}\` >= @since
@@ -103,7 +111,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                  MIN(\`${dateCol}\`)          AS purchase_date
           FROM ${tVendas}
           WHERE Status IN ('COMPLETO', 'APROVADO')
-            AND LOWER(TRIM(Nome_do_Produto)) = 'bucoapprove'
+            AND LOWER(TRIM(Nome_do_Produto)) LIKE @productFilter
             AND \`${emailCol}\` IS NOT NULL
             AND TRIM(\`${emailCol}\`) <> ''
             AND \`${dateCol}\` >= @since

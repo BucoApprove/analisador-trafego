@@ -63,6 +63,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const since = typeof req.query.since === 'string' ? req.query.since : firstOfMonthStr()
   const until = typeof req.query.until === 'string' ? req.query.until : todayStr()
 
+  // Filtro de produto parametrizável por lançamento (default = BucoApprove)
+  const productFilter = typeof req.query.productFilter === 'string' && req.query.productFilter
+    ? req.query.productFilter : '%buco%approve%'
+
   const emailCol = process.env.BQ_VENDAS_EMAIL_COL ?? 'E_mail_do_Comprador'
   const dateCol  = process.env.BQ_VENDAS_DATE_COL  ?? 'Data_de_Aprova____o'
 
@@ -79,7 +83,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           MIN(\`${dateCol}\`)          AS purchase_date
         FROM ${tVendas}
         WHERE Status IN ('COMPLETO', 'APROVADO')
-          AND LOWER(TRIM(Nome_do_Produto)) = 'bucoapprove'
+          AND LOWER(TRIM(Nome_do_Produto)) LIKE @productFilter
           AND \`${emailCol}\` IS NOT NULL
           AND TRIM(\`${emailCol}\`) <> ''
           AND \`${dateCol}\` >= @since
@@ -146,10 +150,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       bqQuery(sql, [
         { name: 'since', value: since },
         { name: 'until', value: until },
+        { name: 'productFilter', value: productFilter },
       ]),
       bqQuery(saleCountSql, [
         { name: 'since', value: since },
         { name: 'until', value: until },
+        { name: 'productFilter', value: productFilter },
       ]),
     ])
 

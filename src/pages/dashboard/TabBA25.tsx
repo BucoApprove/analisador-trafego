@@ -23,6 +23,8 @@ interface Props {
   defaultSince?: string
   defaultUntil?: string
   nome?: string
+  productFilter?: string   // filtro LIKE de produto de venda (default BucoApprove)
+  surveySheetId?: string   // planilha de pesquisa de boas-vindas
 }
 
 const FIXED_PREFIX = 'BA25'
@@ -513,6 +515,8 @@ export default function TabBA25({
   defaultSince = FIXED_SINCE,
   defaultUntil = FIXED_UNTIL,
   nome = 'BA25',
+  productFilter = '',
+  surveySheetId = '',
 }: Props) {
   const [since, setSince] = useState(defaultSince)
   const [until, setUntil] = useState(defaultUntil)
@@ -542,7 +546,7 @@ export default function TabBA25({
   }, [token])
 
   const load = useCallback(async (force = false) => {
-    const cacheKey = `${since}_${until}`
+    const cacheKey = `${prefix}_${since}_${until}_${productFilter}`
 
     if (!force) {
       const cached = _cache.current.get(cacheKey)
@@ -567,9 +571,12 @@ export default function TabBA25({
       const bqUrl = `/api/launch-data?prefix=${encodeURIComponent(prefix)}&since=${since}&until=${until}&broadSearch=true${nc}`
       const metaUrl = `/api/meta-spend?since=${since}&until=${until}&spendFilter=${encodeURIComponent(spendFilter)}&orFilter=${encodeURIComponent(orFilter)}${nc}`
 
-      const salesUrl  = `/api/launch-sales-utms?since=${since}&until=${until}${nc}`
-      const surveyUrl  = `/api/survey-buyers?since=${since}&until=${until}${nc}`
-      const profileUrl = `/api/ba25-profile?since=${since}&until=${until}${nc}`
+      // params opcionais por lançamento (vazio = default BucoApprove/BA25 no backend)
+      const pf = productFilter ? `&productFilter=${encodeURIComponent(productFilter)}` : ''
+      const ss = surveySheetId ? `&surveySheetId=${encodeURIComponent(surveySheetId)}` : ''
+      const salesUrl  = `/api/launch-sales-utms?since=${since}&until=${until}${pf}${nc}`
+      const surveyUrl  = `/api/survey-buyers?since=${since}&until=${until}${pf}${ss}${nc}`
+      const profileUrl = `/api/ba25-profile?since=${since}&until=${until}${pf}${ss}${nc}`
 
       const t0 = Date.now()
       const [bqRes, metaRes, salesRes, surveyRes, profileRes] = await Promise.all([
@@ -757,7 +764,7 @@ export default function TabBA25({
       setStatus('error')
       setErrorMsg((e as Error).message)
     }
-  }, [since, until, token, prefix, spendFilter, orFilter])
+  }, [since, until, token, prefix, spendFilter, orFilter, productFilter, surveySheetId])
 
   // Reseta a janela de datas quando troca de lançamento (defaults mudam).
   useEffect(() => {
@@ -1599,7 +1606,7 @@ export default function TabBA25({
       {salesUtmData?.buyerSaleCounts && salesUtmData.buyerSaleCounts.length > 0 && (
         <div className="rounded-lg border bg-card overflow-hidden">
           <div className="px-4 py-2.5 border-b bg-muted/40">
-            <p className="text-sm font-semibold">Emails de Compradores — BucoApprove</p>
+            <p className="text-sm font-semibold">Emails de Compradores</p>
             <p className="text-xs text-muted-foreground">
               {salesUtmData.buyerSaleCounts.length} emails únicos · {salesUtmData.totalSales ?? salesUtmData.buyerSaleCounts.reduce((s, r) => s + r.count, 0)} transações · emails com <code>(Nx)</code> aparecem mais de uma vez
             </p>
