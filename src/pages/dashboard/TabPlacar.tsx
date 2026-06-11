@@ -4,8 +4,10 @@ import { supabase } from '@/lib/supabase'
 
 // Produtos selecionáveis no editor de mapeamento (label → product_id gravado
 // na campaign_produto_map; o backend converte o id de volta no nome canônico).
+const INTENSIVO_MARKER_ID = -2016048
 const PRODUTOS_SELECIONAVEIS: Array<{ label: string; id: number }> = [
   { label: 'Buco Approve',                id: 2016048 },
+  { label: 'Intensivo ENARE',             id: INTENSIVO_MARKER_ID },
   { label: 'Mentoria CTBMF',              id: 3811518 },
   { label: 'Pós Patologia',               id: 5694443 },
   { label: 'Pós Anatomia',                id: 6115663 },

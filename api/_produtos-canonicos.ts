@@ -53,8 +53,17 @@ export const LOW_TICKET = 'Low ticket'
 // id apenas serve de âncora para a opção única no dropdown.
 export const LOW_TICKET_ID = 6766383
 
+// Id-marcador sentinela para "Intensivo ENARE" no MAPEAMENTO DE CAMPANHA.
+// O Intensivo não é um produto na Hotmart, é uma oferta dentro do BucoApprove
+// (id 2016048) — então não tem product_id próprio. Mas a campanha Meta não
+// carrega o offer.code, então a única forma de atribuir o GASTO de uma campanha
+// de Intensivo à linha "Intensivo ENARE" é o usuário mapeá-la para este id
+// sentinela. Negativo para nunca colidir com um product_id real da Hotmart.
+export const INTENSIVO_MARKER_ID = -2016048
+
 export const PRODUTOS_SELECIONAVEIS: Array<{ label: string; id: number }> = [
   { label: 'Buco Approve',              id: 2016048 },
+  { label: 'Intensivo ENARE',           id: INTENSIVO_MARKER_ID },
   { label: 'Mentoria CTBMF',            id: 3811518 },
   { label: 'Pós Patologia',             id: 5694443 },
   { label: 'Pós Anatomia',              id: 6115663 },
@@ -69,10 +78,13 @@ export const PRODUTOS_SELECIONAVEIS: Array<{ label: string; id: number }> = [
 
 /**
  * Classifica uma venda no produto canônico, considerando id e oferta.
- * @param productId  product.id da Hotmart
+ * @param productId  product.id da Hotmart (ou INTENSIVO_MARKER_ID no mapeamento de campanha)
  * @param offerCode  purchase.offer.code (só relevante para o BucoApprove)
  */
 export function classifyProduto(productId: number, offerCode?: string): ProdutoCanonico {
+  if (productId === INTENSIVO_MARKER_ID) {
+    return { nome: 'Intensivo ENARE', categoria: 'core' }
+  }
   if (productId === BUCO_PID) {
     return offerCode && INTENSIVO_OFFERS.has(offerCode)
       ? { nome: 'Intensivo ENARE', categoria: 'core' }
