@@ -27,6 +27,7 @@ interface Props {
   surveySheetId?: string   // planilha de pesquisa de boas-vindas
   goalsOverride?: GoalsData | null  // metas vindas do lançamento (substitui /api/goals-data)
   tipo?: 'interno' | 'pago' // pago mostra CPV (custo por venda) nas UTMs
+  slotAfterMetas?: React.ReactNode  // conteúdo extra renderizado após "Metas × Realizado"
 }
 
 const FIXED_PREFIX = 'BA25'
@@ -536,6 +537,7 @@ export default function TabBA25({
   surveySheetId = '',
   goalsOverride,
   tipo = 'interno',
+  slotAfterMetas,
 }: Props) {
   const [since, setSince] = useState(defaultSince)
   const [until, setUntil] = useState(defaultUntil)
@@ -1215,6 +1217,9 @@ export default function TabBA25({
               </div>
             )
           })()}
+
+          {/* Slot: metas/vendas dos produtos do lançamento (vem do TabLancamentos) */}
+          {slotAfterMetas}
 
           {/* Distribuição de vendas por UTM (gráficos de pizza) */}
           {salesUtmData && salesUtmData.totalBuyers > 0 && (

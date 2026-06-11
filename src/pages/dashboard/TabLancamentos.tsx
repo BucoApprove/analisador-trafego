@@ -451,8 +451,8 @@ export default function TabLancamentos({ token, enabled }: Props) {
         <button onClick={() => setSelected(null)} className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
           <ChevronLeft className="h-4 w-4" /> Voltar aos lançamentos
         </button>
-        <VendasProdutoBlock token={token} l={selected} />
         <TabBA25
+          slotAfterMetas={<VendasProdutoBlock token={token} l={selected} />}
           token={token}
           enabled={true}
           prefix={selected.prefixo}
