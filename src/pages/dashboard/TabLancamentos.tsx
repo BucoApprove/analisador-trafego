@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect } from 'react'
+import { useParams, useNavigate } from 'react-router-dom'
 import { Plus, X, Loader2, Trash2, ChevronLeft, Calendar, Pencil } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import type { Lancamento } from '@/lib/supabase'
@@ -496,11 +497,17 @@ function LancamentoCard({ l, onOpen, onEdit, onDelete }: {
 // ─── Main ────────────────────────────────────────────────────────────────────
 
 export default function TabLancamentos({ token, enabled }: Props) {
+  const { sub } = useParams<{ sub?: string }>()
+  const navigate = useNavigate()
   const [lancamentos, setLancamentos] = useState<Lancamento[]>([])
   const [loading, setLoading] = useState(true)
-  const [selected, setSelected] = useState<Lancamento | null>(null)
   const [modalOpen, setModalOpen] = useState(false)
   const [editing, setEditing] = useState<Lancamento | null>(null)
+
+  // Lançamento aberto vem da URL (/dashboard/lancamentos/:id).
+  const selected = sub ? lancamentos.find(l => l.id === sub) ?? null : null
+  const openLancamento = (l: Lancamento) => navigate(`/dashboard/lancamentos/${l.id}`)
+  const closeLancamento = () => navigate('/dashboard/lancamentos')
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -521,7 +528,7 @@ export default function TabLancamentos({ token, enabled }: Props) {
   if (selected) {
     return (
       <div className="space-y-4">
-        <button onClick={() => setSelected(null)} className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
+        <button onClick={closeLancamento} className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
           <ChevronLeft className="h-4 w-4" /> Voltar aos lançamentos
         </button>
         <DetalheLancamento token={token} l={selected} />
@@ -566,7 +573,7 @@ export default function TabLancamentos({ token, enabled }: Props) {
             <LancamentoCard
               key={l.id}
               l={l}
-              onOpen={() => setSelected(l)}
+              onOpen={() => openLancamento(l)}
               onEdit={() => { setEditing(l); setModalOpen(true) }}
               onDelete={() => remove(l)}
             />
