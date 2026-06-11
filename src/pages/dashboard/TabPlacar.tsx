@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
-import { RefreshCw, ChevronDown, ChevronUp, Pencil, Loader2, Settings, Plus, Trash2, X } from 'lucide-react'
+import { RefreshCw, ChevronDown, ChevronUp, Pencil, Loader2, Settings, Plus, Trash2, X, Rows2, Table2 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 
 // Produtos selecionáveis no editor de mapeamento (label → product_id gravado
@@ -183,43 +183,71 @@ function GastoCell({ gasto, etapas }: { gasto: number; etapas: EtapaGasto | null
 
 // ─── Linha de produto (com drill-down de ofertas) ────────────────────────────
 
-function ProdutoRow({ p, stripe, month, onMeta }: { p: Produto; stripe: boolean; month: string; onMeta: (goalName: string, v: number) => void }) {
+function ProdutoRow({ p, stripe, month, onMeta, enxuta }: { p: Produto; stripe: boolean; month: string; onMeta: (goalName: string, v: number) => void; enxuta: boolean }) {
   const [open, setOpen] = useState(false)
   const pct = p.meta && p.meta > 0 ? (p.liquido / p.meta) * 100 : null
   const hasOfertas = (p.ofertas?.length ?? 0) > 1
+  const cpa = p.gasto > 0 && p.vendas > 0 ? p.gasto / p.vendas : null
+  const pctCls = pct === null ? '' : pct >= 100 ? 'text-green-600 font-semibold' : pct >= 70 ? 'text-yellow-600' : 'text-red-600'
+
+  const nomeCell = (
+    <td className={`px-4 ${enxuta ? 'py-3' : 'py-2.5'} font-medium`}>
+      <span className="inline-flex items-center gap-1.5">
+        {hasOfertas ? (
+          <button onClick={() => setOpen(o => !o)} className="text-muted-foreground hover:text-foreground">
+            {open ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+          </button>
+        ) : <span className="w-3.5 inline-block" />}
+        {p.nome}
+        <CatBadge cat={p.categoria} />
+      </span>
+    </td>
+  )
+
   return (
     <>
       <tr className={`border-b ${stripe ? 'bg-muted/20' : ''}`}>
-        <td className="px-4 py-2.5 font-medium">
-          <span className="inline-flex items-center gap-1.5">
-            {hasOfertas ? (
-              <button onClick={() => setOpen(o => !o)} className="text-muted-foreground hover:text-foreground">
-                {open ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
-              </button>
-            ) : <span className="w-3.5 inline-block" />}
-            {p.nome}
-            <CatBadge cat={p.categoria} />
-          </span>
-        </td>
-        <td className="px-4 py-2.5 text-right">{p.vendas}</td>
-        <td className="px-4 py-2.5 text-right font-semibold">{fmtBRL(p.liquido)}</td>
-        <EditableMeta month={month} goalName={p.goalName} meta={p.meta} onSaved={v => onMeta(p.goalName, v)} />
-        <td className="px-4 py-2.5 text-right">
-          {pct !== null ? (
-            <span className={pct >= 100 ? 'text-green-600 font-semibold' : pct >= 70 ? 'text-yellow-600' : 'text-red-600'}>
-              {pct.toFixed(0)}%
-            </span>
-          ) : '—'}
-        </td>
-        <GastoCell gasto={p.gasto} etapas={p.gastoEtapas} />
-        <td className="px-4 py-2.5 text-right text-muted-foreground">
-          {p.gasto > 0 && p.vendas > 0 ? fmtBRL(p.gasto / p.vendas) : '—'}
-        </td>
-        <td className="px-4 py-2.5 text-right">
-          {p.roas !== null ? (
-            <span className={p.roas >= 1 ? 'text-green-600 font-medium' : 'text-red-600'}>{p.roas.toFixed(2)}x</span>
-          ) : '—'}
-        </td>
+        {nomeCell}
+        <td className={`px-4 ${enxuta ? 'py-3' : 'py-2.5'} text-right`}>{p.vendas}</td>
+
+        {enxuta ? (
+          <>
+            {/* Líquido + meta + % empilhados */}
+            <td className="px-4 py-3 text-right">
+              <div className="font-semibold">{fmtBRL(p.liquido)}</div>
+              {p.meta && p.meta > 0 ? (
+                <div className="text-xs text-muted-foreground">
+                  meta {fmtBRL(p.meta)} · <span className={pctCls}>{pct!.toFixed(0)}%{pct! >= 100 ? ' ✓' : ''}</span>
+                </div>
+              ) : <div className="text-xs text-muted-foreground italic">sem meta</div>}
+            </td>
+            {/* Gasto + CPA + ROAS empilhados */}
+            <td className="px-4 py-3 text-right">
+              <div className="text-muted-foreground">{p.gasto > 0 ? fmtBRL(p.gasto) : '—'}</div>
+              {p.gasto > 0 && (
+                <div className="text-xs text-muted-foreground">
+                  {cpa !== null && <>CPA {fmtBRL(cpa)}</>}
+                  {p.roas !== null && <> · ROAS <span className={p.roas >= 1 ? 'text-green-600 font-medium' : 'text-red-600'}>{p.roas.toFixed(2)}x</span></>}
+                </div>
+              )}
+            </td>
+          </>
+        ) : (
+          <>
+            <td className="px-4 py-2.5 text-right font-semibold">{fmtBRL(p.liquido)}</td>
+            <EditableMeta month={month} goalName={p.goalName} meta={p.meta} onSaved={v => onMeta(p.goalName, v)} />
+            <td className="px-4 py-2.5 text-right">
+              {pct !== null ? <span className={pctCls}>{pct.toFixed(0)}%</span> : '—'}
+            </td>
+            <GastoCell gasto={p.gasto} etapas={p.gastoEtapas} />
+            <td className="px-4 py-2.5 text-right text-muted-foreground">{cpa !== null ? fmtBRL(cpa) : '—'}</td>
+            <td className="px-4 py-2.5 text-right">
+              {p.roas !== null ? (
+                <span className={p.roas >= 1 ? 'text-green-600 font-medium' : 'text-red-600'}>{p.roas.toFixed(2)}x</span>
+              ) : '—'}
+            </td>
+          </>
+        )}
       </tr>
       {open && p.ofertas?.map(o => (
         <tr key={o.code} className="border-b bg-muted/5 text-xs text-muted-foreground">
@@ -228,7 +256,7 @@ function ProdutoRow({ p, stripe, month, onMeta }: { p: Produto; stripe: boolean;
           </td>
           <td className="px-4 py-1.5 text-right">{o.vendas}</td>
           <td className="px-4 py-1.5 text-right">{fmtBRL(o.liquido)}</td>
-          <td colSpan={5} />
+          <td colSpan={enxuta ? 1 : 5} />
         </tr>
       ))}
     </>
@@ -351,6 +379,9 @@ export default function TabPlacar({ token, enabled }: Props) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [showMap, setShowMap] = useState(false)
+  // Visualização: completa (todas colunas) ou enxuta (meta/% sob líquido, CPA/ROAS sob gasto).
+  const [enxuta, setEnxuta] = useState(() => localStorage.getItem('placar-view') === 'enxuta')
+  const toggleView = () => setEnxuta(e => { localStorage.setItem('placar-view', !e ? 'enxuta' : 'completa'); return !e })
 
   const load = useCallback(async (m: string) => {
     setLoading(true)
@@ -413,6 +444,10 @@ export default function TabPlacar({ token, enabled }: Props) {
           <select value={month} onChange={e => setMonth(e.target.value)} className="text-sm border rounded px-2 py-1.5 bg-background">
             {monthOptions.map(m => <option key={m} value={m}>{m}</option>)}
           </select>
+          <button onClick={toggleView} className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded border bg-background hover:bg-muted transition-colors" title={enxuta ? 'Ver visualização completa' : 'Ver visualização enxuta'}>
+            {enxuta ? <Table2 className="h-3.5 w-3.5" /> : <Rows2 className="h-3.5 w-3.5" />}
+            {enxuta ? 'Completa' : 'Enxuta'}
+          </button>
           <button onClick={() => setShowMap(true)} className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded border bg-background hover:bg-muted transition-colors" title="Mapear campanhas para produtos">
             <Settings className="h-3.5 w-3.5" />
             Campanhas
@@ -489,33 +524,53 @@ export default function TabPlacar({ token, enabled }: Props) {
               <tr className="border-b bg-muted/50">
                 <th className="text-left px-4 py-2.5 font-medium">Produto</th>
                 <th className="text-right px-4 py-2.5 font-medium">Vendas</th>
-                <th className="text-right px-4 py-2.5 font-medium">Líquido</th>
-                <th className="text-right px-4 py-2.5 font-medium">Meta</th>
-                <th className="text-right px-4 py-2.5 font-medium">% Meta</th>
-                <th className="text-right px-4 py-2.5 font-medium">Gasto</th>
-                <th className="text-right px-4 py-2.5 font-medium">CPA</th>
-                <th className="text-right px-4 py-2.5 font-medium">ROAS</th>
+                <th className="text-right px-4 py-2.5 font-medium">Líquido{enxuta && ' / Meta'}</th>
+                {!enxuta && <th className="text-right px-4 py-2.5 font-medium">Meta</th>}
+                {!enxuta && <th className="text-right px-4 py-2.5 font-medium">% Meta</th>}
+                <th className="text-right px-4 py-2.5 font-medium">Gasto{enxuta && ' / CPA / ROAS'}</th>
+                {!enxuta && <th className="text-right px-4 py-2.5 font-medium">CPA</th>}
+                {!enxuta && <th className="text-right px-4 py-2.5 font-medium">ROAS</th>}
               </tr>
             </thead>
             <tbody>
-              {produtos.map((p, i) => <ProdutoRow key={p.nome} p={p} stripe={i % 2 !== 0} month={month} onMeta={onMeta} />)}
+              {produtos.map((p, i) => <ProdutoRow key={p.nome} p={p} stripe={i % 2 !== 0} month={month} onMeta={onMeta} enxuta={enxuta} />)}
             </tbody>
             <tfoot>
               <tr className="border-t bg-muted/50 font-semibold">
                 <td className="px-4 py-2.5">Total</td>
                 <td className="px-4 py-2.5 text-right">{data?.totalVendas ?? 0}</td>
-                <td className="px-4 py-2.5 text-right">{fmtBRL(totalLiquido)}</td>
-                <td className="px-4 py-2.5 text-right">{totalMeta > 0 ? fmtBRL(totalMeta) : '—'}</td>
-                <td className="px-4 py-2.5 text-right">
-                  {pctMeta !== null ? <span className={pctMeta >= 100 ? 'text-green-600' : ''}>{pctMeta.toFixed(0)}%</span> : '—'}
-                </td>
-                <td className="px-4 py-2.5 text-right">{gastoProdutos > 0 ? fmtBRL(gastoProdutos) : '—'}</td>
-                <td className="px-4 py-2.5 text-right">
-                  {gastoProdutos > 0 && (data?.totalVendas ?? 0) > 0 ? fmtBRL(gastoProdutos / (data?.totalVendas ?? 1)) : '—'}
-                </td>
-                <td className="px-4 py-2.5 text-right">
-                  {gastoProdutos > 0 ? <span className={totalLiquido / gastoProdutos >= 1 ? 'text-green-600' : 'text-red-600'}>{(totalLiquido / gastoProdutos).toFixed(2)}x</span> : '—'}
-                </td>
+                {enxuta ? (
+                  <>
+                    <td className="px-4 py-2.5 text-right">
+                      <div>{fmtBRL(totalLiquido)}</div>
+                      {totalMeta > 0 && <div className="text-xs font-normal text-muted-foreground">meta {fmtBRL(totalMeta)} · {pctMeta !== null && <span className={pctMeta >= 100 ? 'text-green-600' : ''}>{pctMeta.toFixed(0)}%{pctMeta >= 100 ? ' ✓' : ''}</span>}</div>}
+                    </td>
+                    <td className="px-4 py-2.5 text-right">
+                      <div>{gastoProdutos > 0 ? fmtBRL(gastoProdutos) : '—'}</div>
+                      {gastoProdutos > 0 && (
+                        <div className="text-xs font-normal text-muted-foreground">
+                          {(data?.totalVendas ?? 0) > 0 && <>CPA {fmtBRL(gastoProdutos / (data?.totalVendas ?? 1))}</>}
+                          {' · ROAS '}<span className={totalLiquido / gastoProdutos >= 1 ? 'text-green-600' : 'text-red-600'}>{(totalLiquido / gastoProdutos).toFixed(2)}x</span>
+                        </div>
+                      )}
+                    </td>
+                  </>
+                ) : (
+                  <>
+                    <td className="px-4 py-2.5 text-right">{fmtBRL(totalLiquido)}</td>
+                    <td className="px-4 py-2.5 text-right">{totalMeta > 0 ? fmtBRL(totalMeta) : '—'}</td>
+                    <td className="px-4 py-2.5 text-right">
+                      {pctMeta !== null ? <span className={pctMeta >= 100 ? 'text-green-600' : ''}>{pctMeta.toFixed(0)}%</span> : '—'}
+                    </td>
+                    <td className="px-4 py-2.5 text-right">{gastoProdutos > 0 ? fmtBRL(gastoProdutos) : '—'}</td>
+                    <td className="px-4 py-2.5 text-right">
+                      {gastoProdutos > 0 && (data?.totalVendas ?? 0) > 0 ? fmtBRL(gastoProdutos / (data?.totalVendas ?? 1)) : '—'}
+                    </td>
+                    <td className="px-4 py-2.5 text-right">
+                      {gastoProdutos > 0 ? <span className={totalLiquido / gastoProdutos >= 1 ? 'text-green-600' : 'text-red-600'}>{(totalLiquido / gastoProdutos).toFixed(2)}x</span> : '—'}
+                    </td>
+                  </>
+                )}
               </tr>
             </tfoot>
           </table>
