@@ -657,7 +657,7 @@ export default function TabBA25({
           addUtm(mediumMap, row.utm_medium)
           addUtm(contentMap, row.utm_content)
 
-          if (tag.toLowerCase().includes('ba25-captura')) {
+          if (tag.toLowerCase().includes(`${prefix.toLowerCase()}-captura`)) {
             const k = row.utm_content ?? ''
             if (!captureContentMap.has(k)) captureContentMap.set(k, new Set())
             captureContentMap.get(k)!.add(email)
@@ -943,12 +943,13 @@ export default function TabBA25({
             const brl2 = (v: number) => v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
             const campaigns = data.metaCampaigns ?? []
 
-            // Gasto Captura: campanhas com ba25 E captura, sem engajamento
+            // Gasto Captura: campanhas com o prefixo E captura, sem engajamento
+            const pfx = prefix.toLowerCase()
             const gastoCaptura = campaigns
-              .filter(c => { const n = c.name.toLowerCase(); return n.includes('ba25') && n.includes('captura') && !n.includes('engajamento') })
+              .filter(c => { const n = c.name.toLowerCase(); return n.includes(pfx) && n.includes('captura') && !n.includes('engajamento') })
               .reduce((s, c) => s + c.spend, 0)
 
-            const leadsCaptura = data.byTag.find(t => t.tag === 'BA25-Captura-Tráfego')?.countPeriod ?? 0
+            const leadsCaptura = data.byTag.find(t => t.tag === `${prefix}-Captura-Tráfego`)?.countPeriod ?? 0
             const totalLeads = data.totalUnique
 
             const cpl  = totalLeads > 0 && gastoCaptura > 0 ? gastoCaptura / totalLeads : null
@@ -990,9 +991,9 @@ export default function TabBA25({
             function leadsForTag(tag: string) {
               return data!.byTag.find(t => t.tag === tag)?.countPeriod ?? 0
             }
-            const leadsTrafico  = leadsForTag('BA25-Captura-Tráfego')
-            const leadsOrganico = leadsForTag('BA25-Captura-Orgânico')
-            const leadsManychat = leadsForTag('BA25-Captura-Manychat')
+            const leadsTrafico  = leadsForTag(`${prefix}-Captura-Tráfego`)
+            const leadsOrganico = leadsForTag(`${prefix}-Captura-Orgânico`)
+            const leadsManychat = leadsForTag(`${prefix}-Captura-Manychat`)
             const totalLeadsRealizados = leadsTrafico + leadsOrganico + leadsManychat
             const totalMetaLeads = goals.metaLeadsTrafico + goals.metaLeadsOrganico + goals.metaLeadsManychat
 
@@ -1018,7 +1019,7 @@ export default function TabBA25({
                 keyword: goals.tagsReferencia.captura,
                 orcamento: goals.orcamentoPorFase.captura,
                 leads: leadsForKeyword(goals.tagsReferencia.captura),
-                spendFn: (k: string) => k.includes('ba25') && k.includes('captura') && !k.includes('engajamento'),
+                spendFn: (k: string) => k.includes(prefix.toLowerCase()) && k.includes('captura') && !k.includes('engajamento'),
               },
               {
                 label: 'Descoberta',
