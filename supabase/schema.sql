@@ -161,6 +161,16 @@ create table if not exists lancamentos (
   orcamento_aquecimento numeric not null default 0,
   orcamento_lembrete   numeric not null default 0,
   orcamento_remarketing numeric not null default 0,
+  -- Tipo de lançamento e produtos vinculados (para metas de venda + cruzamento):
+  --   interno = 3 aulas → captura lead → vende produto principal (ev. downsell)
+  --   pago    = evento pago (ingresso já é venda) → vende produto principal + downsell
+  tipo                    text not null default 'interno' check (tipo in ('interno', 'pago')),
+  produto_ingresso_id     int,                          -- só "pago": o produto do evento
+  produto_principal_id    int,                          -- produto vendido após o lançamento
+  produto_downsell_id     int,                          -- produto de downsell (opcional)
+  meta_vendas_ingresso    int not null default 0,       -- só "pago"
+  meta_vendas_principal   int not null default 0,
+  meta_vendas_downsell    int not null default 0,
   created_at      timestamptz not null default now()
 );
 alter table lancamentos disable row level security;

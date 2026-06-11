@@ -44,13 +44,31 @@ function fmtDate(d: string | null): string {
   return `${day}/${m}/${y.slice(2)}`
 }
 
+// Produtos vinculáveis (mesma lista do Placar). label → product_id.
+const PRODUTOS: Array<{ label: string; id: number }> = [
+  { label: 'Buco Approve', id: 2016048 },
+  { label: 'Intensivo ENARE', id: -2016048 },
+  { label: 'Mentoria CTBMF', id: 3811518 },
+  { label: 'Pós Patologia', id: 5694443 },
+  { label: 'Pós Anatomia', id: 6115663 },
+  { label: 'Planejamento ImpulsoR+', id: 6739963 },
+  { label: 'Renovação de acesso', id: 3510472 },
+  { label: 'Rota Enare', id: 4739673 },
+  { label: 'BucoApp', id: 2286372 },
+  { label: 'Imersão ENARE', id: 7737553 },
+  { label: 'Segurança Clínica por Casos', id: 7812483 },
+  { label: 'Low ticket', id: 6766383 },
+]
+
 const emptyForm = {
-  nome: '', prefixo: '', spend_filter: '', or_filter: '',
+  nome: '', prefixo: '', spend_filter: '', or_filter: '', tipo: 'interno',
   data_inicio: '', captura_inicio: '', captura_fim: '', carrinho_inicio: '', carrinho_fim: '',
   produto_venda: '', survey_sheet_id: '',
   meta_leads_trafico: '', meta_leads_organico: '', meta_leads_manychat: '',
   orcamento_total: '', orcamento_captura: '', orcamento_descoberta: '',
   orcamento_aquecimento: '', orcamento_lembrete: '', orcamento_remarketing: '',
+  produto_ingresso_id: '', produto_principal_id: '', produto_downsell_id: '',
+  meta_vendas_ingresso: '', meta_vendas_principal: '', meta_vendas_downsell: '',
 }
 type FormState = typeof emptyForm
 
@@ -61,15 +79,19 @@ function LancamentoModal({ initial, onClose, onSaved }: {
   onClose: () => void
   onSaved: () => void
 }) {
-  const numStr = (n: number | undefined) => (n && n > 0 ? String(n) : '')
+  const numStr = (n: number | null | undefined) => (n && n > 0 ? String(n) : '')
+  const idStr = (n: number | null | undefined) => (n != null ? String(n) : '')
   const [form, setForm] = useState<FormState>(initial ? {
     nome: initial.nome, prefixo: initial.prefixo, spend_filter: initial.spend_filter, or_filter: initial.or_filter,
+    tipo: initial.tipo ?? 'interno',
     data_inicio: initial.data_inicio ?? '', captura_inicio: initial.captura_inicio ?? '', captura_fim: initial.captura_fim ?? '',
     carrinho_inicio: initial.carrinho_inicio ?? '', carrinho_fim: initial.carrinho_fim ?? '',
     produto_venda: initial.produto_venda ?? '', survey_sheet_id: initial.survey_sheet_id ?? '',
     meta_leads_trafico: numStr(initial.meta_leads_trafico), meta_leads_organico: numStr(initial.meta_leads_organico), meta_leads_manychat: numStr(initial.meta_leads_manychat),
     orcamento_total: numStr(initial.orcamento_total), orcamento_captura: numStr(initial.orcamento_captura), orcamento_descoberta: numStr(initial.orcamento_descoberta),
     orcamento_aquecimento: numStr(initial.orcamento_aquecimento), orcamento_lembrete: numStr(initial.orcamento_lembrete), orcamento_remarketing: numStr(initial.orcamento_remarketing),
+    produto_ingresso_id: idStr(initial.produto_ingresso_id), produto_principal_id: idStr(initial.produto_principal_id), produto_downsell_id: idStr(initial.produto_downsell_id),
+    meta_vendas_ingresso: numStr(initial.meta_vendas_ingresso), meta_vendas_principal: numStr(initial.meta_vendas_principal), meta_vendas_downsell: numStr(initial.meta_vendas_downsell),
   } : emptyForm)
   const [saving, setSaving] = useState(false)
 
@@ -80,11 +102,19 @@ function LancamentoModal({ initial, onClose, onSaved }: {
     setSaving(true)
     const num = (s: string) => parseFloat(s.replace(/\./g, '').replace(',', '.').trim()) || 0
     const int = (s: string) => parseInt(s.trim(), 10) || 0
+    const idOrNull = (s: string) => (s.trim() === '' ? null : parseInt(s.trim(), 10))
     const payload = {
       nome: form.nome.trim(),
       prefixo: form.prefixo.trim(),
       spend_filter: form.spend_filter.trim(),
       or_filter: form.or_filter.trim(),
+      tipo: form.tipo,
+      produto_ingresso_id: idOrNull(form.produto_ingresso_id),
+      produto_principal_id: idOrNull(form.produto_principal_id),
+      produto_downsell_id: idOrNull(form.produto_downsell_id),
+      meta_vendas_ingresso: int(form.meta_vendas_ingresso),
+      meta_vendas_principal: int(form.meta_vendas_principal),
+      meta_vendas_downsell: int(form.meta_vendas_downsell),
       data_inicio: form.data_inicio || null,
       captura_inicio: form.captura_inicio || null,
       captura_fim: form.captura_fim || null,
@@ -138,6 +168,18 @@ function LancamentoModal({ initial, onClose, onSaved }: {
             <input value={form.nome} onChange={e => set('nome', e.target.value)} placeholder="ex: Imersão ENARE" className="text-sm border rounded px-2.5 py-1.5 bg-background" autoFocus />
           </label>
 
+          <div>
+            <span className="text-xs text-muted-foreground block mb-1">Tipo de lançamento</span>
+            <div className="flex gap-2">
+              {([['interno', 'Interno (3 aulas → lead → venda)'], ['pago', 'Pago (evento/ingresso → venda)']] as const).map(([v, lbl]) => (
+                <button key={v} type="button" onClick={() => set('tipo', v)}
+                  className={`flex-1 text-xs px-3 py-2 rounded border transition-colors ${form.tipo === v ? 'bg-primary text-primary-foreground' : 'bg-background hover:bg-muted'}`}>
+                  {lbl}
+                </button>
+              ))}
+            </div>
+          </div>
+
           <div className="grid grid-cols-3 gap-3">
             <label className="flex flex-col gap-1 col-span-1">
               <span className="text-xs text-muted-foreground">Prefixo da campanha</span>
@@ -165,6 +207,44 @@ function LancamentoModal({ initial, onClose, onSaved }: {
               {dateField('Fechamento do carrinho', 'carrinho_fim')}
             </div>
             <p className="text-[11px] text-muted-foreground mt-2">A janela de dados do detalhe vai de <strong>início da captura</strong> a <strong>fechamento do carrinho</strong>.</p>
+          </div>
+
+          <div className="border-t pt-4">
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Produtos & metas de venda (qtd)</p>
+            <div className="space-y-3">
+              {form.tipo === 'pago' && (
+                <div className="grid grid-cols-[2fr_1fr] gap-3">
+                  <label className="flex flex-col gap-1">
+                    <span className="text-xs text-muted-foreground">Produto do ingresso (evento)</span>
+                    <select value={form.produto_ingresso_id} onChange={e => set('produto_ingresso_id', e.target.value)} className="text-sm border rounded px-2 py-1.5 bg-background">
+                      <option value="">—</option>
+                      {PRODUTOS.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
+                    </select>
+                  </label>
+                  {textField('Meta vendas ingresso', 'meta_vendas_ingresso')}
+                </div>
+              )}
+              <div className="grid grid-cols-[2fr_1fr] gap-3">
+                <label className="flex flex-col gap-1">
+                  <span className="text-xs text-muted-foreground">Produto principal</span>
+                  <select value={form.produto_principal_id} onChange={e => set('produto_principal_id', e.target.value)} className="text-sm border rounded px-2 py-1.5 bg-background">
+                    <option value="">—</option>
+                    {PRODUTOS.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
+                  </select>
+                </label>
+                {textField('Meta vendas principal', 'meta_vendas_principal')}
+              </div>
+              <div className="grid grid-cols-[2fr_1fr] gap-3">
+                <label className="flex flex-col gap-1">
+                  <span className="text-xs text-muted-foreground">Produto de downsell (opcional)</span>
+                  <select value={form.produto_downsell_id} onChange={e => set('produto_downsell_id', e.target.value)} className="text-sm border rounded px-2 py-1.5 bg-background">
+                    <option value="">—</option>
+                    {PRODUTOS.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
+                  </select>
+                </label>
+                {textField('Meta vendas downsell', 'meta_vendas_downsell')}
+              </div>
+            </div>
           </div>
 
           <div className="border-t pt-4">
@@ -226,7 +306,12 @@ function LancamentoCard({ l, onOpen, onEdit, onDelete }: {
   return (
     <div className="rounded-lg border bg-card hover:shadow-md transition-shadow group relative">
       <button onClick={onOpen} className="w-full text-left p-4">
-        <h3 className="font-semibold text-base mb-2">{l.nome}</h3>
+        <div className="flex items-center gap-2 mb-2">
+          <h3 className="font-semibold text-base">{l.nome}</h3>
+          <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${l.tipo === 'pago' ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'}`}>
+            {l.tipo === 'pago' ? 'pago' : 'interno'}
+          </span>
+        </div>
         <div className="space-y-1 text-xs text-muted-foreground">
           <div className="flex items-center gap-1.5"><Calendar className="h-3 w-3" /> Captura: {fmtDate(l.captura_inicio)} → {fmtDate(l.captura_fim)}</div>
           <div className="flex items-center gap-1.5"><Calendar className="h-3 w-3" /> Carrinho: {fmtDate(l.carrinho_inicio)} → {fmtDate(l.carrinho_fim)}</div>
