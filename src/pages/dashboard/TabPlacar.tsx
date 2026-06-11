@@ -15,7 +15,14 @@ interface Produto {
   liquido: number
   meta: number | null
   goalName: string
+  gasto: number
+  roas: number | null
   ofertas?: Oferta[]
+}
+interface MetaInfo {
+  totalGasto: number
+  gastoTopo: Record<string, number>
+  campanhas: { campaign: string; conta: string; spend: number; alvo: string; isProduto: boolean }[]
 }
 interface PlacarResp {
   month: string
@@ -24,6 +31,8 @@ interface PlacarResp {
   totalVendas: number
   totalMeta: number
   porCategoria: Record<Categoria, number>
+  meta: MetaInfo | null
+  metaError: string | null
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -153,13 +162,19 @@ function ProdutoRow({ p, stripe, month, onMeta }: { p: Produto; stripe: boolean;
             </span>
           ) : '—'}
         </td>
+        <td className="px-4 py-2.5 text-right text-muted-foreground">{p.gasto > 0 ? fmtBRL(p.gasto) : '—'}</td>
+        <td className="px-4 py-2.5 text-right">
+          {p.roas !== null ? (
+            <span className={p.roas >= 1 ? 'text-green-600 font-medium' : 'text-red-600'}>{p.roas.toFixed(2)}x</span>
+          ) : '—'}
+        </td>
       </tr>
       {open && p.ofertas?.map(o => (
         <tr key={o.code} className="border-b bg-muted/5 text-xs text-muted-foreground">
           <td className="pl-10 py-1.5 italic">oferta {o.code}</td>
           <td className="px-4 py-1.5 text-right">{o.vendas}</td>
           <td className="px-4 py-1.5 text-right">{fmtBRL(o.liquido)}</td>
-          <td colSpan={2} />
+          <td colSpan={4} />
         </tr>
       ))}
     </>
@@ -219,6 +234,10 @@ export default function TabPlacar({ token, enabled }: Props) {
   }
 
   const produtos = data?.produtos ?? []
+  const gastoProdutos = produtos.reduce((s, p) => s + p.gasto, 0)
+  const totalGasto = data?.meta?.totalGasto ?? 0
+  const gastoTopo = data?.meta?.gastoTopo ?? {}
+  const topoEntries = Object.entries(gastoTopo).sort(([, a], [, b]) => b - a)
 
   return (
     <div className="space-y-6">
@@ -272,16 +291,24 @@ export default function TabPlacar({ token, enabled }: Props) {
       {data && (
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
           {[
-            { label: 'Líquido core',  value: fmtBRL(data.porCategoria.core) },
-            { label: 'Portas (Imersão/Quiz)', value: fmtBRL(data.porCategoria.porta) },
-            { label: 'Low ticket',    value: fmtBRL(data.porCategoria.low) },
-            { label: 'Vendas',        value: String(data.totalVendas) },
+            { label: 'Vendas',         value: String(data.totalVendas), sub: null },
+            { label: 'Gasto total (2 contas)', value: totalGasto > 0 ? fmtBRL(totalGasto) : '—', sub: gastoProdutos > 0 ? `${fmtBRL(gastoProdutos)} em produtos` : null },
+            { label: 'ROAS geral',     value: gastoProdutos > 0 ? `${(totalLiquido / gastoProdutos).toFixed(2)}x` : '—', sub: 'líquido ÷ gasto produtos' },
+            { label: 'Low ticket',     value: fmtBRL(data.porCategoria.low), sub: null },
           ].map(c => (
             <div key={c.label} className="rounded-lg border bg-card p-4">
               <p className="text-xs text-muted-foreground mb-1">{c.label}</p>
               <p className="text-xl font-bold">{c.value}</p>
+              {c.sub && <p className="text-xs text-muted-foreground mt-0.5">{c.sub}</p>}
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Aviso se o gasto Meta falhou */}
+      {data?.metaError && (
+        <div className="rounded-md bg-yellow-50 border border-yellow-200 px-4 py-2.5 text-xs text-yellow-800">
+          ⚠️ Gasto Meta indisponível ({data.metaError}). Verifique <code>META_AD_ACCOUNTS</code> e <code>META_ACCESS_TOKEN</code> no Vercel.
         </div>
       )}
 
@@ -296,6 +323,8 @@ export default function TabPlacar({ token, enabled }: Props) {
                 <th className="text-right px-4 py-2.5 font-medium">Líquido</th>
                 <th className="text-right px-4 py-2.5 font-medium">Meta</th>
                 <th className="text-right px-4 py-2.5 font-medium">% Meta</th>
+                <th className="text-right px-4 py-2.5 font-medium">Gasto</th>
+                <th className="text-right px-4 py-2.5 font-medium">ROAS</th>
               </tr>
             </thead>
             <tbody>
@@ -310,8 +339,31 @@ export default function TabPlacar({ token, enabled }: Props) {
                 <td className="px-4 py-2.5 text-right">
                   {pctMeta !== null ? <span className={pctMeta >= 100 ? 'text-green-600' : ''}>{pctMeta.toFixed(0)}%</span> : '—'}
                 </td>
+                <td className="px-4 py-2.5 text-right">{gastoProdutos > 0 ? fmtBRL(gastoProdutos) : '—'}</td>
+                <td className="px-4 py-2.5 text-right">
+                  {gastoProdutos > 0 ? <span className={totalLiquido / gastoProdutos >= 1 ? 'text-green-600' : 'text-red-600'}>{(totalLiquido / gastoProdutos).toFixed(2)}x</span> : '—'}
+                </td>
               </tr>
             </tfoot>
+          </table>
+        </div>
+      )}
+
+      {/* Topo de funil: gasto que não é venda direta de produto */}
+      {topoEntries.length > 0 && (
+        <div className="rounded-lg border bg-card overflow-hidden">
+          <div className="px-4 py-2 bg-muted/50 border-b text-sm font-semibold">
+            Topo de funil <span className="font-normal text-muted-foreground">— gasto sem venda direta de produto</span>
+          </div>
+          <table className="w-full text-sm">
+            <tbody>
+              {topoEntries.map(([nome, spend], i) => (
+                <tr key={nome} className={`border-b last:border-0 ${i % 2 !== 0 ? 'bg-muted/20' : ''}`}>
+                  <td className="px-4 py-2 text-muted-foreground">{nome}</td>
+                  <td className="px-4 py-2 text-right">{fmtBRL(spend)}</td>
+                </tr>
+              ))}
+            </tbody>
           </table>
         </div>
       )}

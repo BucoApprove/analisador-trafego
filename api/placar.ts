@@ -14,6 +14,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { authUser, requireAdmin } from './_supabase-auth.js'
 import { fetchHotmartLiquido } from './_hotmart-liquido.js'
 import { fetchAllGoals } from './_goals.js'
+import { fetchMetaGasto } from './_meta-gasto.js'
 import { GOAL_NAME_BY_CANON } from './_produtos-canonicos.js'
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -27,24 +28,47 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const month = monthParam || `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
 
   try {
-    const [hotmart, allGoals] = await Promise.all([
+    // Gasto Meta é opcional: se falhar (env não configurada, token), a aba
+    // continua mostrando Hotmart sem quebrar. Erro vai em `metaError`.
+    const metaGastoPromise = fetchMetaGasto(month).catch((e: Error) => {
+      console.error('placar meta-gasto error:', e.message)
+      return { erro: e.message } as const
+    })
+
+    const [hotmart, allGoals, metaResult] = await Promise.all([
       fetchHotmartLiquido(month),
       fetchAllGoals(month),
+      metaGastoPromise,
     ])
 
-    // Anexa a meta a cada produto. goalName = chave usada na tabela monthly_goals:
-    //   - produto que casa no de/para → nome antigo (ex: Low ticket → Low tickets)
-    //   - produto novo → o próprio nome canônico (ex: Imersão ENARE)
-    // Assim a edição de meta no Placar grava na mesma tabela da Metas Mensais.
+    const meta = 'erro' in metaResult ? null : metaResult
+    const gastoPorProduto = meta?.gastoPorProduto ?? {}
+
+    // Anexa meta, gasto e ROAS a cada produto.
+    //   goalName = chave em monthly_goals (de/para p/ produtos antigos, nome
+    //   canônico p/ novos) — edição no Placar sincroniza com a Metas Mensais.
     const produtos = hotmart.produtos.map(p => {
       const goalName = GOAL_NAME_BY_CANON[p.nome] ?? p.nome
-      const meta = allGoals.get(goalName) ?? null
-      return { ...p, meta, goalName }
+      const metaVal = allGoals.get(goalName) ?? null
+      const gasto = gastoPorProduto[p.nome] ?? 0
+      const roas = gasto > 0 ? Math.round((p.liquido / gasto) * 100) / 100 : null
+      return { ...p, meta: metaVal, goalName, gasto, roas }
     })
 
     const totalMeta = produtos.reduce((s, p) => s + (p.meta ?? 0), 0)
 
-    res.json({ month, ...hotmart, produtos, totalMeta })
+    res.json({
+      month,
+      ...hotmart,
+      produtos,
+      totalMeta,
+      meta: meta ? {
+        totalGasto: meta.totalGasto,
+        gastoTopo: meta.gastoTopo,
+        campanhas: meta.campanhas,
+      } : null,
+      metaError: 'erro' in metaResult ? metaResult.erro : null,
+    })
   } catch (err) {
     console.error('placar error:', err)
     res.status(500).json({ error: 'Erro interno', detail: (err as Error).message })
