@@ -7,7 +7,7 @@ import {
 } from 'lucide-react'
 import TabVisaoGeral from './TabVisaoGeral'
 import TabLancamento from './TabLancamento'
-import TabBA25 from './TabBA25'
+import TabLancamentos from './TabLancamentos'
 import TabLeads from './TabLeads'
 import TabInscritos from './TabInscritos'
 import TabInstagram from './TabInstagram'
@@ -58,7 +58,7 @@ const USER_NAV: NavItem[] = [
   { id: 'analises',    label: 'Análises',    icon: Activity     },
   { id: 'utm-leads',   label: 'UTMs Leads',  icon: Tags         },
   { id: 'report',      label: 'Relatório IA', icon: Link         },
-  { id: 'ba25',        label: 'BA25 🚀',     icon: BarChart2    },
+  { id: 'lancamentos', label: 'Lançamentos', icon: BarChart2    },
 ]
 
 const ADMIN_NAV: NavItem[] = [
@@ -271,8 +271,8 @@ export default function DashboardLayout({ token, role, userName, onLogout }: Das
 
           {/* Tab content (no TabsList — sidebar is the nav) */}
           <Tabs value={activeTab} onValueChange={setActiveTab}>
-            <TabsContent value="ba25" className="mt-0">
-              <TabBA25 token={token} enabled={activeTab === 'ba25'} />
+            <TabsContent value="lancamentos" className="mt-0">
+              <TabLancamentos token={token} enabled={activeTab === 'lancamentos'} />
             </TabsContent>
             <TabsContent value="visao-geral" className="mt-0">
               <TabVisaoGeral token={token} enabled={activeTab === 'visao-geral'} />

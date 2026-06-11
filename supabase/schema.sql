@@ -131,3 +131,24 @@ alter table product_mappings disable row level security;
 -- Nota: o matching campanha → produto da aba Placar reusa a tabela existente
 -- campaign_produto_map (account, prefixo, produto_ids[], label), editável em
 -- "Produtos/Campanhas" (TabConfigProdutos). Não há tabela própria do Placar.
+
+-- ─────────────────────────────────────────────────────────────────────────────
+
+-- Lançamentos (aba "Lançamentos"). Cada lançamento guarda os parâmetros para
+-- puxar os dados (prefixo de campanha + filtros) e as datas-marco do funil.
+-- A janela de dados do detalhe = captura_inicio → carrinho_fim.
+create table if not exists lancamentos (
+  id              uuid primary key default gen_random_uuid(),
+  nome            text not null,
+  prefixo         text not null default '',       -- prefixo do nome da campanha (ex: BA25)
+  spend_filter    text not null default '',       -- keywords AND p/ gasto Meta
+  or_filter       text not null default '',       -- keywords OR p/ gasto Meta
+  data_inicio     date,                            -- início geral do lançamento
+  captura_inicio  date,                            -- início da captura
+  captura_fim     date,                            -- fim da captura
+  carrinho_inicio date,                            -- abertura do carrinho
+  carrinho_fim    date,                            -- fechamento do carrinho
+  ordem           int not null default 0,          -- ordenação dos cards
+  created_at      timestamptz not null default now()
+);
+alter table lancamentos disable row level security;

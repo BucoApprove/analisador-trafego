@@ -13,12 +13,23 @@ import {
 } from 'recharts'
 import { RefreshCw, ChevronDown } from 'lucide-react'
 
-interface Props { token: string; enabled: boolean }
+interface Props {
+  token: string
+  enabled: boolean
+  // Parâmetros do lançamento (default = BA25, para retrocompatibilidade).
+  prefix?: string
+  spendFilter?: string
+  orFilter?: string
+  defaultSince?: string
+  defaultUntil?: string
+  nome?: string
+}
 
 const FIXED_PREFIX = 'BA25'
 const FIXED_SPEND_FILTER = 'BA25'
 const FIXED_OR_FILTER = 'instagram,engajamento,lembrete,remarketing'
 const FIXED_SINCE = '2026-03-13'
+const FIXED_UNTIL = '2026-04-22'
 
 
 function makeGetCpl(map: Record<string, number> | undefined) {
@@ -492,9 +503,16 @@ function TopAdsBlock({
   )
 }
 
-export default function TabBA25({ token, enabled }: Props) {
-  const [since, setSince] = useState(FIXED_SINCE)
-  const [until, setUntil] = useState('2026-04-22')
+export default function TabBA25({
+  token, enabled,
+  prefix = FIXED_PREFIX,
+  spendFilter = FIXED_SPEND_FILTER,
+  orFilter = FIXED_OR_FILTER,
+  defaultSince = FIXED_SINCE,
+  defaultUntil = FIXED_UNTIL,
+}: Props) {
+  const [since, setSince] = useState(defaultSince)
+  const [until, setUntil] = useState(defaultUntil)
   const [data, setData] = useState<LaunchData | null>(null)
   const [status, setStatus] = useState<'idle' | 'loading' | 'error'>('idle')
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
@@ -543,8 +561,8 @@ export default function TabBA25({ token, enabled }: Props) {
     try {
       const headers = { Authorization: `Bearer ${token}` }
       const nc = force ? '&nocache=1' : ''
-      const bqUrl = `/api/launch-data?prefix=${encodeURIComponent(FIXED_PREFIX)}&since=${since}&until=${until}&broadSearch=true${nc}`
-      const metaUrl = `/api/meta-spend?since=${since}&until=${until}&spendFilter=${encodeURIComponent(FIXED_SPEND_FILTER)}&orFilter=${encodeURIComponent(FIXED_OR_FILTER)}${nc}`
+      const bqUrl = `/api/launch-data?prefix=${encodeURIComponent(prefix)}&since=${since}&until=${until}&broadSearch=true${nc}`
+      const metaUrl = `/api/meta-spend?since=${since}&until=${until}&spendFilter=${encodeURIComponent(spendFilter)}&orFilter=${encodeURIComponent(orFilter)}${nc}`
 
       const salesUrl  = `/api/launch-sales-utms?since=${since}&until=${until}${nc}`
       const surveyUrl  = `/api/survey-buyers?since=${since}&until=${until}${nc}`
@@ -736,7 +754,13 @@ export default function TabBA25({ token, enabled }: Props) {
       setStatus('error')
       setErrorMsg((e as Error).message)
     }
-  }, [since, until, token])
+  }, [since, until, token, prefix, spendFilter, orFilter])
+
+  // Reseta a janela de datas quando troca de lançamento (defaults mudam).
+  useEffect(() => {
+    setSince(defaultSince)
+    setUntil(defaultUntil)
+  }, [defaultSince, defaultUntil])
 
   useEffect(() => {
     if (enabled) loadGoals()
@@ -794,7 +818,7 @@ export default function TabBA25({ token, enabled }: Props) {
             </span>
           )}
           <div className="flex gap-2 ml-auto text-xs text-muted-foreground items-center">
-            <span className="rounded-full bg-muted px-2 py-0.5 font-mono">Prefixo: {FIXED_PREFIX}</span>
+            <span className="rounded-full bg-muted px-2 py-0.5 font-mono">Prefixo: {prefix}</span>
             <span className="rounded-full bg-muted px-2 py-0.5 font-mono">Meta: todas campanhas BA25</span>
             <span className="rounded-full bg-muted px-2 py-0.5">Busca ampliada ✓</span>
           </div>

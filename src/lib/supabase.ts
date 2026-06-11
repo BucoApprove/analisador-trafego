@@ -50,3 +50,18 @@ export interface ProductMapping {
   product_name: string
   updated_at: string
 }
+
+export interface Lancamento {
+  id: string
+  nome: string
+  prefixo: string
+  spend_filter: string
+  or_filter: string
+  data_inicio: string | null
+  captura_inicio: string | null
+  captura_fim: string | null
+  carrinho_inicio: string | null
+  carrinho_fim: string | null
+  ordem: number
+  created_at: string
+}
