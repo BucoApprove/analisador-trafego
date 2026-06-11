@@ -26,6 +26,7 @@ interface Props {
   productFilter?: string   // filtro LIKE de produto de venda (default BucoApprove)
   surveySheetId?: string   // planilha de pesquisa de boas-vindas
   goalsOverride?: GoalsData | null  // metas vindas do lançamento (substitui /api/goals-data)
+  tipo?: 'interno' | 'pago' // pago mostra CPV (custo por venda) nas UTMs
 }
 
 const FIXED_PREFIX = 'BA25'
@@ -41,6 +42,21 @@ function makeGetCpl(map: Record<string, number> | undefined) {
     const spend = map[name]
     if (spend == null || leads === 0) return null
     return Math.round((spend / leads) * 100) / 100
+  }
+}
+
+// CPV (custo por venda): gasto da UTM ÷ vendas atribuídas (last-touch) a ela.
+function makeGetCpv(
+  spendMap: Record<string, number> | undefined,
+  salesRows: UtmSalesAttribution[] | undefined,
+) {
+  if (!spendMap || !salesRows) return undefined
+  const salesByName = new Map(salesRows.map(s => [s.name.toLowerCase(), s.lastBefore]))
+  return (name: string): number | null => {
+    const spend = spendMap[name]
+    const vendas = salesByName.get(name.toLowerCase()) ?? 0
+    if (spend == null || vendas === 0) return null
+    return Math.round((spend / vendas) * 100) / 100
   }
 }
 
@@ -519,6 +535,7 @@ export default function TabBA25({
   productFilter = '',
   surveySheetId = '',
   goalsOverride,
+  tipo = 'interno',
 }: Props) {
   const [since, setSince] = useState(defaultSince)
   const [until, setUntil] = useState(defaultUntil)
@@ -1443,6 +1460,7 @@ export default function TabBA25({
                     color={CHART_COLORS[0]}
                     getCpl={makeGetCpl(data.spendByUtm?.source)}
                     cplNote="CPL calculado a partir do gasto real dos anúncios com esse utm_source no período."
+                    getCpv={tipo === 'pago' ? makeGetCpv(data.spendByUtm?.source, salesUtmData?.bySource) : undefined}
                     salesRows={salesUtmData?.bySource}
                     totalBuyers={salesUtmData?.totalBuyers}
                   />
@@ -1456,6 +1474,7 @@ export default function TabBA25({
                     hint="Corresponde ao nome do conjunto de anúncios (adset), ex: Env7d_Visitantes180d."
                     getCpl={makeGetCpl(data.spendByUtm?.medium)}
                     cplNote="CPL calculado a partir do gasto real por conjunto de anúncios (adset) no período."
+                    getCpv={tipo === 'pago' ? makeGetCpv(data.spendByUtm?.medium, salesUtmData?.byMedium) : undefined}
                     salesRows={salesUtmData?.byMedium}
                     totalBuyers={salesUtmData?.totalBuyers}
                   />
@@ -1468,6 +1487,7 @@ export default function TabBA25({
                     color={CHART_COLORS[2]}
                     getCpl={makeGetCpl(data.spendByUtm?.campaign)}
                     cplNote="CPL calculado a partir do gasto real da campanha no período."
+                    getCpv={tipo === 'pago' ? makeGetCpv(data.spendByUtm?.campaign, salesUtmData?.byCampaign) : undefined}
                     salesRows={salesUtmData?.byCampaign}
                     totalBuyers={salesUtmData?.totalBuyers}
                   />
@@ -1481,6 +1501,7 @@ export default function TabBA25({
                     hint="Corresponde ao nome do anúncio (ad), ex: Ad_Captura_22."
                     getCpl={makeGetCpl(data.spendByUtm?.content)}
                     cplNote="CPL calculado a partir do gasto real por anúncio no período."
+                    getCpv={tipo === 'pago' ? makeGetCpv(data.spendByUtm?.content, salesUtmData?.byContent) : undefined}
                     salesRows={salesUtmData?.byContent}
                     totalBuyers={salesUtmData?.totalBuyers}
                   />

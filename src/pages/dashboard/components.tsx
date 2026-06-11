@@ -141,6 +141,7 @@ export function UtmTable({
   hint,
   getCpl,
   cplNote,
+  getCpv,
   salesRows,
   totalBuyers,
 }: {
@@ -151,6 +152,7 @@ export function UtmTable({
   hint?: string
   getCpl?: (name: string, leads: number) => number | null
   cplNote?: string
+  getCpv?: (name: string) => number | null  // custo por venda: gasto da UTM ÷ vendas dela
   salesRows?: UtmSalesAttribution[]
   totalBuyers?: number
 }) {
@@ -200,6 +202,7 @@ export function UtmTable({
                   Vendas
                 </th>
               )}
+              {getCpv && <th className="px-3 py-2 text-right font-medium" title="Custo por venda: gasto da UTM ÷ vendas atribuídas">CPV</th>}
               <th className="px-3 py-2 w-24"></th>
             </tr>
           </thead>
@@ -207,6 +210,7 @@ export function UtmTable({
             {filtered.map(r => {
               const pct = total > 0 ? (r.value / total) * 100 : 0
               const cpl = getCpl ? getCpl(r.name, r.value) : null
+              const cpv = getCpv ? getCpv(r.name) : null
               const sales = hasSales ? salesMap.get(r.name.toLowerCase()) : null
               return (
                 <tr key={r.name} className="hover:bg-muted/40">
@@ -233,6 +237,13 @@ export function UtmTable({
                           </span>
                         )
                         : <span className="text-muted-foreground">— / — / —</span>}
+                    </td>
+                  )}
+                  {getCpv && (
+                    <td className="px-3 py-1.5 text-right tabular-nums">
+                      {cpv != null
+                        ? <span className="font-medium" style={{ color: CHART_COLORS[3] }}>R$ {cpv.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                        : <span className="text-muted-foreground">—</span>}
                     </td>
                   )}
                   <td className="px-3 py-1.5">

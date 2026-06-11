@@ -464,6 +464,7 @@ export default function TabLancamentos({ token, enabled }: Props) {
           productFilter={selected.produto_venda}
           surveySheetId={selected.survey_sheet_id}
           goalsOverride={goalsFromLancamento(selected)}
+          tipo={selected.tipo}
         />
       </div>
     )
