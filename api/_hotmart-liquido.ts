@@ -43,7 +43,7 @@ async function getToken(): Promise<string> {
 
 interface SaleItem {
   product?: { id: number; name: string }
-  purchase?: { transaction?: string; offer?: { code?: string }; price?: { currency_code?: string } }
+  purchase?: { transaction?: string; offer?: { code?: string }; price?: { currency_code?: string }; order_date?: number; approved_date?: number }
   transaction?: string
 }
 
@@ -164,7 +164,10 @@ export async function fetchHotmartLiquido(month: string): Promise<HotmartLiquido
 export async function fetchVendasPorProdutoRange(
   since: string,
   until: string,
-): Promise<Record<string, { vendas: number; liquido: number }>> {
+): Promise<{
+  totais: Record<string, { vendas: number; liquido: number }>
+  diario: Record<string, Record<string, number>>  // nome → { 'YYYY-MM-DD': vendas }
+}> {
   const startMs = new Date(`${since}T00:00:00`).getTime()
   const endMs = new Date(`${until}T23:59:59`).getTime()
   const token = await getToken()
@@ -185,17 +188,24 @@ export async function fetchVendasPorProdutoRange(
     paginate<SaleItem>(`https://developers.hotmart.com/payments/api/v1/sales/history?transaction_status=COMPLETE&${base}`, token),
   ])
   const seen = new Set<string>()
-  const out: Record<string, { vendas: number; liquido: number }> = {}
+  const totais: Record<string, { vendas: number; liquido: number }> = {}
+  const diario: Record<string, Record<string, number>> = {}
   for (const it of [...appr, ...compl]) {
     const tx = it.purchase?.transaction ?? it.transaction ?? ''
     if (tx && seen.has(tx)) continue
     if (tx) seen.add(tx)
     if ((it.purchase?.price?.currency_code ?? 'BRL') !== 'BRL') continue
     const canon = classifyProduto(it.product?.id ?? 0, it.purchase?.offer?.code)
-    const row = out[canon.nome] ?? { vendas: 0, liquido: 0 }
+    const row = totais[canon.nome] ?? { vendas: 0, liquido: 0 }
     row.vendas++; row.liquido += producerByTx.get(tx) ?? 0
-    out[canon.nome] = row
+    totais[canon.nome] = row
+    // quebra diária pela data da compra (order_date; fallback approved_date)
+    const ts = it.purchase?.order_date ?? it.purchase?.approved_date
+    if (ts) {
+      const dia = new Date(ts).toISOString().slice(0, 10)
+      ;(diario[canon.nome] ??= {})[dia] = (diario[canon.nome][dia] ?? 0) + 1
+    }
   }
-  for (const k of Object.keys(out)) out[k].liquido = round(out[k].liquido)
-  return out
+  for (const k of Object.keys(totais)) totais[k].liquido = round(totais[k].liquido)
+  return { totais, diario }
 }

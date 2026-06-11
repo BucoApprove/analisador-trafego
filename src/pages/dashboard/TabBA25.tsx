@@ -28,6 +28,8 @@ interface Props {
   goalsOverride?: GoalsData | null  // metas vindas do lançamento (substitui /api/goals-data)
   tipo?: 'interno' | 'pago' // pago mostra CPV (custo por venda) nas UTMs
   slotAfterMetas?: React.ReactNode  // conteúdo extra renderizado após "Metas × Realizado"
+  // No pago, o card do topo mostra vendas (do ingresso) em vez de leads.
+  vendasResumo?: { total: number; meta: number; diario: { date: string; vendas: number }[] } | null
 }
 
 const FIXED_PREFIX = 'BA25'
@@ -553,7 +555,9 @@ export default function TabBA25({
   goalsOverride,
   tipo = 'interno',
   slotAfterMetas,
+  vendasResumo,
 }: Props) {
+  const pagoComVendas = tipo === 'pago' && !!vendasResumo
   const [since, setSince] = useState(defaultSince)
   const [until, setUntil] = useState(defaultUntil)
   const [data, setData] = useState<LaunchData | null>(null)
@@ -898,7 +902,13 @@ export default function TabBA25({
             </div>
 
             <div className="flex flex-wrap gap-px border-b">
-              {[
+              {(pagoComVendas ? [
+                // Lançamento pago: foco em vendas (do ingresso), não leads.
+                { label: 'Total vendas', value: vendasResumo!.total.toLocaleString('pt-BR'), color: CHART_COLORS[1], sub: 'ingresso, no período' },
+                { label: 'Meta de vendas', value: vendasResumo!.meta > 0 ? vendasResumo!.meta.toLocaleString('pt-BR') : '—', color: CHART_COLORS[0], sub: 'ingresso' },
+                { label: '% da meta', value: vendasResumo!.meta > 0 ? `${Math.round((vendasResumo!.total / vendasResumo!.meta) * 100)}%` : '—', color: '#7c9885', sub: 'realizado ÷ meta' },
+                { label: 'Leads no período', value: data.totalUnique.toLocaleString('pt-BR'), color: '#888', sub: 'tags + UTM' },
+              ] : [
                 { label: 'Total leads', value: data.totalUniqueAll.toLocaleString('pt-BR'), color: CHART_COLORS[1], sub: 'histórico (tags + UTM)' },
                 { label: 'No período', value: data.totalUnique.toLocaleString('pt-BR'), color: CHART_COLORS[0], sub: data.dateRange.since + ' → ' + data.dateRange.until },
                 { label: 'Soma bruta', value: data.sumByTag.toLocaleString('pt-BR'), color: '#888', sub: 'c/ duplicatas (tags)' },
@@ -907,7 +917,7 @@ export default function TabBA25({
                   { label: 'Vendas c/ interação', value: interactionStats.with.toLocaleString('pt-BR'), color: CHART_COLORS[1], sub: 'lead captado no período → comprou' },
                   { label: 'Vendas s/ interação', value: interactionStats.without.toLocaleString('pt-BR'), color: CHART_COLORS[3], sub: 'comprou sem lead no período' },
                 ] : []),
-              ].map(s => (
+              ]).map(s => (
                 <div key={s.label} className="flex-1 min-w-[100px] px-4 py-2">
                   <p className="text-[10px] text-muted-foreground">{s.label}</p>
                   <p className="text-lg font-bold tabular-nums leading-tight" style={{ color: s.color }}>{s.value}</p>
@@ -952,8 +962,21 @@ export default function TabBA25({
                 </tbody>
               </table>
 
-              {/* Gráfico */}
-              {data.leadsByDay.length > 0 ? (
+              {/* Gráfico: vendas diárias (pago) ou captação de leads (interno) */}
+              {pagoComVendas && (vendasResumo!.diario.length > 0) ? (
+                <div className="p-3">
+                  <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1">Vendas diárias (ingresso)</p>
+                  <ResponsiveContainer width="100%" height={120}>
+                    <LineChart data={vendasResumo!.diario} margin={{ top: 2, right: 8, left: -24, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
+                      <XAxis dataKey="date" tick={{ fontSize: 9 }} tickFormatter={v => v.slice(5)} />
+                      <YAxis tick={{ fontSize: 9 }} allowDecimals={false} />
+                      <Tooltip content={<ChartTooltip />} />
+                      <Line type="monotone" dataKey="vendas" name="Vendas" stroke={CHART_COLORS[1]} strokeWidth={2} dot={false} activeDot={{ r: 3 }} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              ) : data.leadsByDay.length > 0 ? (
                 <div className="p-3">
                   <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1">Captação diária</p>
                   <ResponsiveContainer width="100%" height={120}>

@@ -415,6 +415,53 @@ function VendasProdutoBlock({ token, l }: { token: string; l: Lancamento }) {
   )
 }
 
+// ─── Detalhe do lançamento (busca resumo de vendas do ingresso p/ o card) ────
+
+function DetalheLancamento({ token, l }: { token: string; l: Lancamento }) {
+  const [vendasResumo, setVendasResumo] = useState<{ total: number; meta: number; diario: { date: string; vendas: number }[] } | null>(null)
+
+  const ingSince = l.captura_inicio ?? l.data_inicio ?? ''
+  const ingUntil = l.carrinho_fim ?? ''
+
+  useEffect(() => {
+    if (l.tipo !== 'pago' || !ingSince || !ingUntil || l.produto_ingresso_id == null) {
+      setVendasResumo(null)
+      return
+    }
+    const nome = ID_TO_NOME[l.produto_ingresso_id] ?? ''
+    fetch(`/api/lancamento-vendas?since=${ingSince}&until=${ingUntil}`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : Promise.reject(new Error(String(r.status))))
+      .then(j => {
+        const total = j.vendasPorProduto?.[nome]?.vendas ?? 0
+        const diarioObj: Record<string, number> = j.diarioPorProduto?.[nome] ?? {}
+        const diario = Object.entries(diarioObj)
+          .map(([date, vendas]) => ({ date, vendas: vendas as number }))
+          .sort((a, b) => a.date.localeCompare(b.date))
+        setVendasResumo({ total, meta: l.meta_vendas_ingresso, diario })
+      })
+      .catch(() => setVendasResumo(null))
+  }, [token, l.tipo, ingSince, ingUntil, l.produto_ingresso_id, l.meta_vendas_ingresso])
+
+  return (
+    <TabBA25
+      slotAfterMetas={<VendasProdutoBlock token={token} l={l} />}
+      token={token}
+      enabled={true}
+      prefix={l.prefixo}
+      spendFilter={l.spend_filter}
+      orFilter={l.or_filter}
+      defaultSince={l.captura_inicio ?? l.data_inicio ?? ''}
+      defaultUntil={l.carrinho_fim ?? ''}
+      nome={l.nome}
+      productFilter={l.produto_venda}
+      surveySheetId={l.survey_sheet_id}
+      goalsOverride={goalsFromLancamento(l)}
+      tipo={l.tipo}
+      vendasResumo={vendasResumo}
+    />
+  )
+}
+
 // ─── Card de lançamento ──────────────────────────────────────────────────────
 
 function LancamentoCard({ l, onOpen, onEdit, onDelete }: {
@@ -477,21 +524,7 @@ export default function TabLancamentos({ token, enabled }: Props) {
         <button onClick={() => setSelected(null)} className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
           <ChevronLeft className="h-4 w-4" /> Voltar aos lançamentos
         </button>
-        <TabBA25
-          slotAfterMetas={<VendasProdutoBlock token={token} l={selected} />}
-          token={token}
-          enabled={true}
-          prefix={selected.prefixo}
-          spendFilter={selected.spend_filter}
-          orFilter={selected.or_filter}
-          defaultSince={selected.captura_inicio ?? selected.data_inicio ?? ''}
-          defaultUntil={selected.carrinho_fim ?? ''}
-          nome={selected.nome}
-          productFilter={selected.produto_venda}
-          surveySheetId={selected.survey_sheet_id}
-          goalsOverride={goalsFromLancamento(selected)}
-          tipo={selected.tipo}
-        />
+        <DetalheLancamento token={token} l={selected} />
       </div>
     )
   }
