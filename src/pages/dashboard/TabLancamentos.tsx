@@ -299,30 +299,42 @@ function LancamentoModal({ initial, onClose, onSaved }: {
 
 const ID_TO_NOME: Record<number, string> = Object.fromEntries(PRODUTOS.map(p => [p.id, p.label]))
 
+type VendasMap = Record<string, { vendas: number; liquido: number }>
+
 function VendasProdutoBlock({ token, l }: { token: string; l: Lancamento }) {
-  const [vendas, setVendas] = useState<Record<string, { vendas: number; liquido: number }> | null>(null)
+  // Duas janelas: ingresso vende no período do evento (captura→carrinho_fim);
+  // produto principal/downsell só a partir da abertura do carrinho.
+  const ingSince = l.captura_inicio ?? l.data_inicio ?? ''
+  const ingUntil = l.carrinho_fim ?? ''
+  const prodSince = l.carrinho_inicio ?? ''
+  const prodUntil = l.carrinho_fim ?? ''
+
+  const [vendasIngresso, setVendasIngresso] = useState<VendasMap | null>(null)
+  const [vendasProduto, setVendasProduto] = useState<VendasMap | null>(null)
   const [loading, setLoading] = useState(true)
 
-  const since = l.captura_inicio ?? l.data_inicio ?? ''
-  const until = l.carrinho_fim ?? ''
-
   useEffect(() => {
-    if (!since || !until) { setLoading(false); return }
     setLoading(true)
-    fetch(`/api/lancamento-vendas?since=${since}&until=${until}`, { headers: { Authorization: `Bearer ${token}` } })
-      .then(r => r.ok ? r.json() : Promise.reject(new Error(String(r.status))))
-      .then(j => setVendas(j.vendasPorProduto ?? {}))
-      .catch(() => setVendas({}))
+    const get = (since: string, until: string): Promise<VendasMap> =>
+      (!since || !until) ? Promise.resolve({})
+        : fetch(`/api/lancamento-vendas?since=${since}&until=${until}`, { headers: { Authorization: `Bearer ${token}` } })
+            .then(r => r.ok ? r.json() : Promise.reject(new Error(String(r.status))))
+            .then(j => j.vendasPorProduto ?? {})
+            .catch(() => ({}))
+    Promise.all([get(ingSince, ingUntil), get(prodSince, prodUntil)])
+      .then(([ing, prod]) => { setVendasIngresso(ing); setVendasProduto(prod) })
       .finally(() => setLoading(false))
-  }, [token, since, until])
+  }, [token, ingSince, ingUntil, prodSince, prodUntil])
 
   const fmtBRL = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 
-  // Linhas conforme o tipo: pago = ingresso + principal + downsell; interno = principal + downsell.
-  const linhas: { papel: string; id: number | null; metaQtd: number }[] = [
-    ...(l.tipo === 'pago' ? [{ papel: 'Ingresso', id: l.produto_ingresso_id, metaQtd: l.meta_vendas_ingresso }] : []),
-    { papel: 'Produto principal', id: l.produto_principal_id, metaQtd: l.meta_vendas_principal },
-    { papel: 'Downsell', id: l.produto_downsell_id, metaQtd: l.meta_vendas_downsell },
+  // Linhas: ingresso (só pago, janela do evento) + principal + downsell (janela do carrinho).
+  const linhas: { papel: string; id: number | null; metaQtd: number; vendas: VendasMap | null; janela: string }[] = [
+    ...(l.tipo === 'pago'
+      ? [{ papel: 'Ingresso', id: l.produto_ingresso_id, metaQtd: l.meta_vendas_ingresso, vendas: vendasIngresso, janela: `${ingSince} → ${ingUntil}` }]
+      : []),
+    { papel: 'Produto principal', id: l.produto_principal_id, metaQtd: l.meta_vendas_principal, vendas: vendasProduto, janela: prodSince ? `${prodSince} → ${prodUntil}` : '—' },
+    { papel: 'Downsell', id: l.produto_downsell_id, metaQtd: l.meta_vendas_downsell, vendas: vendasProduto, janela: prodSince ? `${prodSince} → ${prodUntil}` : '—' },
   ].filter(r => r.id != null)
 
   if (linhas.length === 0) return null
@@ -332,7 +344,7 @@ function VendasProdutoBlock({ token, l }: { token: string; l: Lancamento }) {
       <div className="px-4 py-2.5 border-b bg-muted/40">
         <p className="text-sm font-semibold">Vendas dos produtos do lançamento</p>
         <p className="text-xs text-muted-foreground">
-          Todas as vendas por produto no período ({since} → {until}), incluindo compra direta sem lead.
+          Todas as vendas por produto (incl. compra direta sem lead). Ingresso conta no período do evento; produto principal/downsell a partir da abertura do carrinho.
         </p>
       </div>
       {loading ? (
@@ -347,12 +359,13 @@ function VendasProdutoBlock({ token, l }: { token: string; l: Lancamento }) {
               <th className="text-right px-4 py-2 font-medium">Meta (qtd)</th>
               <th className="text-right px-4 py-2 font-medium">% Meta</th>
               <th className="text-right px-4 py-2 font-medium">Líquido</th>
+              <th className="text-left px-4 py-2 font-medium">Janela</th>
             </tr>
           </thead>
           <tbody>
             {linhas.map(r => {
               const nome = ID_TO_NOME[r.id!] ?? `id ${r.id}`
-              const v = vendas?.[nome]
+              const v = r.vendas?.[nome]
               const qtd = v?.vendas ?? 0
               const pct = r.metaQtd > 0 ? (qtd / r.metaQtd) * 100 : null
               return (
@@ -365,6 +378,7 @@ function VendasProdutoBlock({ token, l }: { token: string; l: Lancamento }) {
                     {pct !== null ? <span className={pct >= 100 ? 'text-green-600 font-semibold' : pct >= 70 ? 'text-yellow-600' : 'text-red-600'}>{pct.toFixed(0)}%</span> : '—'}
                   </td>
                   <td className="px-4 py-2 text-right text-muted-foreground">{v ? fmtBRL(v.liquido) : '—'}</td>
+                  <td className="px-4 py-2 text-[10px] text-muted-foreground">{r.janela}</td>
                 </tr>
               )
             })}
