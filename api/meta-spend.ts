@@ -88,7 +88,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     dUrl.searchParams.set('access_token', accessToken)
 
     const aiUrl = new URL(`https://graph.facebook.com/v19.0/${adAccount}/insights`)
-    aiUrl.searchParams.set('fields', 'ad_name,adset_name,campaign_name,spend')
+    aiUrl.searchParams.set('fields', 'ad_name,adset_name,campaign_name,spend,actions')
     aiUrl.searchParams.set('time_range', timeRange)
     aiUrl.searchParams.set('level', 'ad')
     aiUrl.searchParams.set('filtering', JSON.stringify([{ field: 'campaign.name', operator: 'CONTAIN', value: spendKeywords[0] ?? '' }]))
@@ -121,16 +121,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // Processa ad insights
-    type AdRow = { ad_name?: string; adset_name?: string; campaign_name?: string; spend: string }
+    type Action = { action_type: string; value: string }
+    type AdRow = { ad_name?: string; adset_name?: string; campaign_name?: string; spend: string; actions?: Action[] }
     let allAdRows: AdRow[] = []
     if (aiRes.ok) {
       const d = await aiRes.json() as { data: AdRow[] }
       allAdRows = d.data ?? []
     }
 
+    // Compras que o Meta atribui a uma linha (purchase / omni_purchase).
+    const purchasesOf = (actions?: Action[]) =>
+      Number(actions?.find(a => a.action_type === 'purchase' || a.action_type === 'omni_purchase')?.value ?? 0)
+
     // spendByUtm.campaign vem direto de metaCampaigns (já cobre AND + OR)
     // spendByUtm.medium e .content vem do ad insights (só BA25, sem Instagram)
     const utmSpend: Record<string, Record<string, number>> = { source: {}, medium: {}, campaign: {}, content: {}, term: {} }
+    // Compras atribuídas pelo Meta, por UTM (para o CPV Meta = spend ÷ compras).
+    const utmPurchases: Record<string, Record<string, number>> = { source: {}, medium: {}, campaign: {}, content: {}, term: {} }
 
     for (const c of metaCampaigns) {
       utmSpend.campaign[c.name] = Math.round(c.spend * 100) / 100
@@ -139,9 +146,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     for (const row of allAdRows) {
       if (row.campaign_name && !matchedCampaignNames.has(row.campaign_name)) continue
       const spend = Number(row.spend ?? 0)
-      if (!spend) continue
-      if (row.adset_name) utmSpend.medium[row.adset_name] = (utmSpend.medium[row.adset_name] ?? 0) + spend
-      if (row.ad_name) utmSpend.content[row.ad_name] = (utmSpend.content[row.ad_name] ?? 0) + spend
+      const purchases = purchasesOf(row.actions)
+      if (!spend && !purchases) continue
+      if (row.adset_name) {
+        utmSpend.medium[row.adset_name] = (utmSpend.medium[row.adset_name] ?? 0) + spend
+        utmPurchases.medium[row.adset_name] = (utmPurchases.medium[row.adset_name] ?? 0) + purchases
+      }
+      if (row.ad_name) {
+        utmSpend.content[row.ad_name] = (utmSpend.content[row.ad_name] ?? 0) + spend
+        utmPurchases.content[row.ad_name] = (utmPurchases.content[row.ad_name] ?? 0) + purchases
+      }
+      if (row.campaign_name) {
+        utmPurchases.campaign[row.campaign_name] = (utmPurchases.campaign[row.campaign_name] ?? 0) + purchases
+      }
     }
 
     for (const dim of ['medium', 'content'] as const) {
@@ -151,8 +168,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const spendByUtm = utmSpend
+    const purchasesByUtm = utmPurchases
 
-    res.json({ metaSpend, cpl, metaCampaigns, dailyMeta, spendByUtm })
+    res.json({ metaSpend, cpl, metaCampaigns, dailyMeta, spendByUtm, purchasesByUtm })
   } catch (err) {
     console.error('meta-spend error:', err)
     res.status(500).json({ error: 'Erro interno', detail: (err as Error).message })

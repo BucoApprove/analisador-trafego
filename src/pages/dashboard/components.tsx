@@ -142,6 +142,7 @@ export function UtmTable({
   getCpl,
   cplNote,
   getCpv,
+  getCpvMeta,
   salesRows,
   totalBuyers,
 }: {
@@ -152,7 +153,8 @@ export function UtmTable({
   hint?: string
   getCpl?: (name: string, leads: number) => number | null
   cplNote?: string
-  getCpv?: (name: string) => number | null  // custo por venda: gasto da UTM ÷ vendas dela
+  getCpv?: (name: string) => number | null     // CPV cruzado: gasto ÷ vendas com lead
+  getCpvMeta?: (name: string) => number | null  // CPV Meta: gasto ÷ compras atribuídas pelo Meta
   salesRows?: UtmSalesAttribution[]
   totalBuyers?: number
 }) {
@@ -202,7 +204,8 @@ export function UtmTable({
                   Vendas
                 </th>
               )}
-              {getCpv && <th className="px-3 py-2 text-right font-medium" title="Custo por venda: gasto da UTM ÷ vendas atribuídas">CPV</th>}
+              {getCpv && <th className="px-3 py-2 text-right font-medium" title="CPV cruzado: gasto da UTM ÷ vendas com lead atribuído">CPV</th>}
+              {getCpvMeta && <th className="px-3 py-2 text-right font-medium" title="CPV Meta: gasto da UTM ÷ compras atribuídas pelo Meta (cobre venda direta)">CPV Meta</th>}
               <th className="px-3 py-2 w-24"></th>
             </tr>
           </thead>
@@ -211,6 +214,7 @@ export function UtmTable({
               const pct = total > 0 ? (r.value / total) * 100 : 0
               const cpl = getCpl ? getCpl(r.name, r.value) : null
               const cpv = getCpv ? getCpv(r.name) : null
+              const cpvMeta = getCpvMeta ? getCpvMeta(r.name) : null
               const sales = hasSales ? salesMap.get(r.name.toLowerCase()) : null
               return (
                 <tr key={r.name} className="hover:bg-muted/40">
@@ -243,6 +247,13 @@ export function UtmTable({
                     <td className="px-3 py-1.5 text-right tabular-nums">
                       {cpv != null
                         ? <span className="font-medium" style={{ color: CHART_COLORS[3] }}>R$ {cpv.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                        : <span className="text-muted-foreground">—</span>}
+                    </td>
+                  )}
+                  {getCpvMeta && (
+                    <td className="px-3 py-1.5 text-right tabular-nums">
+                      {cpvMeta != null
+                        ? <span className="font-medium" style={{ color: CHART_COLORS[0] }}>R$ {cpvMeta.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
                         : <span className="text-muted-foreground">—</span>}
                     </td>
                   )}

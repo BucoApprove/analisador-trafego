@@ -63,6 +63,14 @@ export interface LaunchData {
     content: Record<string, number>
     term: Record<string, number>
   }
+  // Compras atribuídas pelo Meta por UTM (para CPV Meta = gasto ÷ compras)
+  purchasesByUtm?: {
+    source: Record<string, number>
+    medium: Record<string, number>
+    campaign: Record<string, number>
+    content: Record<string, number>
+    term: Record<string, number>
+  }
 }
 
 export interface TagsListData {

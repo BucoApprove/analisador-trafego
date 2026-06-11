@@ -46,7 +46,7 @@ function makeGetCpl(map: Record<string, number> | undefined) {
   }
 }
 
-// CPV (custo por venda): gasto da UTM ÷ vendas atribuídas (last-touch) a ela.
+// CPV cruzado (custo por venda): gasto da UTM ÷ vendas atribuídas (last-touch).
 function makeGetCpv(
   spendMap: Record<string, number> | undefined,
   salesRows: UtmSalesAttribution[] | undefined,
@@ -58,6 +58,21 @@ function makeGetCpv(
     const vendas = salesByName.get(name.toLowerCase()) ?? 0
     if (spend == null || vendas === 0) return null
     return Math.round((spend / vendas) * 100) / 100
+  }
+}
+
+// CPV Meta: gasto da UTM ÷ compras que o próprio Meta atribui ao criativo
+// (não depende do cruzamento lead→venda; cobre venda direta).
+function makeGetCpvMeta(
+  spendMap: Record<string, number> | undefined,
+  purchasesMap: Record<string, number> | undefined,
+) {
+  if (!spendMap || !purchasesMap) return undefined
+  return (name: string): number | null => {
+    const spend = spendMap[name]
+    const compras = purchasesMap[name] ?? 0
+    if (spend == null || compras === 0) return null
+    return Math.round((spend / compras) * 100) / 100
   }
 }
 
@@ -1466,6 +1481,7 @@ export default function TabBA25({
                     getCpl={makeGetCpl(data.spendByUtm?.source)}
                     cplNote="CPL calculado a partir do gasto real dos anúncios com esse utm_source no período."
                     getCpv={tipo === 'pago' ? makeGetCpv(data.spendByUtm?.source, salesUtmData?.bySource) : undefined}
+                    getCpvMeta={tipo === 'pago' ? makeGetCpvMeta(data.spendByUtm?.source, data.purchasesByUtm?.source) : undefined}
                     salesRows={salesUtmData?.bySource}
                     totalBuyers={salesUtmData?.totalBuyers}
                   />
@@ -1480,6 +1496,7 @@ export default function TabBA25({
                     getCpl={makeGetCpl(data.spendByUtm?.medium)}
                     cplNote="CPL calculado a partir do gasto real por conjunto de anúncios (adset) no período."
                     getCpv={tipo === 'pago' ? makeGetCpv(data.spendByUtm?.medium, salesUtmData?.byMedium) : undefined}
+                    getCpvMeta={tipo === 'pago' ? makeGetCpvMeta(data.spendByUtm?.medium, data.purchasesByUtm?.medium) : undefined}
                     salesRows={salesUtmData?.byMedium}
                     totalBuyers={salesUtmData?.totalBuyers}
                   />
@@ -1493,6 +1510,7 @@ export default function TabBA25({
                     getCpl={makeGetCpl(data.spendByUtm?.campaign)}
                     cplNote="CPL calculado a partir do gasto real da campanha no período."
                     getCpv={tipo === 'pago' ? makeGetCpv(data.spendByUtm?.campaign, salesUtmData?.byCampaign) : undefined}
+                    getCpvMeta={tipo === 'pago' ? makeGetCpvMeta(data.spendByUtm?.campaign, data.purchasesByUtm?.campaign) : undefined}
                     salesRows={salesUtmData?.byCampaign}
                     totalBuyers={salesUtmData?.totalBuyers}
                   />
@@ -1507,6 +1525,7 @@ export default function TabBA25({
                     getCpl={makeGetCpl(data.spendByUtm?.content)}
                     cplNote="CPL calculado a partir do gasto real por anúncio no período."
                     getCpv={tipo === 'pago' ? makeGetCpv(data.spendByUtm?.content, salesUtmData?.byContent) : undefined}
+                    getCpvMeta={tipo === 'pago' ? makeGetCpvMeta(data.spendByUtm?.content, data.purchasesByUtm?.content) : undefined}
                     salesRows={salesUtmData?.byContent}
                     totalBuyers={salesUtmData?.totalBuyers}
                   />
