@@ -311,6 +311,7 @@ function VendasProdutoBlock({ token, l }: { token: string; l: Lancamento }) {
 
   const [vendasIngresso, setVendasIngresso] = useState<VendasMap | null>(null)
   const [vendasProduto, setVendasProduto] = useState<VendasMap | null>(null)
+  const [gastoTotal, setGastoTotal] = useState<number | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -321,20 +322,30 @@ function VendasProdutoBlock({ token, l }: { token: string; l: Lancamento }) {
             .then(r => r.ok ? r.json() : Promise.reject(new Error(String(r.status))))
             .then(j => j.vendasPorProduto ?? {})
             .catch(() => ({}))
-    Promise.all([get(ingSince, ingUntil), get(prodSince, prodUntil)])
-      .then(([ing, prod]) => { setVendasIngresso(ing); setVendasProduto(prod) })
+    // Gasto Meta total do lançamento (período do evento), p/ CPV total.
+    const getGasto = (): Promise<number> =>
+      (!ingSince || !ingUntil) ? Promise.resolve(0)
+        : fetch(`/api/meta-spend?since=${ingSince}&until=${ingUntil}&spendFilter=${encodeURIComponent(l.spend_filter)}&orFilter=${encodeURIComponent(l.or_filter)}`, { headers: { Authorization: `Bearer ${token}` } })
+            .then(r => r.ok ? r.json() : Promise.reject(new Error(String(r.status))))
+            .then(j => Number(j.metaSpend ?? 0))
+            .catch(() => 0)
+    Promise.all([get(ingSince, ingUntil), get(prodSince, prodUntil), getGasto()])
+      .then(([ing, prod, gasto]) => { setVendasIngresso(ing); setVendasProduto(prod); setGastoTotal(gasto) })
       .finally(() => setLoading(false))
-  }, [token, ingSince, ingUntil, prodSince, prodUntil])
+  }, [token, ingSince, ingUntil, prodSince, prodUntil, l.spend_filter, l.or_filter])
 
   const fmtBRL = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 
   // Linhas: ingresso (só pago, janela do evento) + principal + downsell (janela do carrinho).
-  const linhas: { papel: string; id: number | null; metaQtd: number; vendas: VendasMap | null; janela: string }[] = [
+  // cpvAplicavel: o gasto Meta do lançamento é o investimento para vender ESTE produto.
+  //   - pago: o gasto é para vender o ingresso → CPV total só no ingresso.
+  //   - interno: o gasto é para captar e vender o principal → CPV total no principal.
+  const linhas: { papel: string; id: number | null; metaQtd: number; vendas: VendasMap | null; janela: string; aposCarrinho: boolean; cpvAplicavel: boolean }[] = [
     ...(l.tipo === 'pago'
-      ? [{ papel: 'Ingresso', id: l.produto_ingresso_id, metaQtd: l.meta_vendas_ingresso, vendas: vendasIngresso, janela: `${ingSince} → ${ingUntil}` }]
+      ? [{ papel: 'Ingresso', id: l.produto_ingresso_id, metaQtd: l.meta_vendas_ingresso, vendas: vendasIngresso, janela: `${ingSince} → ${ingUntil}`, aposCarrinho: false, cpvAplicavel: true }]
       : []),
-    { papel: 'Produto principal', id: l.produto_principal_id, metaQtd: l.meta_vendas_principal, vendas: vendasProduto, janela: prodSince ? `${prodSince} → ${prodUntil}` : '—' },
-    { papel: 'Downsell', id: l.produto_downsell_id, metaQtd: l.meta_vendas_downsell, vendas: vendasProduto, janela: prodSince ? `${prodSince} → ${prodUntil}` : '—' },
+    { papel: 'Produto principal', id: l.produto_principal_id, metaQtd: l.meta_vendas_principal, vendas: vendasProduto, janela: prodSince ? `${prodSince} → ${prodUntil}` : '—', aposCarrinho: true, cpvAplicavel: l.tipo === 'interno' },
+    { papel: 'Downsell', id: l.produto_downsell_id, metaQtd: l.meta_vendas_downsell, vendas: vendasProduto, janela: prodSince ? `${prodSince} → ${prodUntil}` : '—', aposCarrinho: true, cpvAplicavel: false },
   ].filter(r => r.id != null)
 
   if (linhas.length === 0) return null
@@ -359,6 +370,7 @@ function VendasProdutoBlock({ token, l }: { token: string; l: Lancamento }) {
               <th className="text-right px-4 py-2 font-medium">Meta (qtd)</th>
               <th className="text-right px-4 py-2 font-medium">% Meta</th>
               <th className="text-right px-4 py-2 font-medium">Líquido</th>
+              <th className="text-right px-4 py-2 font-medium" title="Custo por venda: gasto Meta total do lançamento ÷ vendas do produto">CPV total</th>
               <th className="text-left px-4 py-2 font-medium">Janela</th>
             </tr>
           </thead>
@@ -368,9 +380,22 @@ function VendasProdutoBlock({ token, l }: { token: string; l: Lancamento }) {
               const v = r.vendas?.[nome]
               const qtd = v?.vendas ?? 0
               const pct = r.metaQtd > 0 ? (qtd / r.metaQtd) * 100 : null
+              const cpvTotal = r.cpvAplicavel && gastoTotal != null && gastoTotal > 0 && qtd > 0 ? gastoTotal / qtd : null
               return (
                 <tr key={r.papel} className="border-b last:border-0">
-                  <td className="px-4 py-2 font-medium">{r.papel}</td>
+                  <td className="px-4 py-2 font-medium">
+                    <span className="inline-flex items-center gap-1.5">
+                      {r.papel}
+                      {r.aposCarrinho && (
+                        <span
+                          title="Vendas contadas a partir da abertura do carrinho. Se o carrinho ainda não abriu, o valor fica em zero."
+                          className="cursor-help text-[10px] px-1.5 py-0.5 rounded-full font-medium bg-amber-100 text-amber-700"
+                        >
+                          pós-carrinho
+                        </span>
+                      )}
+                    </span>
+                  </td>
                   <td className="px-4 py-2 text-muted-foreground">{nome}</td>
                   <td className="px-4 py-2 text-right font-semibold">{qtd}</td>
                   <td className="px-4 py-2 text-right text-muted-foreground">{r.metaQtd > 0 ? r.metaQtd : '—'}</td>
@@ -378,6 +403,7 @@ function VendasProdutoBlock({ token, l }: { token: string; l: Lancamento }) {
                     {pct !== null ? <span className={pct >= 100 ? 'text-green-600 font-semibold' : pct >= 70 ? 'text-yellow-600' : 'text-red-600'}>{pct.toFixed(0)}%</span> : '—'}
                   </td>
                   <td className="px-4 py-2 text-right text-muted-foreground">{v ? fmtBRL(v.liquido) : '—'}</td>
+                  <td className="px-4 py-2 text-right tabular-nums">{cpvTotal != null ? fmtBRL(cpvTotal) : '—'}</td>
                   <td className="px-4 py-2 text-[10px] text-muted-foreground">{r.janela}</td>
                 </tr>
               )
