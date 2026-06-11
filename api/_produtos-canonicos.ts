@@ -48,6 +48,11 @@ export const LOW_TICKET = 'Low ticket'
  * O classifyProduto converte de volta esse id no nome canônico ao ler o gasto.
  * "Buco Approve" usa o id do BucoApprove (2016048).
  */
+// id representativo do balde Low ticket (Pack 6 Livros, maior volume). Qualquer
+// id fora do PRODUTOS_CORE já vira "Low ticket" no classifyProduto, então este
+// id apenas serve de âncora para a opção única no dropdown.
+export const LOW_TICKET_ID = 6766383
+
 export const PRODUTOS_SELECIONAVEIS: Array<{ label: string; id: number }> = [
   { label: 'Buco Approve',              id: 2016048 },
   { label: 'Mentoria CTBMF',            id: 3811518 },
@@ -59,6 +64,7 @@ export const PRODUTOS_SELECIONAVEIS: Array<{ label: string; id: number }> = [
   { label: 'BucoApp',                   id: 2286372 },
   { label: 'Imersão ENARE',             id: 7737553 },
   { label: 'Segurança Clínica por Casos', id: 7812483 },
+  { label: 'Low ticket',                id: LOW_TICKET_ID },
 ]
 
 /**
