@@ -1,5 +1,6 @@
-import { useState, useCallback, useEffect } from 'react'
-import { RefreshCw, ChevronDown, ChevronUp } from 'lucide-react'
+import { useState, useCallback, useEffect, useRef } from 'react'
+import { RefreshCw, ChevronDown, ChevronUp, Pencil, Loader2 } from 'lucide-react'
+import { supabase } from '@/lib/supabase'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -13,6 +14,7 @@ interface Produto {
   vendas: number
   liquido: number
   meta: number | null
+  goalName: string
   ofertas?: Oferta[]
 }
 interface PlacarResp {
@@ -45,16 +47,85 @@ function daysInfo(month: string) {
   return { lastDay, dayOfMonth, diasRestantes, isCurrent }
 }
 
-const CAT_LABEL: Record<Categoria, string> = {
-  core: 'Produtos core',
-  porta: 'Portas de entrada',
-  low: 'Low ticket',
+const CAT_BADGE: Record<Categoria, { label: string; cls: string }> = {
+  core:  { label: 'core',    cls: 'bg-blue-100 text-blue-700' },
+  porta: { label: 'entrada', cls: 'bg-purple-100 text-purple-700' },
+  low:   { label: 'low',     cls: 'bg-gray-100 text-gray-600' },
 }
-const CAT_ORDER: Categoria[] = ['core', 'porta', 'low']
+
+function CatBadge({ cat }: { cat: Categoria }) {
+  const b = CAT_BADGE[cat]
+  return <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${b.cls}`}>{b.label}</span>
+}
+
+// ─── Célula de meta editável (grava em monthly_goals via goalName) ───────────
+
+function EditableMeta({ month, goalName, meta, onSaved }: {
+  month: string
+  goalName: string
+  meta: number | null
+  onSaved: (v: number) => void
+}) {
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState('')
+  const [saving, setSaving] = useState(false)
+  const savedRef = useRef(false)
+
+  function startEdit() {
+    setDraft(meta && meta > 0 ? String(meta) : '')
+    savedRef.current = false
+    setEditing(true)
+  }
+
+  async function save() {
+    if (savedRef.current) return
+    savedRef.current = true
+    const parsed = parseFloat(draft.replace(/\./g, '').replace(',', '.').trim()) || 0
+    setSaving(true)
+    const { error } = await supabase.from('monthly_goals').upsert({
+      month, product_name: goalName, meta: parsed, updated_at: new Date().toISOString(),
+    })
+    setSaving(false)
+    if (error) { savedRef.current = false; return }
+    onSaved(parsed)
+    setEditing(false)
+  }
+
+  if (editing) {
+    return (
+      <td className="px-4 py-2.5 text-right">
+        <div className="flex items-center justify-end gap-1">
+          <span className="text-xs text-muted-foreground">R$</span>
+          <input
+            autoFocus type="text" inputMode="decimal" value={draft}
+            onChange={e => setDraft(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === 'Enter') save()
+              if (e.key === 'Escape') { savedRef.current = true; setEditing(false) }
+            }}
+            onBlur={save} disabled={saving}
+            className="w-24 text-right text-sm border rounded px-1.5 py-0.5 bg-background disabled:opacity-50"
+          />
+          {saving && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />}
+        </div>
+      </td>
+    )
+  }
+
+  return (
+    <td onClick={startEdit} title="Clique para editar a meta"
+      className="px-4 py-2.5 text-right text-muted-foreground cursor-pointer hover:bg-muted/40 hover:text-foreground transition-colors group/meta">
+      <span className="inline-flex items-center gap-1">
+        {meta && meta > 0 ? fmtBRL(meta) : <span className="italic opacity-60">definir</span>}
+        <Pencil className="h-3 w-3 opacity-0 group-hover/meta:opacity-60 transition-opacity" />
+      </span>
+    </td>
+  )
+}
 
 // ─── Linha de produto (com drill-down de ofertas) ────────────────────────────
 
-function ProdutoRow({ p, stripe }: { p: Produto; stripe: boolean }) {
+function ProdutoRow({ p, stripe, month, onMeta }: { p: Produto; stripe: boolean; month: string; onMeta: (goalName: string, v: number) => void }) {
   const [open, setOpen] = useState(false)
   const pct = p.meta && p.meta > 0 ? (p.liquido / p.meta) * 100 : null
   const hasOfertas = (p.ofertas?.length ?? 0) > 1
@@ -63,17 +134,18 @@ function ProdutoRow({ p, stripe }: { p: Produto; stripe: boolean }) {
       <tr className={`border-b ${stripe ? 'bg-muted/20' : ''}`}>
         <td className="px-4 py-2.5 font-medium">
           <span className="inline-flex items-center gap-1.5">
-            {hasOfertas && (
+            {hasOfertas ? (
               <button onClick={() => setOpen(o => !o)} className="text-muted-foreground hover:text-foreground">
                 {open ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
               </button>
-            )}
+            ) : <span className="w-3.5 inline-block" />}
             {p.nome}
+            <CatBadge cat={p.categoria} />
           </span>
         </td>
         <td className="px-4 py-2.5 text-right">{p.vendas}</td>
         <td className="px-4 py-2.5 text-right font-semibold">{fmtBRL(p.liquido)}</td>
-        <td className="px-4 py-2.5 text-right text-muted-foreground">{p.meta && p.meta > 0 ? fmtBRL(p.meta) : '—'}</td>
+        <EditableMeta month={month} goalName={p.goalName} meta={p.meta} onSaved={v => onMeta(p.goalName, v)} />
         <td className="px-4 py-2.5 text-right">
           {pct !== null ? (
             <span className={pct >= 100 ? 'text-green-600 font-semibold' : pct >= 70 ? 'text-yellow-600' : 'text-red-600'}>
@@ -121,12 +193,23 @@ export default function TabPlacar({ token, enabled }: Props) {
 
   useEffect(() => { if (enabled) load(month) }, [enabled, month, load])
 
-  const { dayOfMonth, lastDay, diasRestantes } = daysInfo(month)
+  // Atualiza localmente a meta de todos os produtos que usam o mesmo goalName.
+  const onMeta = useCallback((goalName: string, v: number) => {
+    setData(prev => {
+      if (!prev) return prev
+      const produtos = prev.produtos.map(p => p.goalName === goalName ? { ...p, meta: v } : p)
+      const totalMeta = produtos.reduce((s, p) => s + (p.meta ?? 0), 0)
+      return { ...prev, produtos, totalMeta }
+    })
+  }, [])
+
+  const { dayOfMonth, lastDay, diasRestantes, isCurrent } = daysInfo(month)
   const totalLiquido = data?.totalLiquido ?? 0
   const totalMeta = data?.totalMeta ?? 0
   const pctMeta = totalMeta > 0 ? (totalLiquido / totalMeta) * 100 : null
-  const pctRitmo = (dayOfMonth / lastDay) * 100  // % do mês decorrido
-  const abaixoDoRitmo = pctMeta !== null && pctMeta < pctRitmo
+  // Ritmo só faz sentido no mês corrente: % esperado = fração do mês já decorrida.
+  const pctEsperado = (dayOfMonth / lastDay) * 100
+  const abaixoDoRitmo = isCurrent && pctMeta !== null && pctMeta < pctEsperado
 
   const monthOptions: string[] = []
   const now = new Date()
@@ -175,9 +258,12 @@ export default function TabPlacar({ token, enabled }: Props) {
             )}
           </div>
           <p className="text-xs text-muted-foreground mt-2">
-            Dia {dayOfMonth}/{lastDay} · {diasRestantes} dias restantes
-            {pctMeta !== null && ` · ritmo do mês: ${pctRitmo.toFixed(0)}%`}
-            {abaixoDoRitmo && <span className="text-red-600 font-medium"> · ⚠️ abaixo do ritmo</span>}
+            {isCurrent
+              ? <>Dia {dayOfMonth} de {lastDay} · faltam {diasRestantes} dias
+                  {pctMeta !== null && ` · esperado até hoje: ${pctEsperado.toFixed(0)}% da meta`}
+                  {abaixoDoRitmo && <span className="text-red-600 font-medium"> · ⚠️ abaixo do esperado</span>}
+                </>
+              : <>Mês fechado</>}
           </p>
         </div>
       )}
@@ -199,32 +285,34 @@ export default function TabPlacar({ token, enabled }: Props) {
         </div>
       )}
 
-      {/* Tabela por categoria */}
+      {/* Tabela única de produtos (badge identifica a categoria) */}
       {produtos.length > 0 && (
-        <div className="space-y-5">
-          {CAT_ORDER.map(cat => {
-            const rows = produtos.filter(p => p.categoria === cat)
-            if (rows.length === 0) return null
-            return (
-              <div key={cat} className="rounded-lg border bg-card overflow-hidden">
-                <div className="px-4 py-2 bg-muted/50 border-b text-sm font-semibold">{CAT_LABEL[cat]}</div>
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b text-muted-foreground">
-                      <th className="text-left px-4 py-2 font-medium">Produto</th>
-                      <th className="text-right px-4 py-2 font-medium">Vendas</th>
-                      <th className="text-right px-4 py-2 font-medium">Líquido</th>
-                      <th className="text-right px-4 py-2 font-medium">Meta</th>
-                      <th className="text-right px-4 py-2 font-medium">% Meta</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {rows.map((p, i) => <ProdutoRow key={p.nome} p={p} stripe={i % 2 !== 0} />)}
-                  </tbody>
-                </table>
-              </div>
-            )
-          })}
+        <div className="rounded-lg border bg-card overflow-hidden">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b bg-muted/50">
+                <th className="text-left px-4 py-2.5 font-medium">Produto</th>
+                <th className="text-right px-4 py-2.5 font-medium">Vendas</th>
+                <th className="text-right px-4 py-2.5 font-medium">Líquido</th>
+                <th className="text-right px-4 py-2.5 font-medium">Meta</th>
+                <th className="text-right px-4 py-2.5 font-medium">% Meta</th>
+              </tr>
+            </thead>
+            <tbody>
+              {produtos.map((p, i) => <ProdutoRow key={p.nome} p={p} stripe={i % 2 !== 0} month={month} onMeta={onMeta} />)}
+            </tbody>
+            <tfoot>
+              <tr className="border-t bg-muted/50 font-semibold">
+                <td className="px-4 py-2.5">Total</td>
+                <td className="px-4 py-2.5 text-right">{data?.totalVendas ?? 0}</td>
+                <td className="px-4 py-2.5 text-right">{fmtBRL(totalLiquido)}</td>
+                <td className="px-4 py-2.5 text-right">{totalMeta > 0 ? fmtBRL(totalMeta) : '—'}</td>
+                <td className="px-4 py-2.5 text-right">
+                  {pctMeta !== null ? <span className={pctMeta >= 100 ? 'text-green-600' : ''}>{pctMeta.toFixed(0)}%</span> : '—'}
+                </td>
+              </tr>
+            </tfoot>
+          </table>
         </div>
       )}
 

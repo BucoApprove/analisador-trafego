@@ -13,7 +13,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { authUser, requireAdmin } from './_supabase-auth.js'
 import { fetchHotmartLiquido } from './_hotmart-liquido.js'
-import { fetchMonthlyGoals } from './_goals.js'
+import { fetchAllGoals } from './_goals.js'
 import { GOAL_NAME_BY_CANON } from './_produtos-canonicos.js'
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -27,16 +27,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const month = monthParam || `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
 
   try {
-    const [hotmart, goalsData] = await Promise.all([
+    const [hotmart, allGoals] = await Promise.all([
       fetchHotmartLiquido(month),
-      fetchMonthlyGoals(month),
+      fetchAllGoals(month),
     ])
 
-    // Anexa a meta (reaproveitada de monthly_goals via de/para) a cada produto.
+    // Anexa a meta a cada produto. goalName = chave usada na tabela monthly_goals:
+    //   - produto que casa no de/para → nome antigo (ex: Low ticket → Low tickets)
+    //   - produto novo → o próprio nome canônico (ex: Imersão ENARE)
+    // Assim a edição de meta no Placar grava na mesma tabela da Metas Mensais.
     const produtos = hotmart.produtos.map(p => {
-      const goalName = GOAL_NAME_BY_CANON[p.nome]
-      const meta = goalName ? (goalsData.goals[goalName] ?? null) : null
-      return { ...p, meta }
+      const goalName = GOAL_NAME_BY_CANON[p.nome] ?? p.nome
+      const meta = allGoals.get(goalName) ?? null
+      return { ...p, meta, goalName }
     })
 
     const totalMeta = produtos.reduce((s, p) => s + (p.meta ?? 0), 0)

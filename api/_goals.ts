@@ -62,6 +62,25 @@ export async function fetchMonthlyGoals(month: string): Promise<MonthlyGoals> {
 }
 
 /**
+ * Lê TODAS as metas de um mês (sem filtrar por PRODUTOS_FIXOS).
+ * Usado pelo Placar, cujos nomes canônicos diferem dos produtos fixos antigos.
+ * Retorna um mapa product_name → meta.
+ */
+export async function fetchAllGoals(month: string): Promise<Map<string, number>> {
+  const supabase = serviceClient()
+  const { data, error } = await supabase
+    .from('monthly_goals')
+    .select('product_name, meta')
+    .eq('month', month)
+
+  if (error) throw new Error(`monthly_goals query failed: ${error.message}`)
+
+  const map = new Map<string, number>()
+  for (const r of data ?? []) map.set(r.product_name, Number(r.meta) || 0)
+  return map
+}
+
+/**
  * Lê os overrides manuais de agrupamento (tabela product_mappings):
  * nome exato do produto Hotmart → produto-meta. Vale para todos os meses.
  */
