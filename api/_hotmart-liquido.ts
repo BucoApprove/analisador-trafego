@@ -10,13 +10,14 @@
  * drill-down de ofertas do BucoApprove.
  */
 import { classifyProduto, BUCO_PID, INTENSIVO_OFFERS, type Categoria } from './_produtos-canonicos.js'
+import { fetchOfertaNomes } from './_hotmart-ofertas.js'
 
 export interface ProdutoVendas {
   nome: string
   categoria: Categoria
   vendas: number
   liquido: number
-  ofertas?: { code: string; vendas: number; liquido: number }[]  // só BucoApprove/Intensivo
+  ofertas?: { code: string; nome: string; vendas: number; liquido: number }[]  // só BucoApprove/Intensivo
 }
 
 export interface HotmartLiquido {
@@ -97,8 +98,12 @@ export async function fetchHotmartLiquido(month: string): Promise<HotmartLiquido
     hist.push(it)
   }
 
+  // Nomes das ofertas do BucoApprove (code → nome legível), em paralelo.
+  const ofertaNomesPromise = fetchOfertaNomes(BUCO_PID, token)
+
   const byCanon = new Map<string, ProdutoVendas>()
-  const bucoOffers = new Map<string, { code: string; nome: string; vendas: number; liquido: number }>()
+  // produtoCanonico = a qual linha a oferta pertence (Buco Approve / Intensivo ENARE)
+  const bucoOffers = new Map<string, { code: string; produtoCanonico: string; vendas: number; liquido: number }>()
   let totalLiquido = 0, totalVendas = 0
   const porCategoria: Record<Categoria, number> = { core: 0, porta: 0, low: 0 }
 
@@ -118,17 +123,23 @@ export async function fetchHotmartLiquido(month: string): Promise<HotmartLiquido
 
     if (pid === BUCO_PID) {
       const code = offer ?? '(sem code)'
-      const o = bucoOffers.get(code) ?? { code, nome: canon.nome, vendas: 0, liquido: 0 }
+      const o = bucoOffers.get(code) ?? { code, produtoCanonico: canon.nome, vendas: 0, liquido: 0 }
       o.vendas++; o.liquido += liq
       bucoOffers.set(code, o)
     }
   }
 
-  // Anexa drill-down de ofertas nos produtos do Buco (Buco Approve / Intensivo ENARE)
+  // Anexa drill-down de ofertas (com nome legível) nos produtos do Buco.
+  const ofertaNomes = await ofertaNomesPromise
   for (const o of bucoOffers.values()) {
-    const target = byCanon.get(o.nome)
+    const target = byCanon.get(o.produtoCanonico)
     if (!target) continue
-    ;(target.ofertas ??= []).push({ code: o.code, vendas: o.vendas, liquido: round(o.liquido) })
+    ;(target.ofertas ??= []).push({
+      code: o.code,
+      nome: ofertaNomes[o.code] || o.code,  // fallback para o code se a API não trouxe o nome
+      vendas: o.vendas,
+      liquido: round(o.liquido),
+    })
   }
 
   const produtos = [...byCanon.values()]

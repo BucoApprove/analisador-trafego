@@ -30,7 +30,7 @@ type Etapa = 'conversão' | 'remarketing' | 'descoberta' | 'relacionamento'
 const ETAPAS: Etapa[] = ['conversão', 'remarketing', 'descoberta', 'relacionamento']
 type EtapaGasto = Record<Etapa, number>
 
-interface Oferta { code: string; vendas: number; liquido: number }
+interface Oferta { code: string; nome: string; vendas: number; liquido: number }
 interface Produto {
   nome: string
   categoria: Categoria
@@ -220,7 +220,9 @@ function ProdutoRow({ p, stripe, month, onMeta }: { p: Produto; stripe: boolean;
       </tr>
       {open && p.ofertas?.map(o => (
         <tr key={o.code} className="border-b bg-muted/5 text-xs text-muted-foreground">
-          <td className="pl-10 py-1.5 italic">oferta {o.code}</td>
+          <td className="pl-10 py-1.5 italic">
+            {o.nome}{o.nome !== o.code && <span className="not-italic opacity-50"> ({o.code})</span>}
+          </td>
           <td className="px-4 py-1.5 text-right">{o.vendas}</td>
           <td className="px-4 py-1.5 text-right">{fmtBRL(o.liquido)}</td>
           <td colSpan={4} />
