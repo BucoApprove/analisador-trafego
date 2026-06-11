@@ -153,3 +153,49 @@ export async function fetchHotmartLiquido(month: string): Promise<HotmartLiquido
     porCategoria: { core: round(porCategoria.core), porta: round(porCategoria.porta), low: round(porCategoria.low) },
   }
 }
+
+/**
+ * Vendas + líquido por produto canônico num intervalo de datas (since/until,
+ * "YYYY-MM-DD"). Conta TODAS as vendas por product_id — independente de lead.
+ * Usado pelo detalhe do lançamento (vendas reais vs meta, incl. compra direta).
+ *
+ * Retorna mapa { nomeCanonico → { vendas, liquido } }.
+ */
+export async function fetchVendasPorProdutoRange(
+  since: string,
+  until: string,
+): Promise<Record<string, { vendas: number; liquido: number }>> {
+  const startMs = new Date(`${since}T00:00:00`).getTime()
+  const endMs = new Date(`${until}T23:59:59`).getTime()
+  const token = await getToken()
+  const base = `start_date=${startMs}&end_date=${endMs}&max_results=50`
+
+  const commItems = await paginate<{ transaction?: string; commissions?: Array<{ source?: string; commission?: { value?: number } }> }>(
+    `https://developers.hotmart.com/payments/api/v1/sales/commissions?${base}`, token,
+  )
+  const producerByTx = new Map<string, number>()
+  for (const it of commItems) {
+    for (const c of it.commissions ?? []) {
+      if (c.source === 'PRODUCER' && it.transaction) producerByTx.set(it.transaction, c.commission?.value ?? 0)
+    }
+  }
+
+  const [appr, compl] = await Promise.all([
+    paginate<SaleItem>(`https://developers.hotmart.com/payments/api/v1/sales/history?transaction_status=APPROVED&${base}`, token),
+    paginate<SaleItem>(`https://developers.hotmart.com/payments/api/v1/sales/history?transaction_status=COMPLETE&${base}`, token),
+  ])
+  const seen = new Set<string>()
+  const out: Record<string, { vendas: number; liquido: number }> = {}
+  for (const it of [...appr, ...compl]) {
+    const tx = it.purchase?.transaction ?? it.transaction ?? ''
+    if (tx && seen.has(tx)) continue
+    if (tx) seen.add(tx)
+    if ((it.purchase?.price?.currency_code ?? 'BRL') !== 'BRL') continue
+    const canon = classifyProduto(it.product?.id ?? 0, it.purchase?.offer?.code)
+    const row = out[canon.nome] ?? { vendas: 0, liquido: 0 }
+    row.vendas++; row.liquido += producerByTx.get(tx) ?? 0
+    out[canon.nome] = row
+  }
+  for (const k of Object.keys(out)) out[k].liquido = round(out[k].liquido)
+  return out
+}

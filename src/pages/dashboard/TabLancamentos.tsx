@@ -295,6 +295,86 @@ function LancamentoModal({ initial, onClose, onSaved }: {
   )
 }
 
+// ─── Bloco de vendas reais dos produtos vinculados (por product_id) ──────────
+
+const ID_TO_NOME: Record<number, string> = Object.fromEntries(PRODUTOS.map(p => [p.id, p.label]))
+
+function VendasProdutoBlock({ token, l }: { token: string; l: Lancamento }) {
+  const [vendas, setVendas] = useState<Record<string, { vendas: number; liquido: number }> | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  const since = l.captura_inicio ?? l.data_inicio ?? ''
+  const until = l.carrinho_fim ?? ''
+
+  useEffect(() => {
+    if (!since || !until) { setLoading(false); return }
+    setLoading(true)
+    fetch(`/api/lancamento-vendas?since=${since}&until=${until}`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : Promise.reject(new Error(String(r.status))))
+      .then(j => setVendas(j.vendasPorProduto ?? {}))
+      .catch(() => setVendas({}))
+      .finally(() => setLoading(false))
+  }, [token, since, until])
+
+  const fmtBRL = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+
+  // Linhas conforme o tipo: pago = ingresso + principal + downsell; interno = principal + downsell.
+  const linhas: { papel: string; id: number | null; metaQtd: number }[] = [
+    ...(l.tipo === 'pago' ? [{ papel: 'Ingresso', id: l.produto_ingresso_id, metaQtd: l.meta_vendas_ingresso }] : []),
+    { papel: 'Produto principal', id: l.produto_principal_id, metaQtd: l.meta_vendas_principal },
+    { papel: 'Downsell', id: l.produto_downsell_id, metaQtd: l.meta_vendas_downsell },
+  ].filter(r => r.id != null)
+
+  if (linhas.length === 0) return null
+
+  return (
+    <div className="rounded-lg border bg-card overflow-hidden">
+      <div className="px-4 py-2.5 border-b bg-muted/40">
+        <p className="text-sm font-semibold">Vendas dos produtos do lançamento</p>
+        <p className="text-xs text-muted-foreground">
+          Todas as vendas por produto no período ({since} → {until}), incluindo compra direta sem lead.
+        </p>
+      </div>
+      {loading ? (
+        <div className="flex justify-center py-6 text-muted-foreground"><Loader2 className="h-5 w-5 animate-spin" /></div>
+      ) : (
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b text-muted-foreground text-xs">
+              <th className="text-left px-4 py-2 font-medium">Papel</th>
+              <th className="text-left px-4 py-2 font-medium">Produto</th>
+              <th className="text-right px-4 py-2 font-medium">Vendas</th>
+              <th className="text-right px-4 py-2 font-medium">Meta (qtd)</th>
+              <th className="text-right px-4 py-2 font-medium">% Meta</th>
+              <th className="text-right px-4 py-2 font-medium">Líquido</th>
+            </tr>
+          </thead>
+          <tbody>
+            {linhas.map(r => {
+              const nome = ID_TO_NOME[r.id!] ?? `id ${r.id}`
+              const v = vendas?.[nome]
+              const qtd = v?.vendas ?? 0
+              const pct = r.metaQtd > 0 ? (qtd / r.metaQtd) * 100 : null
+              return (
+                <tr key={r.papel} className="border-b last:border-0">
+                  <td className="px-4 py-2 font-medium">{r.papel}</td>
+                  <td className="px-4 py-2 text-muted-foreground">{nome}</td>
+                  <td className="px-4 py-2 text-right font-semibold">{qtd}</td>
+                  <td className="px-4 py-2 text-right text-muted-foreground">{r.metaQtd > 0 ? r.metaQtd : '—'}</td>
+                  <td className="px-4 py-2 text-right">
+                    {pct !== null ? <span className={pct >= 100 ? 'text-green-600 font-semibold' : pct >= 70 ? 'text-yellow-600' : 'text-red-600'}>{pct.toFixed(0)}%</span> : '—'}
+                  </td>
+                  <td className="px-4 py-2 text-right text-muted-foreground">{v ? fmtBRL(v.liquido) : '—'}</td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      )}
+    </div>
+  )
+}
+
 // ─── Card de lançamento ──────────────────────────────────────────────────────
 
 function LancamentoCard({ l, onOpen, onEdit, onDelete }: {
@@ -357,6 +437,7 @@ export default function TabLancamentos({ token, enabled }: Props) {
         <button onClick={() => setSelected(null)} className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
           <ChevronLeft className="h-4 w-4" /> Voltar aos lançamentos
         </button>
+        <VendasProdutoBlock token={token} l={selected} />
         <TabBA25
           token={token}
           enabled={true}

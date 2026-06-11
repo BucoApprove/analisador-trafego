@@ -138,7 +138,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         COUNT(*) AS sale_count
       FROM ${tVendas}
       WHERE Status IN ('COMPLETO', 'APROVADO')
-        AND LOWER(TRIM(Nome_do_Produto)) = 'bucoapprove'
+        AND LOWER(TRIM(Nome_do_Produto)) LIKE @productFilter
         AND \`${emailCol}\` IS NOT NULL
         AND TRIM(\`${emailCol}\`) <> ''
         AND \`${dateCol}\` >= @since
