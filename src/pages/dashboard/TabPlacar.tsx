@@ -1,6 +1,22 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
-import { RefreshCw, ChevronDown, ChevronUp, Pencil, Loader2 } from 'lucide-react'
+import { RefreshCw, ChevronDown, ChevronUp, Pencil, Loader2, Settings, Plus, Trash2, X } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
+
+// Produtos selecionáveis no editor de mapeamento (label → product_id gravado
+// na campaign_produto_map; o backend converte o id de volta no nome canônico).
+const PRODUTOS_SELECIONAVEIS: Array<{ label: string; id: number }> = [
+  { label: 'Buco Approve',                id: 2016048 },
+  { label: 'Mentoria CTBMF',              id: 3811518 },
+  { label: 'Pós Patologia',               id: 5694443 },
+  { label: 'Pós Anatomia',                id: 6115663 },
+  { label: 'Planejamento ImpulsoR+',      id: 6739963 },
+  { label: 'Renovação de acesso',         id: 3510472 },
+  { label: 'Rota Enare',                  id: 4739673 },
+  { label: 'BucoApp',                     id: 2286372 },
+  { label: 'Imersão ENARE',               id: 7737553 },
+  { label: 'Segurança Clínica por Casos', id: 7812483 },
+]
+const ID_TO_LABEL: Record<number, string> = Object.fromEntries(PRODUTOS_SELECIONAVEIS.map(p => [p.id, p.label]))
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -211,6 +227,114 @@ function ProdutoRow({ p, stripe, month, onMeta }: { p: Produto; stripe: boolean;
   )
 }
 
+// ─── Modal: mapeamento de campanha → produto (campaign_produto_map) ──────────
+
+interface MapRow { id: number; account: string; prefixo: string; produto_ids: number[]; label: string }
+
+function CampanhaMapModal({ onClose, onChanged }: { onClose: () => void; onChanged: () => void }) {
+  const [account, setAccount] = useState<'conta1' | 'conta2'>('conta1')
+  const [rows, setRows] = useState<MapRow[]>([])
+  const [loading, setLoading] = useState(true)
+  const [newPrefixo, setNewPrefixo] = useState('')
+  const [newId, setNewId] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    const { data } = await supabase
+      .from('campaign_produto_map')
+      .select('id, account, prefixo, produto_ids, label')
+      .eq('account', account)
+      .order('id')
+    setRows((data ?? []) as MapRow[])
+    setLoading(false)
+  }, [account])
+
+  useEffect(() => { load() }, [load])
+
+  async function add() {
+    const idNum = Number(newId)
+    if (!newPrefixo.trim() || !idNum) return
+    setSaving(true)
+    const label = ID_TO_LABEL[idNum] ?? ''
+    const { error } = await supabase.from('campaign_produto_map').insert({
+      account, prefixo: newPrefixo.toLowerCase().trim(), produto_ids: [idNum], label,
+    })
+    setSaving(false)
+    if (!error) { setNewPrefixo(''); setNewId(''); await load(); onChanged() }
+  }
+
+  async function remove(id: number) {
+    await supabase.from('campaign_produto_map').delete().eq('id', id)
+    await load(); onChanged()
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="absolute inset-0 bg-black/40" />
+      <div className="relative z-10 bg-white dark:bg-zinc-900 rounded-xl shadow-2xl w-full max-w-xl max-h-[85vh] flex flex-col border" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 py-4 border-b">
+          <div>
+            <h3 className="font-semibold">Mapeamento de campanhas → produto</h3>
+            <p className="text-xs text-muted-foreground">Trecho do nome da campanha define o produto. Sem regra → vai para <strong>Buco Approve</strong>.</p>
+          </div>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground"><X className="h-4 w-4" /></button>
+        </div>
+
+        {/* Seletor de conta */}
+        <div className="px-5 py-3 border-b flex gap-2">
+          {(['conta1', 'conta2'] as const).map(c => (
+            <button key={c} onClick={() => setAccount(c)}
+              className={`text-xs px-3 py-1.5 rounded border transition-colors ${account === c ? 'bg-primary text-primary-foreground' : 'bg-background hover:bg-muted'}`}>
+              {c === 'conta1' ? 'GBS Launch (conta1)' : 'GBS Pós (conta2)'}
+            </button>
+          ))}
+        </div>
+
+        {/* Nova regra */}
+        <div className="px-5 py-3 border-b bg-muted/20">
+          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Nova regra</p>
+          <div className="flex gap-2">
+            <input
+              className="flex-1 text-sm border rounded px-2.5 py-1.5 bg-background font-mono"
+              placeholder="trecho do nome (ex: anato)"
+              value={newPrefixo}
+              onChange={e => setNewPrefixo(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') add() }}
+            />
+            <select className="text-sm border rounded px-2 py-1.5 bg-background" value={newId} onChange={e => setNewId(e.target.value)}>
+              <option value="">produto…</option>
+              {PRODUTOS_SELECIONAVEIS.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
+            </select>
+            <button onClick={add} disabled={saving || !newPrefixo.trim() || !newId}
+              className="text-xs px-3 py-1.5 rounded bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 flex items-center gap-1">
+              {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
+            </button>
+          </div>
+        </div>
+
+        {/* Lista */}
+        <div className="overflow-y-auto flex-1 p-2">
+          {loading && <div className="flex justify-center py-8 text-muted-foreground"><Loader2 className="h-5 w-5 animate-spin" /></div>}
+          {!loading && rows.length === 0 && (
+            <p className="text-sm text-muted-foreground text-center py-8">Nenhuma regra nesta conta. Tudo cai em Buco Approve.</p>
+          )}
+          {rows.map(r => (
+            <div key={r.id} className="flex items-center gap-2 px-3 py-2 rounded hover:bg-muted/40 group">
+              <code className="text-xs bg-muted px-1.5 py-0.5 rounded">{r.prefixo}</code>
+              <span className="text-muted-foreground text-xs">→</span>
+              <span className="text-sm flex-1">{ID_TO_LABEL[r.produto_ids?.[0]] ?? r.label ?? `id ${r.produto_ids?.[0]}`}</span>
+              <button onClick={() => remove(r.id)} className="opacity-0 group-hover:opacity-100 p-1 text-muted-foreground hover:text-destructive transition-all">
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ─── Main ────────────────────────────────────────────────────────────────────
 
 export default function TabPlacar({ token, enabled }: Props) {
@@ -218,6 +342,7 @@ export default function TabPlacar({ token, enabled }: Props) {
   const [data, setData] = useState<PlacarResp | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [showMap, setShowMap] = useState(false)
 
   const load = useCallback(async (m: string) => {
     setLoading(true)
@@ -280,12 +405,18 @@ export default function TabPlacar({ token, enabled }: Props) {
           <select value={month} onChange={e => setMonth(e.target.value)} className="text-sm border rounded px-2 py-1.5 bg-background">
             {monthOptions.map(m => <option key={m} value={m}>{m}</option>)}
           </select>
+          <button onClick={() => setShowMap(true)} className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded border bg-background hover:bg-muted transition-colors" title="Mapear campanhas para produtos">
+            <Settings className="h-3.5 w-3.5" />
+            Campanhas
+          </button>
           <button onClick={() => load(month)} disabled={loading} className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded border bg-background hover:bg-muted transition-colors disabled:opacity-50">
             <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
             Atualizar
           </button>
         </div>
       </div>
+
+      {showMap && <CampanhaMapModal onClose={() => setShowMap(false)} onChanged={() => load(month)} />}
 
       <div className="rounded-md bg-blue-50 border border-blue-200 px-4 py-2 text-xs text-blue-800">
         ⚙️ Aba em construção. O gasto de cada campanha é atribuído ao produto pela aba <strong>Produtos/Campanhas</strong> (prefixo → produto). Campanha sem regra cai em <strong>Buco Approve</strong>.

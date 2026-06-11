@@ -43,6 +43,25 @@ export const PRODUTOS_CORE: Record<number, ProdutoCanonico> = {
 export const LOW_TICKET = 'Low ticket'
 
 /**
+ * Produtos selecionáveis no editor de mapeamento de campanha (Placar).
+ * label exibido → product_id gravado na campaign_produto_map.
+ * O classifyProduto converte de volta esse id no nome canônico ao ler o gasto.
+ * "Buco Approve" usa o id do BucoApprove (2016048).
+ */
+export const PRODUTOS_SELECIONAVEIS: Array<{ label: string; id: number }> = [
+  { label: 'Buco Approve',              id: 2016048 },
+  { label: 'Mentoria CTBMF',            id: 3811518 },
+  { label: 'Pós Patologia',             id: 5694443 },
+  { label: 'Pós Anatomia',              id: 6115663 },
+  { label: 'Planejamento ImpulsoR+',    id: 6739963 },
+  { label: 'Renovação de acesso',       id: 3510472 },
+  { label: 'Rota Enare',                id: 4739673 },
+  { label: 'BucoApp',                   id: 2286372 },
+  { label: 'Imersão ENARE',             id: 7737553 },
+  { label: 'Segurança Clínica por Casos', id: 7812483 },
+]
+
+/**
  * Classifica uma venda no produto canônico, considerando id e oferta.
  * @param productId  product.id da Hotmart
  * @param offerCode  purchase.offer.code (só relevante para o BucoApprove)
