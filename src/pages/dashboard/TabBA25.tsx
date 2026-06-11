@@ -25,6 +25,7 @@ interface Props {
   nome?: string
   productFilter?: string   // filtro LIKE de produto de venda (default BucoApprove)
   surveySheetId?: string   // planilha de pesquisa de boas-vindas
+  goalsOverride?: GoalsData | null  // metas vindas do lançamento (substitui /api/goals-data)
 }
 
 const FIXED_PREFIX = 'BA25'
@@ -517,6 +518,7 @@ export default function TabBA25({
   nome = 'BA25',
   productFilter = '',
   surveySheetId = '',
+  goalsOverride,
 }: Props) {
   const [since, setSince] = useState(defaultSince)
   const [until, setUntil] = useState(defaultUntil)
@@ -537,13 +539,19 @@ export default function TabBA25({
   }>())
 
   const loadGoals = useCallback(async () => {
+    // Se o lançamento trouxe as metas (goalsOverride), usa elas; senão busca a
+    // planilha legada do BA25 (/api/goals-data).
+    if (goalsOverride !== undefined) {
+      setGoals(goalsOverride)
+      return
+    }
     try {
       const res = await fetch('/api/goals-data', { headers: { Authorization: `Bearer ${token}` } })
       if (res.ok) setGoals(await res.json())
     } catch {
       // silencioso — metas são complementares
     }
-  }, [token])
+  }, [token, goalsOverride])
 
   const load = useCallback(async (force = false) => {
     const cacheKey = `${prefix}_${since}_${until}_${productFilter}`

@@ -2,7 +2,37 @@ import { useState, useCallback, useEffect } from 'react'
 import { Plus, X, Loader2, Trash2, ChevronLeft, Calendar, Pencil } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import type { Lancamento } from '@/lib/supabase'
+import type { GoalsData } from './types'
 import TabBA25 from './TabBA25'
+
+// Monta o objeto de metas (GoalsData) a partir do lançamento, substituindo a
+// planilha legada do goals-data. Origens de captura e keywords de fase são
+// fixas (Tráfego/Orgânico/Manychat · instagram/engajamento/lembrete/remarketing).
+function goalsFromLancamento(l: Lancamento): GoalsData {
+  return {
+    metaLeadsTrafico: l.meta_leads_trafico,
+    metaLeadsOrganico: l.meta_leads_organico,
+    metaLeadsManychat: l.meta_leads_manychat,
+    orcamentoTotal: l.orcamento_total,
+    inicioCaptacao: l.captura_inicio ?? '',
+    finalCaptacao: l.captura_fim ?? '',
+    orcamentoPorFase: {
+      captura: l.orcamento_captura,
+      descoberta: l.orcamento_descoberta,
+      aquecimento: l.orcamento_aquecimento,
+      lembrete: l.orcamento_lembrete,
+      remarketing: l.orcamento_remarketing,
+    },
+    tagsReferencia: {
+      lancamento: l.prefixo,
+      captura: 'Captura',
+      descoberta: 'Instagram',
+      aquecimento: 'Engajamento',
+      lembrete: 'Lembrete',
+      remarketing: 'Remarketing',
+    },
+  }
+}
 
 interface Props { token: string; enabled: boolean }
 
@@ -251,6 +281,9 @@ export default function TabLancamentos({ token, enabled }: Props) {
           defaultSince={selected.captura_inicio ?? selected.data_inicio ?? ''}
           defaultUntil={selected.carrinho_fim ?? ''}
           nome={selected.nome}
+          productFilter={selected.produto_venda}
+          surveySheetId={selected.survey_sheet_id}
+          goalsOverride={goalsFromLancamento(selected)}
         />
       </div>
     )
