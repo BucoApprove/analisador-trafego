@@ -368,10 +368,12 @@ function TopAdsBlock({
   byLeads,
   salesByContent,
   spendByContent,
+  prefix,
 }: {
   byLeads: { name: string; leads: number }[]
   salesByContent: UtmSalesAttribution[] | undefined
   spendByContent: Record<string, number> | undefined
+  prefix: string
 }) {
   const brl = (v: number) =>
     v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -488,9 +490,9 @@ function TopAdsBlock({
   return (
     <div className="rounded-lg border bg-card overflow-hidden">
       <div className="px-4 py-2.5 border-b bg-muted/40">
-        <p className="text-sm font-semibold">Top 10 Anúncios — BA25 Captura</p>
+        <p className="text-sm font-semibold">Top 10 Anúncios — {prefix} Captura</p>
         <p className="text-xs text-muted-foreground">
-          Leads: registros com tag BA25-Captura · Vendas: compradores BA25 por criativo (last-touch na coluna de leads) · Invest.: Meta Ads spend
+          Leads: registros com tag {prefix}-Captura · Vendas: compradores por criativo (last-touch na coluna de leads) · Invest.: Meta Ads spend
         </p>
       </div>
       <div className="p-4 grid gap-6 grid-cols-1 md:grid-cols-2">
@@ -510,6 +512,7 @@ export default function TabBA25({
   orFilter = FIXED_OR_FILTER,
   defaultSince = FIXED_SINCE,
   defaultUntil = FIXED_UNTIL,
+  nome = 'BA25',
 }: Props) {
   const [since, setSince] = useState(defaultSince)
   const [until, setUntil] = useState(defaultUntil)
@@ -774,8 +777,8 @@ export default function TabBA25({
       {/* Cabeçalho fixo com controles de data */}
       <div className="rounded-lg border bg-card p-4">
         <SectionHeader
-          title="BA25 — Lançamento Bolsa Aprígio 2025"
-          description="Análise completa do lançamento BA25. Inclui todos os leads captados via tags BA25 e campanhas Meta Ads com filtro BA25 + CAPTURA."
+          title={nome}
+          description={`Análise completa do lançamento ${nome}. Leads captados via tags ${prefix} e campanhas Meta Ads com filtro ${prefix} + CAPTURA.`}
         />
         <div className="flex flex-wrap items-end gap-3 mt-3">
           <div>
@@ -819,7 +822,7 @@ export default function TabBA25({
           )}
           <div className="flex gap-2 ml-auto text-xs text-muted-foreground items-center">
             <span className="rounded-full bg-muted px-2 py-0.5 font-mono">Prefixo: {prefix}</span>
-            <span className="rounded-full bg-muted px-2 py-0.5 font-mono">Meta: todas campanhas BA25</span>
+            <span className="rounded-full bg-muted px-2 py-0.5 font-mono">Meta: campanhas {spendFilter}</span>
             <span className="rounded-full bg-muted px-2 py-0.5">Busca ampliada ✓</span>
           </div>
         </div>
@@ -840,7 +843,7 @@ export default function TabBA25({
           <div className="rounded-lg border bg-card overflow-hidden">
             <div className="flex flex-wrap items-center justify-between gap-x-4 px-4 py-2 border-b bg-muted/40">
               <span className="text-sm font-semibold">
-                Lançamento: <span style={{ color: CHART_COLORS[1] }}>BA25</span>
+                Lançamento: <span style={{ color: CHART_COLORS[1] }}>{nome}</span>
               </span>
               <span className="text-xs text-muted-foreground">{data.dateRange.since} → {data.dateRange.until}</span>
             </div>
@@ -962,6 +965,7 @@ export default function TabBA25({
               byLeads={captureAdLeads}
               salesByContent={salesUtmData?.byContent}
               spendByContent={data.spendByUtm?.content}
+              prefix={prefix}
             />
           )}
 
@@ -1244,7 +1248,7 @@ export default function TabBA25({
             <div className="rounded-lg border bg-card overflow-hidden">
               <div className="px-4 py-2.5 border-b bg-muted/40 flex flex-wrap items-center justify-between gap-2">
                 <div>
-                  <p className="text-sm font-semibold">Perfil dos Compradores — Pesquisa de Boas-Vindas BA25</p>
+                  <p className="text-sm font-semibold">Perfil dos Compradores — Pesquisa de Boas-Vindas</p>
                   <p className="text-xs text-muted-foreground">
                     {surveyData.surveyMatches > 0
                       ? `${surveyData.surveyMatches} de ${surveyData.totalBuyers} compradores responderam (${surveyData.totalBuyers > 0 ? Math.round((surveyData.surveyMatches / surveyData.totalBuyers) * 100) : 0}%)`
@@ -1433,7 +1437,7 @@ export default function TabBA25({
                     rows={data.byMedium}
                     total={data.totalUnique}
                     color={CHART_COLORS[1]}
-                    hint="No BA25 corresponde ao nome do conjunto de anúncios (adset), ex: Env7d_Visitantes180d."
+                    hint="Corresponde ao nome do conjunto de anúncios (adset), ex: Env7d_Visitantes180d."
                     getCpl={makeGetCpl(data.spendByUtm?.medium)}
                     cplNote="CPL calculado a partir do gasto real por conjunto de anúncios (adset) no período."
                     salesRows={salesUtmData?.byMedium}
@@ -1458,7 +1462,7 @@ export default function TabBA25({
                     rows={data.byContent}
                     total={data.totalUnique}
                     color={CHART_COLORS[3]}
-                    hint="No BA25 corresponde ao nome do anúncio (ad), ex: BA25_Ad_Captura_22."
+                    hint="Corresponde ao nome do anúncio (ad), ex: Ad_Captura_22."
                     getCpl={makeGetCpl(data.spendByUtm?.content)}
                     cplNote="CPL calculado a partir do gasto real por anúncio no período."
                     salesRows={salesUtmData?.byContent}
