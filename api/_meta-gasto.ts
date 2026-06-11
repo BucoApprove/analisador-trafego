@@ -1,70 +1,62 @@
 /**
- * Gasto Meta Ads das DUAS contas do negócio, classificado por produto canônico.
+ * Gasto Meta Ads das DUAS contas do negócio, atribuído a produto + etapa.
  *
  * Contas (env META_AD_ACCOUNTS = CSV de account_ids; fallback p/ META_AD_ACCOUNT_ID):
- *   1082683452063319 — GBS Launch (lançamentos, Buco, Intensivo, Imersão, topo)
- *   565958430809772  — GBS Pós-graduações (Pós + Low ticket, inclusive intl)
+ *   1082683452063319 — GBS Launch
+ *   565958430809772  — GBS Pós-graduações
  *
- * Classificação por palavra no nome da campanha (primeira que casar), espelhando
- * a régua do placar do sócio. Campanhas que não casam com produto viram "topo"
- * (descoberta/relacionamento/remarketing) — gasto que não entra no ROAS de produto.
+ * Atribuição de PRODUTO: por keyword no nome da campanha (tabela
+ * campaign_mappings, editável na UI). A primeira keyword que casar vence.
+ * Campanha que não casa com nenhuma regra → "Buco Approve" (fallback total).
+ *
+ * Atribuição de ETAPA: derivada do nome da campanha por palavra-chave fixa
+ * (conversão / remarketing / descoberta / relacionamento). Default: conversão.
  */
+import { createClient } from '@supabase/supabase-js'
 
-// nome canônico do produto OU rótulo de topo de funil.
+export type Etapa = 'conversão' | 'remarketing' | 'descoberta' | 'relacionamento'
+export const ETAPAS: Etapa[] = ['conversão', 'remarketing', 'descoberta', 'relacionamento']
+
+export const FALLBACK_PRODUTO = 'Buco Approve'
+
 export interface CampanhaGasto {
   campaign: string
   conta: string
   spend: number
-  alvo: string        // produto canônico ou rótulo de topo
-  isProduto: boolean  // true = casa com um produto canônico (entra no ROAS)
+  produto: string
+  etapa: Etapa
 }
 
 export interface MetaGasto {
   campanhas: CampanhaGasto[]
-  gastoPorProduto: Record<string, number>  // só alvos isProduto=true
-  gastoTopo: Record<string, number>        // descoberta/relacionamento/remarketing/não atribuído
-  totalGasto: number       // soma das contas (fechamento real)
-  totalClassificado: number
+  // gasto[produto] = total; gastoPorEtapa[produto][etapa] = split p/ tooltip
+  gastoPorProduto: Record<string, number>
+  gastoPorEtapa: Record<string, Record<Etapa, number>>
+  totalGasto: number          // soma real das contas (fechamento)
+  totalClassificado: number   // soma do que foi atribuído a campanhas
 }
 
-// Régua de classificação: [keyword, alvo, isProduto]. Primeira que casar vence.
-// Os alvos isProduto=true usam exatamente os nomes canônicos (api/_produtos-canonicos.ts).
-const REGRAS: Array<[string, string, boolean]> = [
-  ['low_', 'Low ticket', true],
-  ['intensiv', 'Intensivo ENARE', true],
-  ['vendas anato', 'Pós Anatomia', true],
-  ['anatomia', 'Pós Anatomia', true],
-  ['patologia', 'Pós Patologia', true],
-  ['mentoria', 'Mentoria CTBMF', true],
-  ['pptba', 'Buco Approve', true],
-  ['bucoapprove', 'Buco Approve', true],
-  ['ba25', 'Buco Approve', true],
-  ['planejamento', 'Planejamento ImpulsoR+', true],
-  ['rota enare', 'Rota Enare', true],
-  ['renova', 'Renovação de acesso', true],
-  // portas de entrada (geram lead, vendem indireto — tratadas como produto p/ ROAS próprio)
-  ['imersao', 'Imersão ENARE', true],
-  ['imersão', 'Imersão ENARE', true],
-  ['quiz', 'Quiz ENARE', true],
-  // topo de funil (não atribuível a produto)
-  ['[instagram]', 'Topo: Descoberta', false],
-  ['post:', 'Topo: Descoberta', false],
-  ['video', 'Topo: Descoberta', false],
-  ['vview', 'Topo: Descoberta', false],
-  ['captura', 'Topo: Descoberta', false],
-  ['aulas semanais', 'Topo: Descoberta', false],
-  ['relacionamento', 'Topo: Relacionamento', false],
-  ['engajamento', 'Topo: Relacionamento', false],
-  ['remarketing', 'Topo: Remarketing', false],
-  ['rmkt', 'Topo: Remarketing', false],
+// Detecção de etapa por palavra-chave no nome (primeira que casar). Default: conversão.
+const ETAPA_KEYWORDS: Array<[string, Etapa]> = [
+  ['remarketing', 'remarketing'],
+  ['rmkt', 'remarketing'],
+  ['relacionamento', 'relacionamento'],
+  ['engajamento', 'relacionamento'],
+  ['descoberta', 'descoberta'],
+  ['[instagram]', 'descoberta'],
+  ['post:', 'descoberta'],
+  ['video', 'descoberta'],
+  ['vview', 'descoberta'],
+  ['captura', 'descoberta'],
+  ['aulas semanais', 'descoberta'],
 ]
 
-function classificarCampanha(nome: string): { alvo: string; isProduto: boolean } {
+function detectarEtapa(nome: string): Etapa {
   const n = nome.toLowerCase()
-  for (const [kw, alvo, isProduto] of REGRAS) {
-    if (n.includes(kw)) return { alvo, isProduto }
+  for (const [kw, etapa] of ETAPA_KEYWORDS) {
+    if (n.includes(kw)) return etapa
   }
-  return { alvo: 'Topo: não atribuído', isProduto: false }
+  return 'conversão'
 }
 
 function accountIds(): string[] {
@@ -74,15 +66,41 @@ function accountIds(): string[] {
   return single ? [single.replace(/^act_/, '')] : []
 }
 
+async function fetchCampaignMappings(): Promise<Array<{ keyword: string; product: string }>> {
+  const sb = createClient(process.env.SUPABASE_URL ?? '', process.env.SUPABASE_SERVICE_KEY ?? '', {
+    auth: { persistSession: false },
+  })
+  const { data, error } = await sb.from('campaign_mappings').select('keyword, product_name')
+  if (error) throw new Error(`campaign_mappings query failed: ${error.message}`)
+  // keywords mais longas primeiro: regra mais específica vence
+  return (data ?? [])
+    .map(r => ({ keyword: r.keyword.toLowerCase(), product: r.product_name }))
+    .sort((a, b) => b.keyword.length - a.keyword.length)
+}
+
+function matchProduto(nome: string, regras: Array<{ keyword: string; product: string }>): string {
+  const n = nome.toLowerCase()
+  for (const r of regras) {
+    if (r.keyword && n.includes(r.keyword)) return r.product
+  }
+  return FALLBACK_PRODUTO
+}
+
 const round = (n: number) => Math.round(n * 100) / 100
 
-/** Busca e classifica o gasto Meta das contas configuradas para um mês "YYYY-MM". */
+function emptyEtapas(): Record<Etapa, number> {
+  return { 'conversão': 0, remarketing: 0, descoberta: 0, relacionamento: 0 }
+}
+
+/** Busca e atribui o gasto Meta das contas configuradas para um mês "YYYY-MM". */
 export async function fetchMetaGasto(month: string): Promise<MetaGasto> {
   const token = process.env.META_ACCESS_TOKEN ?? ''
   const accounts = accountIds()
   if (!token || accounts.length === 0) {
     throw new Error('META_ACCESS_TOKEN ou META_AD_ACCOUNTS/META_AD_ACCOUNT_ID não configurado')
   }
+
+  const regras = await fetchCampaignMappings()
 
   const [y, m] = month.split('-').map(Number)
   const since = `${month}-01`
@@ -91,11 +109,10 @@ export async function fetchMetaGasto(month: string): Promise<MetaGasto> {
 
   const campanhas: CampanhaGasto[] = []
   const gastoPorProduto: Record<string, number> = {}
-  const gastoTopo: Record<string, number> = {}
+  const gastoPorEtapa: Record<string, Record<Etapa, number>> = {}
   let totalGasto = 0
 
   for (const aid of accounts) {
-    // gasto por campanha
     const campUrl = new URL(`https://graph.facebook.com/v21.0/act_${aid}/insights`)
     campUrl.searchParams.set('level', 'campaign')
     campUrl.searchParams.set('fields', 'campaign_name,spend')
@@ -111,13 +128,15 @@ export async function fetchMetaGasto(month: string): Promise<MetaGasto> {
       const spend = Number(row.spend ?? 0)
       if (!spend) continue
       const nome = row.campaign_name ?? '(sem nome)'
-      const { alvo, isProduto } = classificarCampanha(nome)
-      campanhas.push({ campaign: nome, conta: aid, spend: round(spend), alvo, isProduto })
-      if (isProduto) gastoPorProduto[alvo] = (gastoPorProduto[alvo] ?? 0) + spend
-      else gastoTopo[alvo] = (gastoTopo[alvo] ?? 0) + spend
+      const produto = matchProduto(nome, regras)
+      const etapa = detectarEtapa(nome)
+      campanhas.push({ campaign: nome, conta: aid, spend: round(spend), produto, etapa })
+
+      gastoPorProduto[produto] = (gastoPorProduto[produto] ?? 0) + spend
+      ;(gastoPorEtapa[produto] ??= emptyEtapas())[etapa] += spend
     }
 
-    // total da conta (fechamento — pega gasto sem campanha/arquivado também)
+    // total da conta (fechamento)
     const totUrl = new URL(`https://graph.facebook.com/v21.0/act_${aid}/insights`)
     totUrl.searchParams.set('fields', 'spend')
     totUrl.searchParams.set('time_range', timeRange)
@@ -130,15 +149,15 @@ export async function fetchMetaGasto(month: string): Promise<MetaGasto> {
   }
 
   for (const k of Object.keys(gastoPorProduto)) gastoPorProduto[k] = round(gastoPorProduto[k])
-  for (const k of Object.keys(gastoTopo)) gastoTopo[k] = round(gastoTopo[k])
-  const totalClassificado = round(
-    Object.values(gastoPorProduto).reduce((s, v) => s + v, 0) + Object.values(gastoTopo).reduce((s, v) => s + v, 0),
-  )
+  for (const p of Object.keys(gastoPorEtapa)) {
+    for (const e of ETAPAS) gastoPorEtapa[p][e] = round(gastoPorEtapa[p][e])
+  }
+  const totalClassificado = round(Object.values(gastoPorProduto).reduce((s, v) => s + v, 0))
 
   return {
     campanhas: campanhas.sort((a, b) => b.spend - a.spend),
     gastoPorProduto,
-    gastoTopo,
+    gastoPorEtapa,
     totalGasto: round(totalGasto),
     totalClassificado,
   }

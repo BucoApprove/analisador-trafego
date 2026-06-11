@@ -43,8 +43,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const meta = 'erro' in metaResult ? null : metaResult
     const gastoPorProduto = meta?.gastoPorProduto ?? {}
+    const gastoPorEtapa = meta?.gastoPorEtapa ?? {}
 
-    // Anexa meta, gasto e ROAS a cada produto.
+    // Produtos do Hotmart que também têm gasto Meta atribuído.
+    const nomesHotmart = new Set(hotmart.produtos.map(p => p.nome))
+
+    // Anexa meta, gasto (+ split por etapa) e ROAS a cada produto.
     //   goalName = chave em monthly_goals (de/para p/ produtos antigos, nome
     //   canônico p/ novos) — edição no Placar sincroniza com a Metas Mensais.
     const produtos = hotmart.produtos.map(p => {
@@ -52,8 +56,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const metaVal = allGoals.get(goalName) ?? null
       const gasto = gastoPorProduto[p.nome] ?? 0
       const roas = gasto > 0 ? Math.round((p.liquido / gasto) * 100) / 100 : null
-      return { ...p, meta: metaVal, goalName, gasto, roas }
+      return { ...p, meta: metaVal, goalName, gasto, roas, gastoEtapas: gastoPorEtapa[p.nome] ?? null }
     })
+
+    // Gasto atribuído a um produto que NÃO teve venda no Hotmart (ex: campanha de
+    // Quiz/produto sem faturamento no mês). Aparece à parte para não sumir.
+    const gastoSemVenda = Object.entries(gastoPorProduto)
+      .filter(([nome]) => !nomesHotmart.has(nome))
+      .map(([nome, gasto]) => ({ nome, gasto, etapas: gastoPorEtapa[nome] ?? null }))
+      .sort((a, b) => b.gasto - a.gasto)
 
     const totalMeta = produtos.reduce((s, p) => s + (p.meta ?? 0), 0)
 
@@ -64,7 +75,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       totalMeta,
       meta: meta ? {
         totalGasto: meta.totalGasto,
-        gastoTopo: meta.gastoTopo,
+        totalClassificado: meta.totalClassificado,
+        gastoSemVenda,
         campanhas: meta.campanhas,
       } : null,
       metaError: 'erro' in metaResult ? metaResult.erro : null,

@@ -127,3 +127,17 @@ create table if not exists product_mappings (
   updated_at   timestamptz not null default now()
 );
 alter table product_mappings disable row level security;
+
+-- ─────────────────────────────────────────────────────────────────────────────
+
+-- Matching de campanhas Meta Ads → produto (aba Placar).
+-- keyword = trecho do nome da campanha (case-insensitive); a primeira regra que
+-- casar define o produto. Campanhas que não casam com nenhuma regra vão para
+-- "Buco Approve" (fallback). A etapa (conversão/remarketing/descoberta/
+-- relacionamento) é derivada do nome em código, não cadastrada aqui.
+create table if not exists campaign_mappings (
+  keyword      text primary key,
+  product_name text not null,
+  updated_at   timestamptz not null default now()
+);
+alter table campaign_mappings disable row level security;
