@@ -183,7 +183,7 @@ function GastoCell({ gasto, etapas }: { gasto: number; etapas: EtapaGasto | null
 
 // ─── Linha de produto (com drill-down de ofertas) ────────────────────────────
 
-function ProdutoRow({ p, stripe, month, onMeta, enxuta }: { p: Produto; stripe: boolean; month: string; onMeta: (goalName: string, v: number) => void; enxuta: boolean }) {
+function ProdutoRow({ p, stripe, month, onMeta, enxuta, leadsUtm, leadsClint, clintAtivo }: { p: Produto; stripe: boolean; month: string; onMeta: (goalName: string, v: number) => void; enxuta: boolean; leadsUtm: number | null; leadsClint: number | null; clintAtivo: boolean }) {
   const [open, setOpen] = useState(false)
   const pct = p.meta && p.meta > 0 ? (p.liquido / p.meta) * 100 : null
   const hasOfertas = (p.ofertas?.length ?? 0) > 1
@@ -209,6 +209,14 @@ function ProdutoRow({ p, stripe, month, onMeta, enxuta }: { p: Produto; stripe: 
       <tr className={`border-b ${stripe ? 'bg-muted/20' : ''}`}>
         {nomeCell}
         <td className={`px-4 ${enxuta ? 'py-3' : 'py-2.5'} text-right`}>{p.vendas}</td>
+        <td className={`px-4 ${enxuta ? 'py-3' : 'py-2.5'} text-right`}>
+          <div title="Leads UTM (BigQuery)">{leadsUtm != null && leadsUtm > 0 ? leadsUtm.toLocaleString('pt-BR') : '—'}</div>
+          {clintAtivo && (
+            <div className="text-xs text-muted-foreground" title="Leads Clint (CRM)">
+              {leadsClint != null && leadsClint > 0 ? `${leadsClint.toLocaleString('pt-BR')} Clint` : '—'}
+            </div>
+          )}
+        </td>
 
         {enxuta ? (
           <>
@@ -255,6 +263,7 @@ function ProdutoRow({ p, stripe, month, onMeta, enxuta }: { p: Produto; stripe: 
             {o.nome}{o.nome !== o.code && <span className="not-italic opacity-50"> ({o.code})</span>}
           </td>
           <td className="px-4 py-1.5 text-right">{o.vendas}</td>
+          <td className="px-4 py-1.5" />
           <td className="px-4 py-1.5 text-right">{fmtBRL(o.liquido)}</td>
           <td colSpan={enxuta ? 1 : 5} />
         </tr>
@@ -382,6 +391,7 @@ export default function TabPlacar({ token, enabled }: Props) {
   // Visualização: completa (todas colunas) ou enxuta (meta/% sob líquido, CPA/ROAS sob gasto).
   const [enxuta, setEnxuta] = useState(() => localStorage.getItem('placar-view') === 'enxuta')
   const toggleView = () => setEnxuta(e => { localStorage.setItem('placar-view', !e ? 'enxuta' : 'completa'); return !e })
+  const [leads, setLeads] = useState<{ leadsUtm: Record<string, number>; leadsClint: Record<string, number>; clintAtivo: boolean } | null>(null)
 
   const load = useCallback(async (m: string) => {
     setLoading(true)
@@ -400,7 +410,16 @@ export default function TabPlacar({ token, enabled }: Props) {
     }
   }, [token])
 
-  useEffect(() => { if (enabled) load(month) }, [enabled, month, load])
+  // Leads (UTM + Clint) — carrega em paralelo, não bloqueia a tabela.
+  const loadLeads = useCallback(async (m: string) => {
+    setLeads(null)
+    try {
+      const r = await fetch(`/api/placar-leads?month=${m}`, { headers: { Authorization: `Bearer ${token}` } })
+      if (r.ok) setLeads(await r.json())
+    } catch { /* silencioso — leads são complementares */ }
+  }, [token])
+
+  useEffect(() => { if (enabled) { load(month); loadLeads(month) } }, [enabled, month, load, loadLeads])
 
   // Atualiza localmente a meta de todos os produtos que usam o mesmo goalName.
   const onMeta = useCallback((goalName: string, v: number) => {
@@ -524,6 +543,7 @@ export default function TabPlacar({ token, enabled }: Props) {
               <tr className="border-b bg-muted/50">
                 <th className="text-left px-4 py-2.5 font-medium">Produto</th>
                 <th className="text-right px-4 py-2.5 font-medium">Vendas</th>
+                <th className="text-right px-4 py-2.5 font-medium" title="Leads UTM (cruzado no BigQuery) e Leads Clint (CRM)">Leads</th>
                 <th className="text-right px-4 py-2.5 font-medium">Líquido{enxuta && ' / Meta'}</th>
                 {!enxuta && <th className="text-right px-4 py-2.5 font-medium">Meta</th>}
                 {!enxuta && <th className="text-right px-4 py-2.5 font-medium">% Meta</th>}
@@ -533,12 +553,25 @@ export default function TabPlacar({ token, enabled }: Props) {
               </tr>
             </thead>
             <tbody>
-              {produtos.map((p, i) => <ProdutoRow key={p.nome} p={p} stripe={i % 2 !== 0} month={month} onMeta={onMeta} enxuta={enxuta} />)}
+              {produtos.map((p, i) => (
+                <ProdutoRow key={p.nome} p={p} stripe={i % 2 !== 0} month={month} onMeta={onMeta} enxuta={enxuta}
+                  leadsUtm={leads?.leadsUtm[p.nome] ?? null}
+                  leadsClint={leads?.leadsClint[p.nome] ?? null}
+                  clintAtivo={leads?.clintAtivo ?? false} />
+              ))}
             </tbody>
             <tfoot>
               <tr className="border-t bg-muted/50 font-semibold">
                 <td className="px-4 py-2.5">Total</td>
                 <td className="px-4 py-2.5 text-right">{data?.totalVendas ?? 0}</td>
+                <td className="px-4 py-2.5 text-right">
+                  {leads ? (
+                    <>
+                      <div>{Object.values(leads.leadsUtm).reduce((s, v) => s + v, 0).toLocaleString('pt-BR')}</div>
+                      {leads.clintAtivo && <div className="text-xs font-normal text-muted-foreground">{Object.values(leads.leadsClint).reduce((s, v) => s + v, 0).toLocaleString('pt-BR')} Clint</div>}
+                    </>
+                  ) : '—'}
+                </td>
                 {enxuta ? (
                   <>
                     <td className="px-4 py-2.5 text-right">
