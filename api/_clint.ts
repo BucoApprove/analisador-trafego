@@ -27,6 +27,28 @@ async function fetchTagsPorProduto(): Promise<Record<string, string[]>> {
   return map
 }
 
+/** Lista as tags da Clint (id + nome) para o dropdown do editor. */
+export async function fetchClintTagsList(): Promise<Array<{ id: string; name: string }>> {
+  const token = process.env.CLINT_API_TOKEN ?? ''
+  if (!token) return []
+  const out: Array<{ id: string; name: string }> = []
+  let offset = 0
+  for (let i = 0; i < 50; i++) {
+    const url = new URL(`${BASE}/v1/tags`)
+    url.searchParams.set('limit', '100')
+    url.searchParams.set('offset', String(offset))
+    const r = await fetch(url.toString(), { headers: { 'api-token': token, Accept: 'application/json' } })
+    if (!r.ok) throw new Error(`Clint /v1/tags ${r.status}`)
+    const body = await r.text()
+    const data = lst(body ? JSON.parse(body) : []) as Array<{ id?: string; name?: string }>
+    if (data.length === 0) break
+    for (const t of data) if (t.id) out.push({ id: t.id, name: t.name ?? t.id })
+    if (data.length < 100) break
+    offset += 100
+  }
+  return out.sort((a, b) => a.name.localeCompare(b.name))
+}
+
 interface Deal { id?: string; created_at?: string }
 
 function lst(p: unknown): Deal[] {

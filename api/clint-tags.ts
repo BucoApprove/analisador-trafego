@@ -10,6 +10,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { createClient } from '@supabase/supabase-js'
 import { authUser, requireAdmin } from './_supabase-auth.js'
+import { fetchClintTagsList } from './_clint.js'
 
 function getSupabase() {
   return createClient(process.env.SUPABASE_URL ?? '', process.env.SUPABASE_SERVICE_KEY ?? '', {
@@ -24,6 +25,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const sb = getSupabase()
 
   if (req.method === 'GET') {
+    // ?available=1 → lista as tags da Clint (id+nome) para o dropdown
+    if (req.query.available === '1') {
+      try {
+        const available = await fetchClintTagsList()
+        return res.json({ available })
+      } catch (err) {
+        return res.status(502).json({ error: 'Falha ao listar tags da Clint', detail: (err as Error).message })
+      }
+    }
     const { data, error } = await sb.from('clint_tags').select('id, product_name, tag_id, label').order('product_name')
     if (error) return res.status(500).json({ error: error.message })
     return res.json({ tags: data ?? [] })

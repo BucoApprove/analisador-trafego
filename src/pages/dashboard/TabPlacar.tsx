@@ -388,9 +388,11 @@ function ClintTagsModal({ token, onClose, onChanged }: { token: string; onClose:
   const [rows, setRows] = useState<ClintTagRow[]>([])
   const [loading, setLoading] = useState(true)
   const [prod, setProd] = useState('')
-  const [tagId, setTagId] = useState('')
-  const [label, setLabel] = useState('')
+  const [available, setAvailable] = useState<{ id: string; name: string }[] | null>(null)
+  const [tagSearch, setTagSearch] = useState('')
+  const [selectedTag, setSelectedTag] = useState<{ id: string; name: string } | null>(null)
   const [saving, setSaving] = useState(false)
+  const [tagsErro, setTagsErro] = useState('')
 
   const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }
 
@@ -402,13 +404,28 @@ function ClintTagsModal({ token, onClose, onChanged }: { token: string; onClose:
     setLoading(false)
   }, [token])
 
-  useEffect(() => { load() }, [load])
+  // Lista de tags da Clint (id+nome) para o dropdown.
+  const loadAvailable = useCallback(async () => {
+    const r = await fetch('/api/clint-tags?available=1', { headers: { Authorization: `Bearer ${token}` } })
+    const j = await r.json().catch(() => ({}))
+    if (r.ok) setAvailable(j.available ?? [])
+    else { setAvailable([]); setTagsErro(j.detail ?? j.error ?? 'Falha ao listar tags da Clint') }
+  }, [token])
+
+  useEffect(() => { load(); loadAvailable() }, [load, loadAvailable])
+
+  // já cadastradas (para não repetir no dropdown)
+  const jaUsadas = new Set(rows.map(r => r.tag_id))
+  const tagsFiltradas = (available ?? [])
+    .filter(t => !jaUsadas.has(t.id))
+    .filter(t => !tagSearch || t.name.toLowerCase().includes(tagSearch.toLowerCase()))
+    .slice(0, 50)
 
   async function add() {
-    if (!prod || !tagId.trim()) return
+    if (!prod || !selectedTag) return
     setSaving(true)
-    await fetch('/api/clint-tags', { method: 'POST', headers, body: JSON.stringify({ product_name: prod, tag_id: tagId.trim(), label: label.trim() }) })
-    setTagId(''); setLabel('')
+    await fetch('/api/clint-tags', { method: 'POST', headers, body: JSON.stringify({ product_name: prod, tag_id: selectedTag.id, label: selectedTag.name }) })
+    setSelectedTag(null); setTagSearch('')
     setSaving(false)
     await load(); onChanged()
   }
@@ -440,14 +457,34 @@ function ClintTagsModal({ token, onClose, onChanged }: { token: string; onClose:
               <option value="">produto…</option>
               {PRODUTOS_SELECIONAVEIS.filter(p => p.id > 0).map(p => <option key={p.id} value={p.label}>{p.label}</option>)}
             </select>
-            <input className="flex-1 text-sm border rounded px-2.5 py-1.5 bg-background font-mono" placeholder="tag UUID da Clint" value={tagId} onChange={e => setTagId(e.target.value)} />
-          </div>
-          <div className="flex gap-2">
-            <input className="flex-1 text-sm border rounded px-2.5 py-1.5 bg-background" placeholder="rótulo (opcional, ex: IMERSÃOCONFIRMAR)" value={label} onChange={e => setLabel(e.target.value)} />
-            <button onClick={add} disabled={saving || !prod || !tagId.trim()} className="text-xs px-3 py-1.5 rounded bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 flex items-center gap-1">
+            <div className="flex-1 relative">
+              <input
+                className="w-full text-sm border rounded px-2.5 py-1.5 bg-background"
+                placeholder={available === null ? 'carregando tags…' : selectedTag ? selectedTag.name : 'buscar tag da Clint pelo nome…'}
+                value={selectedTag ? selectedTag.name : tagSearch}
+                onChange={e => { setSelectedTag(null); setTagSearch(e.target.value) }}
+                disabled={available === null}
+              />
+              {/* lista filtrável */}
+              {!selectedTag && tagSearch && tagsFiltradas.length > 0 && (
+                <div className="absolute z-20 left-0 right-0 mt-1 max-h-48 overflow-y-auto rounded-md border bg-white dark:bg-zinc-900 shadow-lg">
+                  {tagsFiltradas.map(t => (
+                    <button key={t.id} onClick={() => { setSelectedTag(t); setTagSearch('') }}
+                      className="block w-full text-left text-sm px-3 py-1.5 hover:bg-muted">
+                      {t.name}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            <button onClick={add} disabled={saving || !prod || !selectedTag} className="text-xs px-3 py-1.5 rounded bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 flex items-center gap-1">
               {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
             </button>
           </div>
+          {tagsErro && <p className="text-[11px] text-red-500">{tagsErro} — verifique o CLINT_API_TOKEN no Vercel.</p>}
+          {available !== null && available.length === 0 && !tagsErro && (
+            <p className="text-[11px] text-muted-foreground">Nenhuma tag retornada pela Clint.</p>
+          )}
         </div>
 
         <div className="overflow-y-auto flex-1 p-2">
