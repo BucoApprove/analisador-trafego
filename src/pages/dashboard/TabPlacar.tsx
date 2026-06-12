@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
-import { RefreshCw, ChevronDown, ChevronUp, Pencil, Loader2, Settings, Plus, Trash2, X, Rows2, Table2 } from 'lucide-react'
+import { RefreshCw, ChevronDown, ChevronUp, Pencil, Loader2, Settings, Plus, Trash2, X } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 
 // Produtos selecionáveis no editor de mapeamento (label → product_id gravado
@@ -50,6 +50,12 @@ interface MetaInfo {
   gastoSemVenda: GastoSemVenda[]
   campanhas: { campaign: string; conta: string; spend: number; produto: string; etapa: Etapa }[]
 }
+interface ClintLeads { total: number; interessado: number; abordado: number }
+interface LeadsData {
+  leadsUtm: Record<string, number>
+  leadsClint: Record<string, ClintLeads>
+  clintAtivo: boolean
+}
 interface PlacarResp {
   month: string
   produtos: Produto[]
@@ -95,11 +101,12 @@ function CatBadge({ cat }: { cat: Categoria }) {
 
 // ─── Célula de meta editável (grava em monthly_goals via goalName) ───────────
 
-function EditableMeta({ month, goalName, meta, onSaved }: {
+function EditableMeta({ month, goalName, meta, onSaved, pctNode }: {
   month: string
   goalName: string
   meta: number | null
   onSaved: (v: number) => void
+  pctNode?: React.ReactNode  // % da meta, exibido embaixo do valor
 }) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState('')
@@ -150,10 +157,11 @@ function EditableMeta({ month, goalName, meta, onSaved }: {
   return (
     <td onClick={startEdit} title="Clique para editar a meta"
       className="px-4 py-2.5 text-right text-muted-foreground cursor-pointer hover:bg-muted/40 hover:text-foreground transition-colors group/meta">
-      <span className="inline-flex items-center gap-1">
+      <div className="inline-flex items-center gap-1">
         {meta && meta > 0 ? fmtBRL(meta) : <span className="italic opacity-60">definir</span>}
         <Pencil className="h-3 w-3 opacity-0 group-hover/meta:opacity-60 transition-opacity" />
-      </span>
+      </div>
+      {pctNode && <div className="text-xs">{pctNode}</div>}
     </td>
   )
 }
@@ -183,89 +191,86 @@ function GastoCell({ gasto, etapas }: { gasto: number; etapas: EtapaGasto | null
 
 // ─── Linha de produto (com drill-down de ofertas) ────────────────────────────
 
-function ProdutoRow({ p, stripe, month, onMeta, enxuta, leadsUtm, leadsClint, clintAtivo }: { p: Produto; stripe: boolean; month: string; onMeta: (goalName: string, v: number) => void; enxuta: boolean; leadsUtm: number | null; leadsClint: number | null; clintAtivo: boolean }) {
+// Limite de % da meta abaixo do qual a linha inteira é destacada em vermelho.
+const PCT_META_CRITICO = 40
+
+function ProdutoRow({ p, stripe, month, onMeta, leadsUtm, leadsClint, clintAtivo }: {
+  p: Produto; stripe: boolean; month: string; onMeta: (goalName: string, v: number) => void
+  leadsUtm: number | null; leadsClint: ClintLeads | null; clintAtivo: boolean
+}) {
   const [open, setOpen] = useState(false)
   const pct = p.meta && p.meta > 0 ? (p.liquido / p.meta) * 100 : null
   const hasOfertas = (p.ofertas?.length ?? 0) > 1
-  const cpa = p.gasto > 0 && p.vendas > 0 ? p.gasto / p.vendas : null
+  const cpv = p.gasto > 0 && p.vendas > 0 ? p.gasto / p.vendas : null
+  const cplUtm = p.gasto > 0 && leadsUtm != null && leadsUtm > 0 ? p.gasto / leadsUtm : null
+  const cplClint = p.gasto > 0 && leadsClint != null && leadsClint.interessado > 0 ? p.gasto / leadsClint.interessado : null
   const pctCls = pct === null ? '' : pct >= 100 ? 'text-green-600 font-semibold' : pct >= 70 ? 'text-yellow-600' : 'text-red-600'
-
-  const nomeCell = (
-    <td className={`px-4 ${enxuta ? 'py-3' : 'py-2.5'} font-medium`}>
-      <span className="inline-flex items-center gap-1.5">
-        {hasOfertas ? (
-          <button onClick={() => setOpen(o => !o)} className="text-muted-foreground hover:text-foreground">
-            {open ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
-          </button>
-        ) : <span className="w-3.5 inline-block" />}
-        {p.nome}
-        <CatBadge cat={p.categoria} />
-      </span>
-    </td>
-  )
+  // Linha inteira em vermelho quando o % da meta está muito baixo.
+  const critico = pct !== null && pct < PCT_META_CRITICO
+  const rowCls = critico ? 'bg-red-50 dark:bg-red-950/30' : (stripe ? 'bg-muted/20' : '')
 
   return (
     <>
-      <tr className={`border-b ${stripe ? 'bg-muted/20' : ''}`}>
-        {nomeCell}
-        <td className={`px-4 ${enxuta ? 'py-3' : 'py-2.5'} text-right`}>{p.vendas}</td>
-        <td className={`px-4 ${enxuta ? 'py-3' : 'py-2.5'} text-right`}>
+      <tr className={`border-b ${rowCls}`}>
+        {/* Produto */}
+        <td className="px-4 py-2.5 font-medium">
+          <span className="inline-flex items-center gap-1.5">
+            {hasOfertas ? (
+              <button onClick={() => setOpen(o => !o)} className="text-muted-foreground hover:text-foreground">
+                {open ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+              </button>
+            ) : <span className="w-3.5 inline-block" />}
+            {p.nome}
+            <CatBadge cat={p.categoria} />
+          </span>
+        </td>
+        {/* Faturamento */}
+        <td className="px-4 py-2.5 text-right font-semibold">{fmtBRL(p.liquido)}</td>
+        {/* Meta + % embaixo */}
+        <EditableMeta month={month} goalName={p.goalName} meta={p.meta} onSaved={v => onMeta(p.goalName, v)}
+          pctNode={pct !== null ? <span className={pctCls}>{pct.toFixed(0)}%{pct >= 100 ? ' ✓' : ''}</span> : null} />
+        {/* Gasto (com tooltip de etapa) */}
+        <GastoCell gasto={p.gasto} etapas={p.gastoEtapas} />
+        {/* Vendas */}
+        <td className="px-4 py-2.5 text-right">{p.vendas}</td>
+        {/* Leads: UTM em cima, Clint (interessado/abordado) embaixo */}
+        <td className="px-4 py-2.5 text-right">
           <div title="Leads UTM (BigQuery)">{leadsUtm != null && leadsUtm > 0 ? leadsUtm.toLocaleString('pt-BR') : '—'}</div>
           {clintAtivo && (
-            <div className="text-xs text-muted-foreground" title="Leads Clint (CRM)">
-              {leadsClint != null && leadsClint > 0 ? `${leadsClint.toLocaleString('pt-BR')} Clint` : '—'}
+            <div className="text-xs text-muted-foreground" title="Leads Clint: interessado / abordado">
+              {leadsClint && leadsClint.total > 0
+                ? <>{leadsClint.interessado.toLocaleString('pt-BR')} int · {leadsClint.abordado.toLocaleString('pt-BR')} abord</>
+                : '—'}
             </div>
           )}
         </td>
-
-        {enxuta ? (
-          <>
-            {/* Líquido + meta + % empilhados */}
-            <td className="px-4 py-3 text-right">
-              <div className="font-semibold">{fmtBRL(p.liquido)}</div>
-              {p.meta && p.meta > 0 ? (
-                <div className="text-xs text-muted-foreground">
-                  meta {fmtBRL(p.meta)} · <span className={pctCls}>{pct!.toFixed(0)}%{pct! >= 100 ? ' ✓' : ''}</span>
-                </div>
-              ) : <div className="text-xs text-muted-foreground italic">sem meta</div>}
-            </td>
-            {/* Gasto + CPA + ROAS empilhados */}
-            <td className="px-4 py-3 text-right">
-              <div className="text-muted-foreground">{p.gasto > 0 ? fmtBRL(p.gasto) : '—'}</div>
-              {p.gasto > 0 && (
-                <div className="text-xs text-muted-foreground">
-                  {cpa !== null && <>CPA {fmtBRL(cpa)}</>}
-                  {p.roas !== null && <> · ROAS <span className={p.roas >= 1 ? 'text-green-600 font-medium' : 'text-red-600'}>{p.roas.toFixed(2)}x</span></>}
-                </div>
-              )}
-            </td>
-          </>
-        ) : (
-          <>
-            <td className="px-4 py-2.5 text-right font-semibold">{fmtBRL(p.liquido)}</td>
-            <EditableMeta month={month} goalName={p.goalName} meta={p.meta} onSaved={v => onMeta(p.goalName, v)} />
-            <td className="px-4 py-2.5 text-right">
-              {pct !== null ? <span className={pctCls}>{pct.toFixed(0)}%</span> : '—'}
-            </td>
-            <GastoCell gasto={p.gasto} etapas={p.gastoEtapas} />
-            <td className="px-4 py-2.5 text-right text-muted-foreground">{cpa !== null ? fmtBRL(cpa) : '—'}</td>
-            <td className="px-4 py-2.5 text-right">
-              {p.roas !== null ? (
-                <span className={p.roas >= 1 ? 'text-green-600 font-medium' : 'text-red-600'}>{p.roas.toFixed(2)}x</span>
-              ) : '—'}
-            </td>
-          </>
-        )}
+        {/* CPV (gasto ÷ vendas) */}
+        <td className="px-4 py-2.5 text-right text-muted-foreground">{cpv !== null ? fmtBRL(cpv) : '—'}</td>
+        {/* CPL: UTM em cima, Clint (interessado) embaixo */}
+        <td className="px-4 py-2.5 text-right text-muted-foreground">
+          <div title="CPL UTM = gasto ÷ leads UTM">{cplUtm !== null ? fmtBRL(cplUtm) : '—'}</div>
+          {clintAtivo && (
+            <div className="text-xs" title="CPL Clint = gasto ÷ leads interessado (Clint)">
+              {cplClint !== null ? fmtBRL(cplClint) : '—'}
+            </div>
+          )}
+        </td>
+        {/* ROAS */}
+        <td className="px-4 py-2.5 text-right">
+          {p.roas !== null ? (
+            <span className={p.roas >= 1 ? 'text-green-600 font-medium' : 'text-red-600'}>{p.roas.toFixed(2)}x</span>
+          ) : '—'}
+        </td>
       </tr>
       {open && p.ofertas?.map(o => (
         <tr key={o.code} className="border-b bg-muted/5 text-xs text-muted-foreground">
           <td className="pl-10 py-1.5 italic">
             {o.nome}{o.nome !== o.code && <span className="not-italic opacity-50"> ({o.code})</span>}
           </td>
-          <td className="px-4 py-1.5 text-right">{o.vendas}</td>
-          <td className="px-4 py-1.5" />
           <td className="px-4 py-1.5 text-right">{fmtBRL(o.liquido)}</td>
-          <td colSpan={enxuta ? 1 : 5} />
+          <td colSpan={3} />
+          <td className="px-4 py-1.5 text-right">{o.vendas}</td>
+          <td colSpan={3} />
         </tr>
       ))}
     </>
@@ -517,10 +522,7 @@ export default function TabPlacar({ token, enabled }: Props) {
   const [error, setError] = useState('')
   const [showMap, setShowMap] = useState(false)
   const [showClint, setShowClint] = useState(false)
-  // Visualização: completa (todas colunas) ou enxuta (meta/% sob líquido, CPA/ROAS sob gasto).
-  const [enxuta, setEnxuta] = useState(() => localStorage.getItem('placar-view') === 'enxuta')
-  const toggleView = () => setEnxuta(e => { localStorage.setItem('placar-view', !e ? 'enxuta' : 'completa'); return !e })
-  const [leads, setLeads] = useState<{ leadsUtm: Record<string, number>; leadsClint: Record<string, number>; clintAtivo: boolean } | null>(null)
+  const [leads, setLeads] = useState<LeadsData | null>(null)
 
   const load = useCallback(async (m: string) => {
     setLoading(true)
@@ -560,7 +562,7 @@ export default function TabPlacar({ token, enabled }: Props) {
     })
   }, [])
 
-  const { dayOfMonth, lastDay, diasRestantes, isCurrent } = daysInfo(month)
+  const { dayOfMonth, lastDay, isCurrent } = daysInfo(month)
   const totalLiquido = data?.totalLiquido ?? 0
   const totalMeta = data?.totalMeta ?? 0
   const pctMeta = totalMeta > 0 ? (totalLiquido / totalMeta) * 100 : null
@@ -592,10 +594,6 @@ export default function TabPlacar({ token, enabled }: Props) {
           <select value={month} onChange={e => setMonth(e.target.value)} className="text-sm border rounded px-2 py-1.5 bg-background">
             {monthOptions.map(m => <option key={m} value={m}>{m}</option>)}
           </select>
-          <button onClick={toggleView} className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded border bg-background hover:bg-muted transition-colors" title={enxuta ? 'Ver visualização completa' : 'Ver visualização enxuta'}>
-            {enxuta ? <Table2 className="h-3.5 w-3.5" /> : <Rows2 className="h-3.5 w-3.5" />}
-            {enxuta ? 'Completa' : 'Enxuta'}
-          </button>
           <button onClick={() => setShowMap(true)} className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded border bg-background hover:bg-muted transition-colors" title="Mapear campanhas para produtos">
             <Settings className="h-3.5 w-3.5" />
             Campanhas
@@ -620,46 +618,48 @@ export default function TabPlacar({ token, enabled }: Props) {
 
       {error && <div className="rounded-md bg-destructive/10 border border-destructive/20 px-4 py-3 text-sm text-destructive">{error}</div>}
 
-      {/* Hero */}
+      {/* Hero: faturamento do mês (sem ritmo — ritmo vai no card separado) */}
       {data && (
         <div className="rounded-lg border bg-card p-5">
           <p className="text-xs text-muted-foreground mb-1">Faturamento líquido do mês</p>
           <div className="flex items-end gap-4 flex-wrap">
             <p className="text-3xl font-bold">{fmtBRL(totalLiquido)}</p>
             {pctMeta !== null && (
-              <p className={`text-sm font-medium mb-1 ${pctMeta >= 100 ? 'text-green-600' : abaixoDoRitmo ? 'text-red-600' : 'text-yellow-600'}`}>
+              <p className={`text-sm font-medium mb-1 ${pctMeta >= 100 ? 'text-green-600' : 'text-muted-foreground'}`}>
                 {pctMeta.toFixed(0)}% da meta {totalMeta > 0 && `(${fmtBRL(totalMeta)})`}
               </p>
             )}
           </div>
-          <p className="text-xs text-muted-foreground mt-2">
-            {isCurrent
-              ? <>Dia {dayOfMonth} de {lastDay} · faltam {diasRestantes} dias
-                  {pctMeta !== null && ` · esperado até hoje: ${pctEsperado.toFixed(0)}% da meta`}
-                  {abaixoDoRitmo && <span className="text-red-600 font-medium"> · ⚠️ abaixo do esperado</span>}
-                </>
-              : <>Mês fechado</>}
-          </p>
         </div>
       )}
 
-      {/* KPIs */}
-      {data && (
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-          {[
-            { label: 'Vendas',         value: String(data.totalVendas), sub: null },
-            { label: 'Gasto total (2 contas)', value: totalGasto > 0 ? fmtBRL(totalGasto) : '—', sub: gastoProdutos > 0 ? `${fmtBRL(gastoProdutos)} em produtos` : null },
-            { label: 'ROAS geral',     value: gastoProdutos > 0 ? `${(totalLiquido / gastoProdutos).toFixed(2)}x` : '—', sub: 'líquido ÷ gasto produtos' },
-            { label: 'Low ticket',     value: fmtBRL(data.porCategoria.low), sub: null },
-          ].map(c => (
-            <div key={c.label} className="rounded-lg border bg-card p-4">
-              <p className="text-xs text-muted-foreground mb-1">{c.label}</p>
-              <p className="text-xl font-bold">{c.value}</p>
-              {c.sub && <p className="text-xs text-muted-foreground mt-0.5">{c.sub}</p>}
-            </div>
-          ))}
-        </div>
-      )}
+      {/* KPIs: Faturamento · Gasto · ROAS geral · Distância da meta / ritmo */}
+      {data && (() => {
+        const restante = totalMeta - totalLiquido
+        return (
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+            {[
+              { label: 'Faturamento', value: fmtBRL(totalLiquido), sub: pctMeta !== null ? `${pctMeta.toFixed(0)}% da meta` : null, cls: '' },
+              { label: 'Gasto total (2 contas)', value: totalGasto > 0 ? fmtBRL(totalGasto) : '—', sub: gastoProdutos > 0 ? `${fmtBRL(gastoProdutos)} em produtos` : null, cls: '' },
+              { label: 'ROAS geral', value: gastoProdutos > 0 ? `${(totalLiquido / gastoProdutos).toFixed(2)}x` : '—', sub: 'líquido ÷ gasto produtos', cls: '' },
+              {
+                label: 'Distância da meta',
+                value: totalMeta > 0 ? (restante > 0 ? fmtBRL(restante) : 'atingida ✓') : '—',
+                sub: isCurrent && totalMeta > 0
+                  ? `esperado hoje: ${pctEsperado.toFixed(0)}%${abaixoDoRitmo ? ' · ⚠️ abaixo' : ' · no ritmo'}`
+                  : (totalMeta > 0 ? 'mês fechado' : null),
+                cls: abaixoDoRitmo ? 'text-red-600' : '',
+              },
+            ].map(c => (
+              <div key={c.label} className="rounded-lg border bg-card p-4">
+                <p className="text-xs text-muted-foreground mb-1">{c.label}</p>
+                <p className={`text-xl font-bold ${c.cls}`}>{c.value}</p>
+                {c.sub && <p className={`text-xs mt-0.5 ${c.cls || 'text-muted-foreground'}`}>{c.sub}</p>}
+              </div>
+            ))}
+          </div>
+        )
+      })()}
 
       {/* Aviso se o gasto Meta falhou */}
       {data?.metaError && (
@@ -676,19 +676,19 @@ export default function TabPlacar({ token, enabled }: Props) {
             <thead>
               <tr className="border-b bg-muted/50">
                 <th className="text-left px-4 py-2.5 font-medium">Produto</th>
+                <th className="text-right px-4 py-2.5 font-medium">Faturamento</th>
+                <th className="text-right px-4 py-2.5 font-medium">Meta</th>
+                <th className="text-right px-4 py-2.5 font-medium">Gasto</th>
                 <th className="text-right px-4 py-2.5 font-medium">Vendas</th>
-                <th className="text-right px-4 py-2.5 font-medium" title="Leads UTM (cruzado no BigQuery) e Leads Clint (CRM)">Leads</th>
-                <th className="text-right px-4 py-2.5 font-medium">Líquido{enxuta && ' / Meta'}</th>
-                {!enxuta && <th className="text-right px-4 py-2.5 font-medium">Meta</th>}
-                {!enxuta && <th className="text-right px-4 py-2.5 font-medium">% Meta</th>}
-                <th className="text-right px-4 py-2.5 font-medium">Gasto{enxuta && ' / CPA / ROAS'}</th>
-                {!enxuta && <th className="text-right px-4 py-2.5 font-medium">CPA</th>}
-                {!enxuta && <th className="text-right px-4 py-2.5 font-medium">ROAS</th>}
+                <th className="text-right px-4 py-2.5 font-medium" title="Leads UTM (BigQuery) e Leads Clint (interessado/abordado)">Leads</th>
+                <th className="text-right px-4 py-2.5 font-medium" title="Custo por venda (gasto ÷ vendas)">CPV</th>
+                <th className="text-right px-4 py-2.5 font-medium" title="CPL UTM (gasto÷leads UTM) e CPL Clint (gasto÷interessado)">CPL</th>
+                <th className="text-right px-4 py-2.5 font-medium">ROAS</th>
               </tr>
             </thead>
             <tbody>
               {produtos.map((p, i) => (
-                <ProdutoRow key={p.nome} p={p} stripe={i % 2 !== 0} month={month} onMeta={onMeta} enxuta={enxuta}
+                <ProdutoRow key={p.nome} p={p} stripe={i % 2 !== 0} month={month} onMeta={onMeta}
                   leadsUtm={leads?.leadsUtm[p.nome] ?? null}
                   leadsClint={leads?.leadsClint[p.nome] ?? null}
                   clintAtivo={leads?.clintAtivo ?? false} />
@@ -697,47 +697,34 @@ export default function TabPlacar({ token, enabled }: Props) {
             <tfoot>
               <tr className="border-t bg-muted/50 font-semibold">
                 <td className="px-4 py-2.5">Total</td>
+                {/* Faturamento */}
+                <td className="px-4 py-2.5 text-right">{fmtBRL(totalLiquido)}</td>
+                {/* Meta + % */}
+                <td className="px-4 py-2.5 text-right">
+                  <div>{totalMeta > 0 ? fmtBRL(totalMeta) : '—'}</div>
+                  {totalMeta > 0 && pctMeta !== null && <div className="text-xs font-normal"><span className={pctMeta >= 100 ? 'text-green-600' : ''}>{pctMeta.toFixed(0)}%{pctMeta >= 100 ? ' ✓' : ''}</span></div>}
+                </td>
+                {/* Gasto */}
+                <td className="px-4 py-2.5 text-right">{gastoProdutos > 0 ? fmtBRL(gastoProdutos) : '—'}</td>
+                {/* Vendas */}
                 <td className="px-4 py-2.5 text-right">{data?.totalVendas ?? 0}</td>
+                {/* Leads */}
                 <td className="px-4 py-2.5 text-right">
                   {leads ? (
                     <>
                       <div>{Object.values(leads.leadsUtm).reduce((s, v) => s + v, 0).toLocaleString('pt-BR')}</div>
-                      {leads.clintAtivo && <div className="text-xs font-normal text-muted-foreground">{Object.values(leads.leadsClint).reduce((s, v) => s + v, 0).toLocaleString('pt-BR')} Clint</div>}
+                      {leads.clintAtivo && <div className="text-xs font-normal text-muted-foreground">{Object.values(leads.leadsClint).reduce((s, v) => s + v.interessado, 0).toLocaleString('pt-BR')} int</div>}
                     </>
                   ) : '—'}
                 </td>
-                {enxuta ? (
-                  <>
-                    <td className="px-4 py-2.5 text-right">
-                      <div>{fmtBRL(totalLiquido)}</div>
-                      {totalMeta > 0 && <div className="text-xs font-normal text-muted-foreground">meta {fmtBRL(totalMeta)} · {pctMeta !== null && <span className={pctMeta >= 100 ? 'text-green-600' : ''}>{pctMeta.toFixed(0)}%{pctMeta >= 100 ? ' ✓' : ''}</span>}</div>}
-                    </td>
-                    <td className="px-4 py-2.5 text-right">
-                      <div>{gastoProdutos > 0 ? fmtBRL(gastoProdutos) : '—'}</div>
-                      {gastoProdutos > 0 && (
-                        <div className="text-xs font-normal text-muted-foreground">
-                          {(data?.totalVendas ?? 0) > 0 && <>CPA {fmtBRL(gastoProdutos / (data?.totalVendas ?? 1))}</>}
-                          {' · ROAS '}<span className={totalLiquido / gastoProdutos >= 1 ? 'text-green-600' : 'text-red-600'}>{(totalLiquido / gastoProdutos).toFixed(2)}x</span>
-                        </div>
-                      )}
-                    </td>
-                  </>
-                ) : (
-                  <>
-                    <td className="px-4 py-2.5 text-right">{fmtBRL(totalLiquido)}</td>
-                    <td className="px-4 py-2.5 text-right">{totalMeta > 0 ? fmtBRL(totalMeta) : '—'}</td>
-                    <td className="px-4 py-2.5 text-right">
-                      {pctMeta !== null ? <span className={pctMeta >= 100 ? 'text-green-600' : ''}>{pctMeta.toFixed(0)}%</span> : '—'}
-                    </td>
-                    <td className="px-4 py-2.5 text-right">{gastoProdutos > 0 ? fmtBRL(gastoProdutos) : '—'}</td>
-                    <td className="px-4 py-2.5 text-right">
-                      {gastoProdutos > 0 && (data?.totalVendas ?? 0) > 0 ? fmtBRL(gastoProdutos / (data?.totalVendas ?? 1)) : '—'}
-                    </td>
-                    <td className="px-4 py-2.5 text-right">
-                      {gastoProdutos > 0 ? <span className={totalLiquido / gastoProdutos >= 1 ? 'text-green-600' : 'text-red-600'}>{(totalLiquido / gastoProdutos).toFixed(2)}x</span> : '—'}
-                    </td>
-                  </>
-                )}
+                {/* CPV */}
+                <td className="px-4 py-2.5 text-right">{gastoProdutos > 0 && (data?.totalVendas ?? 0) > 0 ? fmtBRL(gastoProdutos / (data?.totalVendas ?? 1)) : '—'}</td>
+                {/* CPL */}
+                <td className="px-4 py-2.5 text-right">—</td>
+                {/* ROAS */}
+                <td className="px-4 py-2.5 text-right">
+                  {gastoProdutos > 0 ? <span className={totalLiquido / gastoProdutos >= 1 ? 'text-green-600' : 'text-red-600'}>{(totalLiquido / gastoProdutos).toFixed(2)}x</span> : '—'}
+                </td>
               </tr>
             </tfoot>
           </table>

@@ -53,10 +53,11 @@ function body2json(body: string): { data?: unknown[]; hasNext?: boolean } {
   try { return body ? JSON.parse(body) : {} } catch { return {} }
 }
 
-interface Deal { id?: string; created_at?: string }
+interface Deal { id?: string; created_at?: string; fields?: { tipo?: string } }
 
-async function dealsByTag(token: string, tagId: string, since: string, until: string): Promise<Set<string>> {
-  const ids = new Set<string>()
+// Coleta os deals de uma tag no período, mapeando id → tipo (Interessado/Abordado).
+async function dealsByTag(token: string, tagId: string, since: string, until: string): Promise<Map<string, string>> {
+  const byId = new Map<string, string>()
   let page = 1
   for (let i = 0; i < 100; i++) {
     const url = new URL(`${BASE}/v1/deals`)
@@ -71,37 +72,45 @@ async function dealsByTag(token: string, tagId: string, since: string, until: st
     const data = json.data ?? json.items ?? []
     if (data.length === 0) break
     for (const d of data) {
-      // garante o filtro de data no cliente (a API às vezes ignora)
       const dt = (d.created_at ?? '').slice(0, 10)
-      if (d.id && dt >= since && dt <= until) ids.add(d.id)
+      if (d.id && dt >= since && dt <= until) byId.set(d.id, d.fields?.tipo ?? '')
     }
     if (json.hasNext === false || data.length < 100) break
     page++
   }
-  return ids
+  return byId
 }
 
+export interface ClintLeads { total: number; interessado: number; abordado: number }
+
 /**
- * Conta leads Clint por produto canônico no período. Retorna {} se o token
- * não estiver configurado ou em caso de falha (degrada para "—" na UI).
+ * Conta leads Clint por produto canônico no período, separando Interessado e
+ * Abordado (fields.tipo). Retorna {} se o token não estiver configurado.
  */
-export async function fetchClintLeads(since: string, until: string): Promise<Record<string, number>> {
+export async function fetchClintLeads(since: string, until: string): Promise<Record<string, ClintLeads>> {
   const token = process.env.CLINT_API_TOKEN ?? ''
   if (!token) return {}
 
   const tagsPorProduto = await fetchTagsPorProduto()
-  const out: Record<string, number> = {}
+  const out: Record<string, ClintLeads> = {}
+  const norm = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim()
   for (const [produto, tags] of Object.entries(tagsPorProduto)) {
     try {
-      const seen = new Set<string>()
+      // dedup por deal entre as tags do produto; mantém o tipo do deal.
+      const tipoById = new Map<string, string>()
       for (const tag of tags) {
-        const ids = await dealsByTag(token, tag, since, until)
-        for (const id of ids) seen.add(id)
+        const byId = await dealsByTag(token, tag, since, until)
+        for (const [id, tipo] of byId) if (!tipoById.has(id)) tipoById.set(id, tipo)
       }
-      out[produto] = seen.size
+      let interessado = 0, abordado = 0
+      for (const tipo of tipoById.values()) {
+        const t = norm(tipo)
+        if (t === 'interessado') interessado++
+        else if (t === 'abordado') abordado++
+      }
+      out[produto] = { total: tipoById.size, interessado, abordado }
     } catch (err) {
       console.error(`fetchClintLeads(${produto}) erro:`, (err as Error).message)
-      // produto fica de fora; UI mostra "—"
     }
   }
   return out
