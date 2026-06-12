@@ -3,23 +3,28 @@
  *
  * Auth: header `api-token: {CLINT_API_TOKEN}`. Base https://api.clint.digital.
  * Leads = deals com a(s) tag(s) do produto, created_at no período, deduplicados
- * por id de deal. Mapa produto canônico → tags Clint (UUIDs).
+ * por id de deal. O mapa produto canônico → tags Clint vem da tabela
+ * `clint_tags` (Supabase, editável na UI).
  *
  * Se CLINT_API_TOKEN não estiver configurado, retorna {} (a coluna mostra "—").
  */
+import { createClient } from '@supabase/supabase-js'
 
 const BASE = 'https://api.clint.digital'
 
-// Produto canônico (mesmo nome do classifyProduto) → tags Clint (UUID).
-// Origem: clint_leads.py (referência do sócio).
-export const CLINT_TAGS_POR_PRODUTO: Record<string, string[]> = {
-  'Buco Approve':     ['2749bbb9-d335-4077-a940-abfff6050264', '20ad2a94-14f2-4938-a13d-61e95fe4a31b'],
-  'Intensivo ENARE':  ['95818d14-845a-4bea-9c53-f14bbb8f1dde', '447ceac5-f682-41fb-9691-77b59f35cbb6'],
-  'Imersão ENARE':    ['97e5af6d-0d5d-4adf-a624-896333266cd6', 'b6c68687-3812-46f5-85d4-b862778a3df9'],
-  'Mentoria CTBMF':   ['17f9aec7-0381-4b61-918d-c616ee387906'],
-  'Pós Patologia':    ['7a7f2e78-eca6-4d03-bf78-9b517c4b9b60', 'a54d86f4-4d3f-4679-9491-784e51161cd4'],
-  'Pós Anatomia':     ['211baf47-a20f-4497-a440-3fa7e4ecd4fb'],
-  'Planejamento ImpulsoR+': ['3e6a901f-f27e-4902-bdc9-a8de113ae4c9'],
+/** Lê o mapa produto canônico → tags da tabela clint_tags. */
+async function fetchTagsPorProduto(): Promise<Record<string, string[]>> {
+  const sb = createClient(process.env.SUPABASE_URL ?? '', process.env.SUPABASE_SERVICE_KEY ?? '', {
+    auth: { persistSession: false },
+  })
+  const { data, error } = await sb.from('clint_tags').select('product_name, tag_id')
+  if (error) throw new Error(`clint_tags: ${error.message}`)
+  const map: Record<string, string[]> = {}
+  for (const r of data ?? []) {
+    if (!r.product_name || !r.tag_id) continue
+    ;(map[r.product_name] ??= []).push(r.tag_id)
+  }
+  return map
 }
 
 interface Deal { id?: string; created_at?: string }
@@ -64,8 +69,9 @@ export async function fetchClintLeads(since: string, until: string): Promise<Rec
   const token = process.env.CLINT_API_TOKEN ?? ''
   if (!token) return {}
 
+  const tagsPorProduto = await fetchTagsPorProduto()
   const out: Record<string, number> = {}
-  for (const [produto, tags] of Object.entries(CLINT_TAGS_POR_PRODUTO)) {
+  for (const [produto, tags] of Object.entries(tagsPorProduto)) {
     try {
       const seen = new Set<string>()
       for (const tag of tags) {

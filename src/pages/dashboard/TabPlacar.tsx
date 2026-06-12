@@ -380,6 +380,97 @@ function CampanhaMapModal({ onClose, onChanged }: { onClose: () => void; onChang
   )
 }
 
+// ─── Modal: tags da Clint por produto (clint_tags) ───────────────────────────
+
+interface ClintTagRow { id: string; product_name: string; tag_id: string; label: string }
+
+function ClintTagsModal({ token, onClose, onChanged }: { token: string; onClose: () => void; onChanged: () => void }) {
+  const [rows, setRows] = useState<ClintTagRow[]>([])
+  const [loading, setLoading] = useState(true)
+  const [prod, setProd] = useState('')
+  const [tagId, setTagId] = useState('')
+  const [label, setLabel] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    const r = await fetch('/api/clint-tags', { headers: { Authorization: `Bearer ${token}` } })
+    const j = await r.json().catch(() => ({ tags: [] }))
+    setRows(j.tags ?? [])
+    setLoading(false)
+  }, [token])
+
+  useEffect(() => { load() }, [load])
+
+  async function add() {
+    if (!prod || !tagId.trim()) return
+    setSaving(true)
+    await fetch('/api/clint-tags', { method: 'POST', headers, body: JSON.stringify({ product_name: prod, tag_id: tagId.trim(), label: label.trim() }) })
+    setTagId(''); setLabel('')
+    setSaving(false)
+    await load(); onChanged()
+  }
+
+  async function remove(id: string) {
+    await fetch(`/api/clint-tags?id=${encodeURIComponent(id)}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } })
+    await load(); onChanged()
+  }
+
+  // Agrupa por produto para exibir.
+  const porProduto = rows.reduce((acc, r) => { (acc[r.product_name] ??= []).push(r); return acc }, {} as Record<string, ClintTagRow[]>)
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="absolute inset-0 bg-black/40" />
+      <div className="relative z-10 bg-white dark:bg-zinc-900 rounded-xl shadow-2xl w-full max-w-xl max-h-[85vh] flex flex-col border" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 py-4 border-b">
+          <div>
+            <h3 className="font-semibold">Tags da Clint → produto (Leads Clint)</h3>
+            <p className="text-xs text-muted-foreground">Cada tag UUID da Clint conta como lead do produto escolhido. Um produto pode ter várias tags.</p>
+          </div>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground"><X className="h-4 w-4" /></button>
+        </div>
+
+        <div className="px-5 py-3 border-b bg-muted/20 space-y-2">
+          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Nova tag</p>
+          <div className="flex gap-2">
+            <select value={prod} onChange={e => setProd(e.target.value)} className="text-sm border rounded px-2 py-1.5 bg-background">
+              <option value="">produto…</option>
+              {PRODUTOS_SELECIONAVEIS.filter(p => p.id > 0).map(p => <option key={p.id} value={p.label}>{p.label}</option>)}
+            </select>
+            <input className="flex-1 text-sm border rounded px-2.5 py-1.5 bg-background font-mono" placeholder="tag UUID da Clint" value={tagId} onChange={e => setTagId(e.target.value)} />
+          </div>
+          <div className="flex gap-2">
+            <input className="flex-1 text-sm border rounded px-2.5 py-1.5 bg-background" placeholder="rótulo (opcional, ex: IMERSÃOCONFIRMAR)" value={label} onChange={e => setLabel(e.target.value)} />
+            <button onClick={add} disabled={saving || !prod || !tagId.trim()} className="text-xs px-3 py-1.5 rounded bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 flex items-center gap-1">
+              {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
+            </button>
+          </div>
+        </div>
+
+        <div className="overflow-y-auto flex-1 p-2">
+          {loading && <div className="flex justify-center py-8 text-muted-foreground"><Loader2 className="h-5 w-5 animate-spin" /></div>}
+          {!loading && rows.length === 0 && <p className="text-sm text-muted-foreground text-center py-8">Nenhuma tag cadastrada.</p>}
+          {Object.entries(porProduto).map(([produto, tags]) => (
+            <div key={produto} className="mb-2">
+              <p className="text-xs font-semibold px-3 py-1">{produto}</p>
+              {tags.map(t => (
+                <div key={t.id} className="flex items-center gap-2 px-3 py-1.5 rounded hover:bg-muted/40 group">
+                  <code className="text-[10px] bg-muted px-1.5 py-0.5 rounded">{t.tag_id}</code>
+                  {t.label && <span className="text-xs text-muted-foreground">{t.label}</span>}
+                  <button onClick={() => remove(t.id)} className="ml-auto opacity-0 group-hover:opacity-100 p-1 text-muted-foreground hover:text-destructive transition-all"><Trash2 className="h-3.5 w-3.5" /></button>
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ─── Main ────────────────────────────────────────────────────────────────────
 
 export default function TabPlacar({ token, enabled }: Props) {
@@ -388,6 +479,7 @@ export default function TabPlacar({ token, enabled }: Props) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [showMap, setShowMap] = useState(false)
+  const [showClint, setShowClint] = useState(false)
   // Visualização: completa (todas colunas) ou enxuta (meta/% sob líquido, CPA/ROAS sob gasto).
   const [enxuta, setEnxuta] = useState(() => localStorage.getItem('placar-view') === 'enxuta')
   const toggleView = () => setEnxuta(e => { localStorage.setItem('placar-view', !e ? 'enxuta' : 'completa'); return !e })
@@ -471,6 +563,10 @@ export default function TabPlacar({ token, enabled }: Props) {
             <Settings className="h-3.5 w-3.5" />
             Campanhas
           </button>
+          <button onClick={() => setShowClint(true)} className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded border bg-background hover:bg-muted transition-colors" title="Tags da Clint por produto">
+            <Settings className="h-3.5 w-3.5" />
+            Tags Clint
+          </button>
           <button onClick={() => load(month)} disabled={loading} className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded border bg-background hover:bg-muted transition-colors disabled:opacity-50">
             <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
             Atualizar
@@ -479,6 +575,7 @@ export default function TabPlacar({ token, enabled }: Props) {
       </div>
 
       {showMap && <CampanhaMapModal onClose={() => setShowMap(false)} onChanged={() => load(month)} />}
+      {showClint && <ClintTagsModal token={token} onClose={() => setShowClint(false)} onChanged={() => loadLeads(month)} />}
 
       <div className="rounded-md bg-blue-50 border border-blue-200 px-4 py-2 text-xs text-blue-800">
         ⚙️ Aba em construção. O gasto de cada campanha é atribuído ao produto pela aba <strong>Produtos/Campanhas</strong> (prefixo → produto). Campanha sem regra cai em <strong>Buco Approve</strong>.

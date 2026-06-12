@@ -134,6 +134,22 @@ alter table product_mappings disable row level security;
 
 -- ─────────────────────────────────────────────────────────────────────────────
 
+-- Tags da Clint (CRM) por produto canônico, para contar Leads Clint no Placar.
+-- Um produto pode ter várias tags (uma linha por tag). product_name = nome
+-- canônico (ex: 'Imersão ENARE'); tag_id = UUID da tag na Clint.
+create table if not exists clint_tags (
+  id           uuid primary key default gen_random_uuid(),
+  product_name text not null,
+  tag_id       text not null,
+  label        text not null default '',
+  created_at   timestamptz not null default now(),
+  unique (product_name, tag_id)
+);
+create index if not exists idx_clint_tags_product on clint_tags(product_name);
+alter table clint_tags disable row level security;
+
+-- ─────────────────────────────────────────────────────────────────────────────
+
 -- Lançamentos (aba "Lançamentos"). Cada lançamento guarda os parâmetros para
 -- puxar os dados (prefixo de campanha + filtros) e as datas-marco do funil.
 -- A janela de dados do detalhe = captura_inicio → carrinho_fim.
