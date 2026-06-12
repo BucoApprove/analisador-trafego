@@ -567,11 +567,12 @@ function daysLeftInMonth(month: string) {
 
 // ─── Célula de meta editável ──────────────────────────────────────────────────
 
-function EditableMetaCell({ month, product, meta, onSaved }: {
+function EditableMetaCell({ month, product, meta, onSaved, readOnly }: {
   month: string
   product: string
   meta: number
   onSaved: (newMeta: number) => void
+  readOnly?: boolean  // no modo período a meta é proporcional → não editável
 }) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState('')
@@ -579,6 +580,7 @@ function EditableMetaCell({ month, product, meta, onSaved }: {
   const savedRef = useRef(false)
 
   function startEdit() {
+    if (readOnly) return
     setDraft(meta > 0 ? String(meta) : '')
     savedRef.current = false
     setEditing(true)
@@ -623,6 +625,14 @@ function EditableMetaCell({ month, product, meta, onSaved }: {
     )
   }
 
+  if (readOnly) {
+    return (
+      <td className="px-4 py-2.5 text-right text-muted-foreground" title="Meta proporcional ao período (somente leitura)">
+        {meta > 0 ? fmtBRL(meta) : '—'}
+      </td>
+    )
+  }
+
   return (
     <td
       onClick={startEdit}
@@ -641,6 +651,9 @@ function EditableMetaCell({ month, product, meta, onSaved }: {
 
 export default function TabMetasMensais({ token, enabled }: Props) {
   const [month, setMonth] = useState(currentMonthStr)
+  // Range opcional dentro do mês (de/até). Vazio = mês inteiro.
+  const [rangeSince, setRangeSince] = useState('')
+  const [rangeUntil, setRangeUntil] = useState('')
   const [goalsData, setGoalsData] = useState<MonthlyGoalsResp | null>(null)
   const [hotmartData, setHotmartData] = useState<HotmartResp | null>(null)
   const [loading, setLoading] = useState(false)
@@ -674,13 +687,15 @@ export default function TabMetasMensais({ token, enabled }: Props) {
     }
   }, [])
 
-  const load = useCallback(async (m: string) => {
+  const load = useCallback(async (m: string, since = '', until = '') => {
     setLoading(true)
     setError('')
     try {
+      // Hotmart usa o range quando informado; goals (meta) é sempre do mês cheio.
+      const rangeQs = since && until ? `&since=${since}&until=${until}` : ''
       const [gr, hr] = await Promise.all([
         fetch(`/api/monthly-goals?month=${m}`, { headers }),
-        fetch(`/api/hotmart-sales?month=${m}`, { headers }),
+        fetch(`/api/hotmart-sales?month=${m}${rangeQs}`, { headers }),
       ])
       if (!gr.ok) throw new Error(`monthly-goals: ${gr.status}`)
       if (!hr.ok) throw new Error(`hotmart-sales: ${hr.status}`)
@@ -694,7 +709,7 @@ export default function TabMetasMensais({ token, enabled }: Props) {
     }
   }, [token])
 
-  useEffect(() => { if (enabled) load(month) }, [enabled, month, load])
+  useEffect(() => { if (enabled) load(month, rangeSince, rangeUntil) }, [enabled, month, rangeSince, rangeUntil, load])
   useEffect(() => { if (enabled) loadMappings() }, [enabled, loadMappings])
 
   // Atualiza a meta de um produto localmente após salvar no Supabase.
@@ -744,8 +759,26 @@ export default function TabMetasMensais({ token, enabled }: Props) {
     }
   }
 
-  const goals = goalsData?.goals ?? []
-  const diasRestantes = daysLeftInMonth(month)
+  // Validação e fator de partição do range (dias do range ÷ dias do mês).
+  const [my, mm] = month.split('-').map(Number)
+  const diasNoMes = new Date(my, mm, 0).getDate()
+  const rangeAtivo = !!(rangeSince && rangeUntil)
+  // range válido: mesmo mês do seletor, e since ≤ until
+  const rangeMesmoMes = rangeAtivo && rangeSince.slice(0, 7) === month && rangeUntil.slice(0, 7) === month
+  const rangeValido = rangeMesmoMes && rangeSince <= rangeUntil
+  const rangeErro = rangeAtivo && !rangeValido
+    ? (rangeSince.slice(0, 7) !== month || rangeUntil.slice(0, 7) !== month
+        ? 'O período deve estar dentro do mês selecionado (não pode cruzar dois meses).'
+        : 'A data inicial deve ser anterior ou igual à final.')
+    : ''
+  const diasNoRange = rangeValido
+    ? (new Date(rangeUntil).getTime() - new Date(rangeSince).getTime()) / 86400000 + 1
+    : diasNoMes
+  const fatorMeta = rangeValido ? diasNoRange / diasNoMes : 1
+
+  // Metas particionadas proporcionalmente quando há range válido.
+  const goals = (goalsData?.goals ?? []).map(g => ({ ...g, meta: g.meta * fatorMeta }))
+  const diasRestantes = rangeValido ? Math.max(diasNoRange, 1) : daysLeftInMonth(month)
   const totalMeta = goals.reduce((s, g) => s + g.meta, 0)
   const totalFaturado = Object.values(faturadoMap).reduce((s, v) => s + v, 0)
   const totalRestante = totalMeta - totalFaturado
@@ -769,16 +802,35 @@ export default function TabMetasMensais({ token, enabled }: Props) {
           <h2 className="text-lg font-semibold">Metas Mensais</h2>
           <p className="text-xs text-muted-foreground">Faturamento Hotmart vs. metas da planilha</p>
         </div>
-        <div className="flex items-center gap-2">
-          <select value={month} onChange={e => setMonth(e.target.value)} className="text-sm border rounded px-2 py-1.5 bg-background">
+        <div className="flex items-center gap-2 flex-wrap">
+          <select value={month} onChange={e => { setMonth(e.target.value); setRangeSince(''); setRangeUntil('') }} className="text-sm border rounded px-2 py-1.5 bg-background">
             {monthOptions.map(m => <option key={m} value={m}>{m}</option>)}
           </select>
-          <button onClick={() => load(month)} disabled={loading} className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded border bg-background hover:bg-muted transition-colors disabled:opacity-50">
+          {/* Range opcional dentro do mês */}
+          <div className="flex items-center gap-1 text-xs text-muted-foreground">
+            <span>de</span>
+            <input type="date" value={rangeSince} onChange={e => setRangeSince(e.target.value)} className="text-sm border rounded px-2 py-1.5 bg-background" />
+            <span>até</span>
+            <input type="date" value={rangeUntil} onChange={e => setRangeUntil(e.target.value)} className="text-sm border rounded px-2 py-1.5 bg-background" />
+            {rangeAtivo && (
+              <button onClick={() => { setRangeSince(''); setRangeUntil('') }} className="text-xs underline hover:no-underline">limpar</button>
+            )}
+          </div>
+          <button onClick={() => load(month, rangeSince, rangeUntil)} disabled={loading} className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded border bg-background hover:bg-muted transition-colors disabled:opacity-50">
             <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
             Atualizar
           </button>
         </div>
       </div>
+
+      {rangeErro && (
+        <div className="rounded-md bg-destructive/10 border border-destructive/20 px-4 py-2.5 text-sm text-destructive">{rangeErro}</div>
+      )}
+      {rangeValido && (
+        <div className="rounded-md bg-blue-50 border border-blue-200 px-4 py-2.5 text-xs text-blue-800">
+          Período de <strong>{rangeSince}</strong> a <strong>{rangeUntil}</strong> ({Math.round(diasNoRange)} de {diasNoMes} dias). As metas estão <strong>proporcionais</strong> ({Math.round(fatorMeta * 100)}% da meta mensal). Edição de meta desabilitada no modo período.
+        </div>
+      )}
 
       {/* Botão cache ManyChat */}
       <div className="rounded-lg border bg-card p-4 flex items-center justify-between gap-4">
@@ -851,7 +903,7 @@ export default function TabMetasMensais({ token, enabled }: Props) {
                 return (
                   <ExpandableRow key={g.name} stripe={i % 2 !== 0} sources={sourcesMap[g.name] ?? []} onActivities={() => setActivitiesProduct(g.name)}>
                     <td className="px-4 py-2.5 font-medium">{g.name}</td>
-                    <EditableMetaCell month={month} product={g.name} meta={g.meta} onSaved={m => updateGoalLocal(g.name, m)} />
+                    <EditableMetaCell month={month} product={g.name} meta={g.meta} onSaved={m => updateGoalLocal(g.name, m)} readOnly={rangeValido} />
                     <td className="px-4 py-2.5 text-right font-semibold">{fat > 0 ? fmtBRL(fat) : '—'}</td>
                     <td className={`px-4 py-2.5 text-right ${restante > 0 ? 'text-orange-600' : 'text-green-600'}`}>{g.meta > 0 ? fmtBRL(restante) : '—'}</td>
                     <td className="px-4 py-2.5 text-right text-muted-foreground">{g.meta > 0 && metaDia > 0 ? fmtBRL(metaDia) : '—'}</td>

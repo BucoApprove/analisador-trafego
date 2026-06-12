@@ -70,8 +70,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     ? monthParam.split('-').map(Number)
     : [new Date().getFullYear(), new Date().getMonth() + 1]
 
-  const startDate = new Date(year, month - 1, 1, 0, 0, 0, 0)
-  const endDate   = new Date(year, month, 0, 23, 59, 59, 999)
+  // Range opcional (since/until, YYYY-MM-DD) — sobrescreve o mês inteiro.
+  const sinceParam = typeof req.query.since === 'string' ? req.query.since : ''
+  const untilParam = typeof req.query.until === 'string' ? req.query.until : ''
+
+  let startDate: Date, endDate: Date
+  if (sinceParam && untilParam) {
+    const [sy, sm, sd] = sinceParam.split('-').map(Number)
+    const [uy, um, ud] = untilParam.split('-').map(Number)
+    startDate = new Date(sy, sm - 1, sd, 0, 0, 0, 0)
+    endDate   = new Date(uy, um - 1, ud, 23, 59, 59, 999)
+  } else {
+    startDate = new Date(year, month - 1, 1, 0, 0, 0, 0)
+    endDate   = new Date(year, month, 0, 23, 59, 59, 999)
+  }
 
   const startMs = startDate.getTime()
   const endMs   = endDate.getTime()
