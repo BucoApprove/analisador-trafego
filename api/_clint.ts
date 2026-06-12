@@ -27,58 +27,56 @@ async function fetchTagsPorProduto(): Promise<Record<string, string[]>> {
   return map
 }
 
-/** Lista as tags da Clint (id + nome) para o dropdown do editor. */
+/** Lista as tags da Clint (id + nome) para o dropdown do editor.
+ *  /v1/tags pagina por page/totalPages (não offset). */
 export async function fetchClintTagsList(): Promise<Array<{ id: string; name: string }>> {
   const token = process.env.CLINT_API_TOKEN ?? ''
   if (!token) return []
   const out: Array<{ id: string; name: string }> = []
-  let offset = 0
-  for (let i = 0; i < 50; i++) {
+  let page = 1
+  for (let i = 0; i < 100; i++) {
     const url = new URL(`${BASE}/v1/tags`)
     url.searchParams.set('limit', '100')
-    url.searchParams.set('offset', String(offset))
+    url.searchParams.set('page', String(page))
     const r = await fetch(url.toString(), { headers: { 'api-token': token, Accept: 'application/json' } })
     if (!r.ok) throw new Error(`Clint /v1/tags ${r.status}`)
-    const body = await r.text()
-    const data = lst(body ? JSON.parse(body) : []) as Array<{ id?: string; name?: string }>
-    if (data.length === 0) break
+    const json = body2json(await r.text())
+    const data = (json.data ?? []) as Array<{ id?: string; name?: string }>
     for (const t of data) if (t.id) out.push({ id: t.id, name: t.name ?? t.id })
-    if (data.length < 100) break
-    offset += 100
+    if (!json.hasNext || data.length === 0) break
+    page++
   }
   return out.sort((a, b) => a.name.localeCompare(b.name))
 }
 
-interface Deal { id?: string; created_at?: string }
-
-function lst(p: unknown): Deal[] {
-  if (Array.isArray(p)) return p as Deal[]
-  const o = p as { data?: Deal[]; items?: Deal[] }
-  return o?.data ?? o?.items ?? []
+function body2json(body: string): { data?: unknown[]; hasNext?: boolean } {
+  try { return body ? JSON.parse(body) : {} } catch { return {} }
 }
+
+interface Deal { id?: string; created_at?: string }
 
 async function dealsByTag(token: string, tagId: string, since: string, until: string): Promise<Set<string>> {
   const ids = new Set<string>()
-  let offset = 0
-  for (let i = 0; i < 40; i++) {
+  let page = 1
+  for (let i = 0; i < 100; i++) {
     const url = new URL(`${BASE}/v1/deals`)
     url.searchParams.set('tag_ids', tagId)
     url.searchParams.set('created_at_start', since)
     url.searchParams.set('created_at_end', until)
     url.searchParams.set('limit', '100')
-    url.searchParams.set('offset', String(offset))
+    url.searchParams.set('page', String(page))
     const r = await fetch(url.toString(), { headers: { 'api-token': token, Accept: 'application/json' } })
     if (!r.ok) throw new Error(`Clint /v1/deals ${r.status}`)
-    const body = await r.text()
-    const data = lst(body ? JSON.parse(body) : [])
+    const json = JSON.parse((await r.text()) || '{}') as { data?: Deal[]; items?: Deal[]; hasNext?: boolean }
+    const data = json.data ?? json.items ?? []
     if (data.length === 0) break
     for (const d of data) {
       // garante o filtro de data no cliente (a API às vezes ignora)
       const dt = (d.created_at ?? '').slice(0, 10)
       if (d.id && dt >= since && dt <= until) ids.add(d.id)
     }
-    if (data.length < 100) break
-    offset += 100
+    if (json.hasNext === false || data.length < 100) break
+    page++
   }
   return ids
 }
