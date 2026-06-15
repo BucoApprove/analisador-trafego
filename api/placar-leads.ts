@@ -50,8 +50,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const now = new Date()
   const month = monthParam || `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
   const [y, m] = month.split('-').map(Number)
-  const since = `${month}-01`
-  const until = new Date(y, m, 0).toISOString().slice(0, 10)
+  // Range opcional (since/until) dentro do mês — sobrescreve o mês inteiro.
+  const sinceParam = typeof req.query.since === 'string' ? req.query.since : ''
+  const untilParam = typeof req.query.until === 'string' ? req.query.until : ''
+  const rangeValido = !!(sinceParam && untilParam
+    && sinceParam.slice(0, 7) === month && untilParam.slice(0, 7) === month
+    && sinceParam <= untilParam)
+  const since = rangeValido ? sinceParam : `${month}-01`
+  const until = rangeValido ? untilParam : new Date(y, m, 0).toISOString().slice(0, 10)
 
   try {
     const regras = await fetchRegras()

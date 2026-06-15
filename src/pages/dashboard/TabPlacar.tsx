@@ -56,8 +56,10 @@ interface LeadsData {
   leadsClint: Record<string, ClintLeads>
   clintAtivo: boolean
 }
+interface RangeInfo { since: string; until: string; diasNoRange: number; diasNoMes: number; fatorMeta: number }
 interface PlacarResp {
   month: string
+  range: RangeInfo | null
   produtos: Produto[]
   totalLiquido: number
   totalVendas: number
@@ -101,12 +103,13 @@ function CatBadge({ cat }: { cat: Categoria }) {
 
 // ─── Célula de meta editável (grava em monthly_goals via goalName) ───────────
 
-function EditableMeta({ month, goalName, meta, onSaved, pctNode }: {
+function EditableMeta({ month, goalName, meta, onSaved, pctNode, readOnly }: {
   month: string
   goalName: string
   meta: number | null
   onSaved: (v: number) => void
   pctNode?: React.ReactNode  // % da meta, exibido embaixo do valor
+  readOnly?: boolean         // no modo período a meta é proporcional → não editável
 }) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState('')
@@ -114,6 +117,7 @@ function EditableMeta({ month, goalName, meta, onSaved, pctNode }: {
   const savedRef = useRef(false)
 
   function startEdit() {
+    if (readOnly) return
     setDraft(meta && meta > 0 ? String(meta) : '')
     savedRef.current = false
     setEditing(true)
@@ -150,6 +154,15 @@ function EditableMeta({ month, goalName, meta, onSaved, pctNode }: {
           />
           {saving && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />}
         </div>
+      </td>
+    )
+  }
+
+  if (readOnly) {
+    return (
+      <td className="px-4 py-2.5 text-right text-muted-foreground" title="Meta proporcional ao período (somente leitura)">
+        <div>{meta && meta > 0 ? fmtBRL(meta) : '—'}</div>
+        {pctNode && <div className="text-xs">{pctNode}</div>}
       </td>
     )
   }
@@ -194,9 +207,9 @@ function GastoCell({ gasto, etapas }: { gasto: number; etapas: EtapaGasto | null
 // Limite de % da meta abaixo do qual a linha inteira é destacada em vermelho.
 const PCT_META_CRITICO = 40
 
-function ProdutoRow({ p, stripe, month, onMeta, leadsUtm, leadsClint, clintAtivo }: {
+function ProdutoRow({ p, stripe, month, onMeta, metaReadOnly, leadsUtm, leadsClint, clintAtivo }: {
   p: Produto; stripe: boolean; month: string; onMeta: (goalName: string, v: number) => void
-  leadsUtm: number | null; leadsClint: ClintLeads | null; clintAtivo: boolean
+  metaReadOnly: boolean; leadsUtm: number | null; leadsClint: ClintLeads | null; clintAtivo: boolean
 }) {
   const [open, setOpen] = useState(false)
   const pct = p.meta && p.meta > 0 ? (p.liquido / p.meta) * 100 : null
@@ -227,7 +240,7 @@ function ProdutoRow({ p, stripe, month, onMeta, leadsUtm, leadsClint, clintAtivo
         {/* Faturamento */}
         <td className="px-4 py-2.5 text-right font-semibold">{fmtBRL(p.liquido)}</td>
         {/* Meta + % embaixo */}
-        <EditableMeta month={month} goalName={p.goalName} meta={p.meta} onSaved={v => onMeta(p.goalName, v)}
+        <EditableMeta month={month} goalName={p.goalName} meta={p.meta} onSaved={v => onMeta(p.goalName, v)} readOnly={metaReadOnly}
           pctNode={pct !== null ? <span className={pctCls}>{pct.toFixed(0)}%{pct >= 100 ? ' ✓' : ''}</span> : null} />
         {/* Gasto (com tooltip de etapa) */}
         <GastoCell gasto={p.gasto} etapas={p.gastoEtapas} />
@@ -523,12 +536,16 @@ export default function TabPlacar({ token, enabled }: Props) {
   const [showMap, setShowMap] = useState(false)
   const [showClint, setShowClint] = useState(false)
   const [leads, setLeads] = useState<LeadsData | null>(null)
+  // Range opcional dentro do mês (de/até). Vazio = mês inteiro.
+  const [rangeSince, setRangeSince] = useState('')
+  const [rangeUntil, setRangeUntil] = useState('')
 
-  const load = useCallback(async (m: string) => {
+  const load = useCallback(async (m: string, since = '', until = '') => {
     setLoading(true)
     setError('')
     try {
-      const r = await fetch(`/api/placar?month=${m}`, { headers: { Authorization: `Bearer ${token}` } })
+      const rangeQs = since && until ? `&since=${since}&until=${until}` : ''
+      const r = await fetch(`/api/placar?month=${m}${rangeQs}`, { headers: { Authorization: `Bearer ${token}` } })
       if (!r.ok) {
         const j = await r.json().catch(() => ({}))
         throw new Error(j.detail ?? j.error ?? `placar: ${r.status}`)
@@ -542,15 +559,16 @@ export default function TabPlacar({ token, enabled }: Props) {
   }, [token])
 
   // Leads (UTM + Clint) — carrega em paralelo, não bloqueia a tabela.
-  const loadLeads = useCallback(async (m: string) => {
+  const loadLeads = useCallback(async (m: string, since = '', until = '') => {
     setLeads(null)
     try {
-      const r = await fetch(`/api/placar-leads?month=${m}`, { headers: { Authorization: `Bearer ${token}` } })
+      const rangeQs = since && until ? `&since=${since}&until=${until}` : ''
+      const r = await fetch(`/api/placar-leads?month=${m}${rangeQs}`, { headers: { Authorization: `Bearer ${token}` } })
       if (r.ok) setLeads(await r.json())
     } catch { /* silencioso — leads são complementares */ }
   }, [token])
 
-  useEffect(() => { if (enabled) { load(month); loadLeads(month) } }, [enabled, month, load, loadLeads])
+  useEffect(() => { if (enabled) { load(month, rangeSince, rangeUntil); loadLeads(month, rangeSince, rangeUntil) } }, [enabled, month, rangeSince, rangeUntil, load, loadLeads])
 
   // Atualiza localmente a meta de todos os produtos que usam o mesmo goalName.
   const onMeta = useCallback((goalName: string, v: number) => {
@@ -590,10 +608,19 @@ export default function TabPlacar({ token, enabled }: Props) {
           <h2 className="text-lg font-semibold">Placar do Negócio 🎯</h2>
           <p className="text-xs text-muted-foreground">Faturamento líquido (comissão Hotmart) por produto · {month}</p>
         </div>
-        <div className="flex items-center gap-2">
-          <select value={month} onChange={e => setMonth(e.target.value)} className="text-sm border rounded px-2 py-1.5 bg-background">
+        <div className="flex items-center gap-2 flex-wrap">
+          <select value={month} onChange={e => { setMonth(e.target.value); setRangeSince(''); setRangeUntil('') }} className="text-sm border rounded px-2 py-1.5 bg-background">
             {monthOptions.map(m => <option key={m} value={m}>{m}</option>)}
           </select>
+          <div className="flex items-center gap-1 text-xs text-muted-foreground">
+            <span>de</span>
+            <input type="date" value={rangeSince} onChange={e => setRangeSince(e.target.value)} className="text-sm border rounded px-2 py-1.5 bg-background" />
+            <span>até</span>
+            <input type="date" value={rangeUntil} onChange={e => setRangeUntil(e.target.value)} className="text-sm border rounded px-2 py-1.5 bg-background" />
+            {(rangeSince || rangeUntil) && (
+              <button onClick={() => { setRangeSince(''); setRangeUntil('') }} className="underline hover:no-underline">limpar</button>
+            )}
+          </div>
           <button onClick={() => setShowMap(true)} className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded border bg-background hover:bg-muted transition-colors" title="Mapear campanhas para produtos">
             <Settings className="h-3.5 w-3.5" />
             Campanhas
@@ -609,12 +636,24 @@ export default function TabPlacar({ token, enabled }: Props) {
         </div>
       </div>
 
-      {showMap && <CampanhaMapModal onClose={() => setShowMap(false)} onChanged={() => load(month)} />}
-      {showClint && <ClintTagsModal token={token} onClose={() => setShowClint(false)} onChanged={() => loadLeads(month)} />}
+      {showMap && <CampanhaMapModal onClose={() => setShowMap(false)} onChanged={() => load(month, rangeSince, rangeUntil)} />}
+      {showClint && <ClintTagsModal token={token} onClose={() => setShowClint(false)} onChanged={() => loadLeads(month, rangeSince, rangeUntil)} />}
 
       <div className="rounded-md bg-blue-50 border border-blue-200 px-4 py-2 text-xs text-blue-800">
         ⚙️ Aba em construção. O gasto de cada campanha é atribuído ao produto pela aba <strong>Produtos/Campanhas</strong> (prefixo → produto). Campanha sem regra cai em <strong>Buco Approve</strong>.
       </div>
+
+      {/* Range ativo: metas proporcionais */}
+      {(rangeSince || rangeUntil) && !data?.range && (
+        <div className="rounded-md bg-destructive/10 border border-destructive/20 px-4 py-2.5 text-sm text-destructive">
+          Período inválido — selecione <strong>de</strong> e <strong>até</strong> dentro do mês {month} (não pode cruzar dois meses).
+        </div>
+      )}
+      {data?.range && (
+        <div className="rounded-md bg-amber-50 border border-amber-200 px-4 py-2.5 text-xs text-amber-800">
+          Período <strong>{data.range.since}</strong> a <strong>{data.range.until}</strong> ({Math.round(data.range.diasNoRange)} de {data.range.diasNoMes} dias). Faturamento, gasto, vendas e leads são do período; metas estão <strong>proporcionais</strong> ({Math.round(data.range.fatorMeta * 100)}% da mensal).
+        </div>
+      )}
 
       {error && <div className="rounded-md bg-destructive/10 border border-destructive/20 px-4 py-3 text-sm text-destructive">{error}</div>}
 
@@ -689,6 +728,7 @@ export default function TabPlacar({ token, enabled }: Props) {
             <tbody>
               {produtos.map((p, i) => (
                 <ProdutoRow key={p.nome} p={p} stripe={i % 2 !== 0} month={month} onMeta={onMeta}
+                  metaReadOnly={!!data?.range}
                   leadsUtm={leads?.leadsUtm[p.nome] ?? null}
                   leadsClint={leads?.leadsClint[p.nome] ?? null}
                   clintAtivo={leads?.clintAtivo ?? false} />

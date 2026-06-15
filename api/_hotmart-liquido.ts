@@ -65,11 +65,15 @@ async function paginate<T>(url: string, token: string): Promise<T[]> {
 
 const round = (n: number) => Math.round(n * 100) / 100
 
-/** Busca vendas + líquido (commissions PRODUCER) de um mês "YYYY-MM". */
-export async function fetchHotmartLiquido(month: string): Promise<HotmartLiquido> {
+/** Busca vendas + líquido (commissions PRODUCER) de um mês "YYYY-MM" (ou range). */
+export async function fetchHotmartLiquido(month: string, range?: { since: string; until: string }): Promise<HotmartLiquido> {
   const [y, m] = month.split('-').map(Number)
-  const startMs = new Date(y, m - 1, 1, 0, 0, 0, 0).getTime()
-  const endMs = new Date(y, m, 0, 23, 59, 59, 999).getTime()
+  const startMs = range?.since
+    ? new Date(`${range.since}T00:00:00`).getTime()
+    : new Date(y, m - 1, 1, 0, 0, 0, 0).getTime()
+  const endMs = range?.until
+    ? new Date(`${range.until}T23:59:59`).getTime()
+    : new Date(y, m, 0, 23, 59, 59, 999).getTime()
   const token = await getToken()
   const base = `start_date=${startMs}&end_date=${endMs}&max_results=50`
 

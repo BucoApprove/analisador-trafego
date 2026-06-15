@@ -112,7 +112,7 @@ function emptyEtapas(): Record<Etapa, number> {
 }
 
 /** Busca e atribui o gasto Meta das contas configuradas para um mês "YYYY-MM". */
-export async function fetchMetaGasto(month: string): Promise<MetaGasto> {
+export async function fetchMetaGasto(month: string, range?: { since: string; until: string }): Promise<MetaGasto> {
   const token = process.env.META_ACCESS_TOKEN ?? ''
   const accounts = accountIds()
   if (!token || accounts.length === 0) {
@@ -120,8 +120,8 @@ export async function fetchMetaGasto(month: string): Promise<MetaGasto> {
   }
 
   const [y, m] = month.split('-').map(Number)
-  const since = `${month}-01`
-  const until = new Date(y, m, 0).toISOString().slice(0, 10)
+  const since = range?.since || `${month}-01`
+  const until = range?.until || new Date(y, m, 0).toISOString().slice(0, 10)
   const timeRange = JSON.stringify({ since, until })
 
   const campanhas: CampanhaGasto[] = []

@@ -27,16 +27,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const now = new Date()
   const month = monthParam || `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
 
+  // Range opcional dentro do mês (since/until, YYYY-MM-DD). Quando válido,
+  // recalcula tudo no período e particiona a meta proporcional aos dias.
+  const sinceParam = typeof req.query.since === 'string' ? req.query.since : ''
+  const untilParam = typeof req.query.until === 'string' ? req.query.until : ''
+  const [my, mm] = month.split('-').map(Number)
+  const diasNoMes = new Date(my, mm, 0).getDate()
+  const rangeValido = !!(sinceParam && untilParam
+    && sinceParam.slice(0, 7) === month && untilParam.slice(0, 7) === month
+    && sinceParam <= untilParam)
+  const range = rangeValido ? { since: sinceParam, until: untilParam } : undefined
+  const diasNoRange = rangeValido
+    ? (new Date(untilParam).getTime() - new Date(sinceParam).getTime()) / 86400000 + 1
+    : diasNoMes
+  const fatorMeta = rangeValido ? diasNoRange / diasNoMes : 1
+
   try {
     // Gasto Meta é opcional: se falhar (env não configurada, token), a aba
     // continua mostrando Hotmart sem quebrar. Erro vai em `metaError`.
-    const metaGastoPromise = fetchMetaGasto(month).catch((e: Error) => {
+    const metaGastoPromise = fetchMetaGasto(month, range).catch((e: Error) => {
       console.error('placar meta-gasto error:', e.message)
       return { erro: e.message } as const
     })
 
     const [hotmart, allGoals, metaResult] = await Promise.all([
-      fetchHotmartLiquido(month),
+      fetchHotmartLiquido(month, range),
       fetchAllGoals(month),
       metaGastoPromise,
     ])
@@ -53,7 +68,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     //   canônico p/ novos) — edição no Placar sincroniza com a Metas Mensais.
     const produtos = hotmart.produtos.map(p => {
       const goalName = GOAL_NAME_BY_CANON[p.nome] ?? p.nome
-      const metaVal = allGoals.get(goalName) ?? null
+      const metaCheia = allGoals.get(goalName) ?? null
+      // meta proporcional ao range (fatorMeta = 1 quando mês inteiro)
+      const metaVal = metaCheia != null ? Math.round(metaCheia * fatorMeta * 100) / 100 : null
       const gasto = gastoPorProduto[p.nome] ?? 0
       const roas = gasto > 0 ? Math.round((p.liquido / gasto) * 100) / 100 : null
       return { ...p, meta: metaVal, goalName, gasto, roas, gastoEtapas: gastoPorEtapa[p.nome] ?? null }
@@ -73,6 +90,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       ...hotmart,
       produtos,
       totalMeta,
+      range: rangeValido ? { since: sinceParam, until: untilParam, diasNoRange, diasNoMes, fatorMeta } : null,
       meta: meta ? {
         totalGasto: meta.totalGasto,
         totalClassificado: meta.totalClassificado,
