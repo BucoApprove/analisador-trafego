@@ -451,8 +451,101 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
   }
 
+  // ── type = 'linked-products' ─────────────────────────────────────────────
+  if (body.type === 'linked-products') {
+    const product = body.product ?? ''
+    if (!product) return res.status(400).json({ error: 'product is required' })
+
+    const params: QueryParam[] = [{ name: 'product', value: product }, ...stClause.params, ...dateParams]
+
+    // Compradores do produto referência, com a data da primeira compra desse produto
+    const targetBuyersSql = `
+      SELECT LOWER(TRIM(E_mail_do_Comprador)) AS email,
+        MIN(COALESCE(Data_de_Aprova____o, Data_do_Pedido)) AS data_b
+      FROM ${tVendas}
+      WHERE Nome_do_Produto = @product ${stClause.sql} AND E_mail_do_Comprador IS NOT NULL${saleDateFilter}
+      GROUP BY LOWER(TRIM(E_mail_do_Comprador))
+    `
+
+    // Produtos comprados ANTES do produto referência (qualquer produto que precedeu)
+    const beforeSql = `
+      WITH
+        target_buyers AS (${targetBuyersSql}),
+        other_sales AS (
+          SELECT LOWER(TRIM(E_mail_do_Comprador)) AS email, Nome_do_Produto AS produto,
+            MIN(COALESCE(Data_de_Aprova____o, Data_do_Pedido)) AS data_compra
+          FROM ${tVendas}
+          WHERE Nome_do_Produto != @product AND E_mail_do_Comprador IS NOT NULL${saleDateFilter}
+          GROUP BY LOWER(TRIM(E_mail_do_Comprador)), Nome_do_Produto
+        )
+      SELECT
+        o.produto,
+        COUNT(DISTINCT o.email) AS compradores
+      FROM other_sales o
+      INNER JOIN target_buyers t ON o.email = t.email
+      WHERE o.data_compra < t.data_b
+      GROUP BY o.produto
+      ORDER BY compradores DESC
+      LIMIT 30
+    `
+
+    // Primeiro produto já comprado por cada comprador (origem) — entre quem também comprou o produto referência
+    const originSql = `
+      WITH
+        target_buyers AS (${targetBuyersSql}),
+        all_sales AS (
+          SELECT LOWER(TRIM(E_mail_do_Comprador)) AS email, Nome_do_Produto AS produto,
+            MIN(COALESCE(Data_de_Aprova____o, Data_do_Pedido)) AS data_compra
+          FROM ${tVendas}
+          WHERE E_mail_do_Comprador IS NOT NULL${saleDateFilter}
+          GROUP BY LOWER(TRIM(E_mail_do_Comprador)), Nome_do_Produto
+        ),
+        ranked AS (
+          SELECT email, produto, data_compra,
+            ROW_NUMBER() OVER (PARTITION BY email ORDER BY data_compra ASC) AS rn
+          FROM all_sales
+        )
+      SELECT r.produto, COUNT(DISTINCT r.email) AS compradores
+      FROM ranked r
+      INNER JOIN target_buyers t ON r.email = t.email
+      WHERE r.rn = 1
+      GROUP BY r.produto
+      ORDER BY compradores DESC
+      LIMIT 30
+    `
+
+    const totalBuyersSql = `
+      SELECT COUNT(DISTINCT LOWER(TRIM(E_mail_do_Comprador))) AS cnt
+      FROM ${tVendas}
+      WHERE Nome_do_Produto = @product ${stClause.sql} AND E_mail_do_Comprador IS NOT NULL${saleDateFilter}
+    `
+
+    try {
+      const [beforeRes, originRes, totalRes] = await Promise.all([
+        bqQuery(beforeSql, params),
+        bqQuery(originSql, params),
+        bqQuery(totalBuyersSql, params),
+      ])
+
+      const totalBuyers = parseInt(totalRes.rows[0]?.cnt ?? '0')
+      return res.json({
+        totalBuyers,
+        before: beforeRes.rows.map(r => ({
+          produto: r.produto ?? '',
+          compradores: parseInt(r.compradores ?? '0'),
+        })),
+        origin: originRes.rows.map(r => ({
+          produto: r.produto ?? '',
+          compradores: parseInt(r.compradores ?? '0'),
+        })),
+      })
+    } catch (e) {
+      return res.status(500).json({ error: (e as Error).message })
+    }
+  }
+
   // ── type = 'all' ─────────────────────────────────────────────────────────
-  if (body.type !== 'all') return res.status(400).json({ error: "type must be 'all', 'behavior-tag', 'utm-attribution', or 'funnel-overview'" })
+  if (body.type !== 'all') return res.status(400).json({ error: "type must be 'all', 'behavior-tag', 'utm-attribution', 'funnel-overview', or 'linked-products'" })
   const product = body.product ?? ''
   if (!product) return res.status(400).json({ error: 'product is required' })
 

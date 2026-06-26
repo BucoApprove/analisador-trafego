@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
-import type { CrossAnalysisData, BehaviorTagResult, UtmAttributionData, UtmAttrRow } from './types'
+import type { CrossAnalysisData, BehaviorTagResult, UtmAttributionData, UtmAttrRow, LinkedProductsData } from './types'
 import { KpiCard, SectionHeader, CHART_COLORS } from './components'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { Button } from '@/components/ui/button'
@@ -151,6 +151,11 @@ export default function TabAnalisesCruzadas({ token, enabled }: Props) {
   const [overviewRunning, setOverviewRunning] = useState(false)
   const [overviewError, setOverviewError] = useState<string | null>(null)
 
+  // Produtos vinculados (comprados antes do produto de referência)
+  const [linkedData, setLinkedData] = useState<LinkedProductsData | null>(null)
+  const [linkedRunning, setLinkedRunning] = useState(false)
+  const [linkedError, setLinkedError] = useState<string | null>(null)
+
   // Load product/status options once when tab becomes active
   useEffect(() => {
     if (!enabled || loaded) return
@@ -237,6 +242,24 @@ export default function TabAnalisesCruzadas({ token, enabled }: Props) {
     }
   }
 
+  async function handleRunLinked() {
+    if (!selectedProduct) return
+    setLinkedRunning(true); setLinkedError(null); setLinkedData(null)
+    try {
+      const res = await fetch('/api/cross-analysis', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ type: 'linked-products', product: selectedProduct, statuses: selectedStatuses, since, until }),
+      })
+      if (!res.ok) throw new Error(`Erro ${res.status}: ${await res.text()}`)
+      setLinkedData(await res.json())
+    } catch (e) {
+      setLinkedError((e as Error).message)
+    } finally {
+      setLinkedRunning(false)
+    }
+  }
+
   async function handleRunOverview() {
     if (!overviewProduct) return
     setOverviewRunning(true); setOverviewError(null); setOverviewData(null)
@@ -305,6 +328,7 @@ export default function TabAnalisesCruzadas({ token, enabled }: Props) {
           {[
             { id: 'overview', label: '📊 Visão Geral' },
             { id: 'ltc', label: '⏱ Lead→Compra' },
+            { id: 'linked', label: '🔗 Produtos Vinculados' },
             { id: 'tags', label: '🏷 Tags/Comprador' },
             { id: 'utm3', label: '📣 utm_content' },
             { id: 'entry', label: '🚪 Primeira entrada' },
@@ -405,6 +429,17 @@ export default function TabAnalisesCruzadas({ token, enabled }: Props) {
                 )}
               </TabsContent>
             </Tabs>
+          </TabsContent>
+
+          {/* 🔗 Produtos Vinculados */}
+          <TabsContent value="linked" className="space-y-4 mt-4">
+            <LinkedProductsPanel
+              product={selectedProduct}
+              data={linkedData}
+              running={linkedRunning}
+              error={linkedError}
+              onRun={handleRunLinked}
+            />
           </TabsContent>
 
           {/* 🏷 Tags por comprador */}
@@ -809,6 +844,99 @@ function FunnelOverviewPanel({
                 valueKey="anyTime"
                 color={CHART_COLORS[3]}
               />
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+// ─── Produtos Vinculados panel ────────────────────────────────────────────────
+
+function LinkedProductsPanel({
+  product, data, running, error, onRun,
+}: {
+  product: string
+  data: LinkedProductsData | null
+  running: boolean
+  error: string | null
+  onRun: () => void
+}) {
+  return (
+    <div className="space-y-5">
+      <p className="text-sm text-muted-foreground">
+        Para os compradores de <strong>{product || '(selecione um produto)'}</strong>, mostra quais outros produtos eles já tinham comprado antes — e qual foi o primeiro produto que compraram (origem).
+      </p>
+      <Button type="button" size="sm" onClick={onRun} disabled={running || !product}>
+        {running ? <><span className="mr-1 animate-spin">⟳</span>Analisando...</> : <><Play className="mr-1 h-4 w-4" />Analisar produtos vinculados</>}
+      </Button>
+
+      {error && <p className="text-sm text-destructive">{error}</p>}
+
+      {!data && !running && (
+        <p className="text-sm text-muted-foreground">Clique em "Analisar produtos vinculados" para ver o resultado.</p>
+      )}
+
+      {data && (
+        <>
+          <KpiCard label="Total de compradores" value={data.totalBuyers.toLocaleString('pt-BR')} />
+
+          <div className="grid gap-6 lg:grid-cols-2">
+            <div>
+              <p className="mb-2 text-sm font-medium">Produtos comprados antes</p>
+              <p className="mb-2 text-xs text-muted-foreground">Qualquer produto que o comprador já tinha adquirido antes deste.</p>
+              {data.before.length === 0 ? (
+                <p className="text-sm text-muted-foreground">Nenhum produto anterior encontrado.</p>
+              ) : (
+                <>
+                  <HBar
+                    data={data.before.slice(0, 15).map(r => ({ name: r.produto, value: r.compradores }))}
+                    nameKey="name" valueKey="value" color={CHART_COLORS[0]}
+                  />
+                  <div className="overflow-x-auto rounded border mt-3">
+                    <table className="w-full text-sm">
+                      <thead className="bg-muted"><tr><th className="px-3 py-2 text-left font-medium">Produto</th><th className="px-3 py-2 text-right font-medium">Compradores</th></tr></thead>
+                      <tbody className="divide-y">
+                        {data.before.map((r, i) => (
+                          <tr key={i} className="hover:bg-muted/50">
+                            <td className="px-3 py-2 max-w-[220px] truncate">{r.produto}</td>
+                            <td className="px-3 py-2 text-right font-medium">{r.compradores.toLocaleString('pt-BR')}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              )}
+            </div>
+
+            <div>
+              <p className="mb-2 text-sm font-medium">Produto de origem (primeira compra)</p>
+              <p className="mb-2 text-xs text-muted-foreground">O primeiro produto que cada comprador já adquiriu, considerando todo o histórico.</p>
+              {data.origin.length === 0 ? (
+                <p className="text-sm text-muted-foreground">Nenhum dado encontrado.</p>
+              ) : (
+                <>
+                  <HBar
+                    data={data.origin.slice(0, 15).map(r => ({ name: r.produto, value: r.compradores }))}
+                    nameKey="name" valueKey="value" color={CHART_COLORS[1]}
+                  />
+                  <div className="overflow-x-auto rounded border mt-3">
+                    <table className="w-full text-sm">
+                      <thead className="bg-muted"><tr><th className="px-3 py-2 text-left font-medium">Produto</th><th className="px-3 py-2 text-right font-medium">Compradores</th></tr></thead>
+                      <tbody className="divide-y">
+                        {data.origin.map((r, i) => (
+                          <tr key={i} className="hover:bg-muted/50">
+                            <td className="px-3 py-2 max-w-[220px] truncate">{r.produto}</td>
+                            <td className="px-3 py-2 text-right font-medium">{r.compradores.toLocaleString('pt-BR')}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              )}
             </div>
           </div>
         </>

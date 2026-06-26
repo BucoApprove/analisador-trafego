@@ -425,6 +425,12 @@ export interface UtmAttributionData {
   lastTagDist: { tag: string; compradores: number }[]
 }
 
+export interface LinkedProductsData {
+  totalBuyers: number
+  before: { produto: string; compradores: number }[]
+  origin: { produto: string; compradores: number }[]
+}
+
 export interface BehaviorTagResult {
   count: number
   soAntes: number

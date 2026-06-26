@@ -61,7 +61,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   const stClause = statusClause(statuses)
-  const gaClause = inClause('Nome_do_Produto', groupA, 'ga')
+  const gaClause = inClause('produto', groupA, 'ga')
 
   // id_comprador: CPF normalizado ou nome normalizado
   const idCompradorExpr = `CASE
@@ -96,7 +96,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     buyers_b AS (
       SELECT id_comprador, MIN(data_efetiva) AS data_b
       FROM base
-      WHERE Nome_do_Produto = @product_b
+      WHERE produto = @product_b
       GROUP BY id_comprador
     )
   `
