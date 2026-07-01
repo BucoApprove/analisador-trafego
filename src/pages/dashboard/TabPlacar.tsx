@@ -69,6 +69,12 @@ interface PlacarResp {
   metaError: string | null
 }
 
+interface OrcamentoEntry {
+  orcamento: number | null
+  ticket: number | null
+  conversao: number | null
+}
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function fmtBRL(v: number) {
@@ -101,6 +107,43 @@ function CatBadge({ cat }: { cat: Categoria }) {
   return <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${b.cls}`}>{b.label}</span>
 }
 
+// ─── Tetos e ROAS esperado (cálculos por produto) ────────────────────────────
+
+interface Alvos {
+  roasEsperado: number | null
+  tetoCpv: number | null
+  tetoCpl: number | null
+}
+
+function calcAlvos(meta: number | null, orc: OrcamentoEntry): Alvos {
+  const { orcamento, ticket, conversao } = orc
+  if (!orcamento || orcamento <= 0 || !meta || meta <= 0) {
+    return { roasEsperado: null, tetoCpv: null, tetoCpl: null }
+  }
+  const roasEsperado = meta / orcamento
+  const vendasNecessarias = ticket && ticket > 0 ? meta / ticket : null
+  const tetoCpv = vendasNecessarias && vendasNecessarias > 0 ? orcamento / vendasNecessarias : null
+  const leadsNecessarios = vendasNecessarias && conversao && conversao > 0 ? vendasNecessarias / conversao : null
+  const tetoCpl = leadsNecessarios && leadsNecessarios > 0 ? orcamento / leadsNecessarios : null
+  return { roasEsperado, tetoCpv, tetoCpl }
+}
+
+// Verde/Amarelo/Vermelho para CPV e CPL (menor = melhor, teto é máximo).
+function colorCusto(real: number | null, teto: number | null): string {
+  if (real === null || teto === null || teto <= 0) return ''
+  if (real <= teto) return 'text-green-600'
+  if (real <= teto * 1.10) return 'text-yellow-600'
+  return 'text-red-600'
+}
+
+// Verde/Amarelo/Vermelho para ROAS (maior = melhor, esperado é mínimo).
+function colorRoas(real: number | null, esperado: number | null): string {
+  if (real === null || esperado === null || esperado <= 0) return ''
+  if (real >= esperado) return 'text-green-600 font-medium'
+  if (real >= esperado * 0.90) return 'text-yellow-600'
+  return 'text-red-600'
+}
+
 // ─── Célula de meta editável (grava em monthly_goals via goalName) ───────────
 
 function EditableMeta({ month, goalName, meta, onSaved, pctNode, readOnly }: {
@@ -108,8 +151,8 @@ function EditableMeta({ month, goalName, meta, onSaved, pctNode, readOnly }: {
   goalName: string
   meta: number | null
   onSaved: (v: number) => void
-  pctNode?: React.ReactNode  // % da meta, exibido embaixo do valor
-  readOnly?: boolean         // no modo período a meta é proporcional → não editável
+  pctNode?: React.ReactNode
+  readOnly?: boolean
 }) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState('')
@@ -179,6 +222,108 @@ function EditableMeta({ month, goalName, meta, onSaved, pctNode, readOnly }: {
   )
 }
 
+// ─── Célula de orçamento editável (grava em orcamento_trafego via API) ────────
+
+function EditableOrcamento({ month, product, token, entry, onSaved }: {
+  month: string
+  product: string
+  token: string
+  entry: OrcamentoEntry
+  onSaved: (e: OrcamentoEntry) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [draftOrc, setDraftOrc] = useState('')
+  const [draftTicket, setDraftTicket] = useState('')
+  const [draftConv, setDraftConv] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  function openEdit() {
+    setDraftOrc(entry.orcamento != null && entry.orcamento > 0 ? String(entry.orcamento) : '')
+    setDraftTicket(entry.ticket != null && entry.ticket > 0 ? String(entry.ticket) : '')
+    setDraftConv(entry.conversao != null && entry.conversao > 0 ? String(Math.round(entry.conversao * 100)) : '')
+    setOpen(true)
+  }
+
+  function parseNum(s: string) {
+    const v = parseFloat(s.replace(/\./g, '').replace(',', '.').trim())
+    return isNaN(v) || v <= 0 ? null : v
+  }
+
+  async function save() {
+    setSaving(true)
+    const orcamento = parseNum(draftOrc)
+    const ticket = parseNum(draftTicket)
+    const convPct = parseNum(draftConv)
+    const conversao = convPct != null ? convPct / 100 : null
+    const body = { month, product, orcamento, ticket, conversao }
+    await fetch('/api/orcamento', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify(body),
+    })
+    setSaving(false)
+    onSaved({ orcamento, ticket, conversao })
+    setOpen(false)
+  }
+
+  const orcVal = entry.orcamento
+
+  return (
+    <td className="px-4 py-2.5 text-right relative">
+      <button
+        onClick={openEdit}
+        title="Clique para editar orçamento, ticket e conversão"
+        className="inline-flex items-center gap-1 cursor-pointer hover:opacity-80 group/orc"
+      >
+        <span className={`rounded px-1.5 py-0.5 text-sm ${orcVal ? 'bg-amber-50 text-amber-800 border border-amber-200' : 'text-muted-foreground italic opacity-60'}`}>
+          {orcVal ? fmtBRL(orcVal) : 'definir'}
+        </span>
+        <Pencil className="h-3 w-3 text-muted-foreground opacity-0 group-hover/orc:opacity-60 transition-opacity" />
+      </button>
+
+      {open && (
+        <div className="absolute right-0 top-full z-50 mt-1 w-64 rounded-lg border bg-white dark:bg-zinc-900 shadow-xl p-3 space-y-2 text-left" onClick={e => e.stopPropagation()}>
+          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Orçamento — {product}</p>
+          <div>
+            <label className="text-xs text-muted-foreground">Orçamento de tráfego (R$)</label>
+            <input
+              autoFocus type="text" inputMode="decimal" value={draftOrc}
+              onChange={e => setDraftOrc(e.target.value)}
+              placeholder="ex: 12000"
+              className="mt-0.5 w-full text-sm border rounded px-2 py-1 bg-background"
+            />
+          </div>
+          <div>
+            <label className="text-xs text-muted-foreground">Ticket médio (R$) <span className="opacity-60">histórico ou manual</span></label>
+            <input type="text" inputMode="decimal" value={draftTicket}
+              onChange={e => setDraftTicket(e.target.value)}
+              placeholder="ex: 1750"
+              className="mt-0.5 w-full text-sm border rounded px-2 py-1 bg-background"
+            />
+          </div>
+          <div>
+            <label className="text-xs text-muted-foreground">Conversão (%) <span className="opacity-60">vendas ÷ leads int</span></label>
+            <input type="text" inputMode="decimal" value={draftConv}
+              onChange={e => setDraftConv(e.target.value)}
+              placeholder="ex: 18.6"
+              className="mt-0.5 w-full text-sm border rounded px-2 py-1 bg-background"
+            />
+          </div>
+          <div className="flex gap-2 pt-1">
+            <button onClick={save} disabled={saving}
+              className="flex-1 text-xs px-3 py-1.5 rounded bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 flex items-center justify-center gap-1">
+              {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Salvar'}
+            </button>
+            <button onClick={() => setOpen(false)} className="text-xs px-3 py-1.5 rounded border hover:bg-muted">
+              Cancelar
+            </button>
+          </div>
+        </div>
+      )}
+    </td>
+  )
+}
+
 // ─── Célula de gasto com tooltip de split por etapa ──────────────────────────
 
 function GastoCell({ gasto, etapas }: { gasto: number; etapas: EtapaGasto | null }) {
@@ -204,12 +349,15 @@ function GastoCell({ gasto, etapas }: { gasto: number; etapas: EtapaGasto | null
 
 // ─── Linha de produto (com drill-down de ofertas) ────────────────────────────
 
-// Limite de % da meta abaixo do qual a linha inteira é destacada em vermelho.
 const PCT_META_CRITICO = 40
 
-function ProdutoRow({ p, stripe, month, onMeta, metaReadOnly, leadsUtm, leadsClint, clintAtivo }: {
-  p: Produto; stripe: boolean; month: string; onMeta: (goalName: string, v: number) => void
-  metaReadOnly: boolean; leadsUtm: number | null; leadsClint: ClintLeads | null; clintAtivo: boolean
+function ProdutoRow({ p, stripe, month, token, onMeta, onOrcamento, metaReadOnly, leadsUtm, leadsClint, clintAtivo, orcEntry }: {
+  p: Produto; stripe: boolean; month: string; token: string
+  onMeta: (goalName: string, v: number) => void
+  onOrcamento: (nome: string, e: OrcamentoEntry) => void
+  metaReadOnly: boolean
+  leadsUtm: number | null; leadsClint: ClintLeads | null; clintAtivo: boolean
+  orcEntry: OrcamentoEntry
 }) {
   const [open, setOpen] = useState(false)
   const pct = p.meta && p.meta > 0 ? (p.liquido / p.meta) * 100 : null
@@ -218,9 +366,16 @@ function ProdutoRow({ p, stripe, month, onMeta, metaReadOnly, leadsUtm, leadsCli
   const cplUtm = p.gasto > 0 && leadsUtm != null && leadsUtm > 0 ? p.gasto / leadsUtm : null
   const cplClint = p.gasto > 0 && leadsClint != null && leadsClint.interessado > 0 ? p.gasto / leadsClint.interessado : null
   const pctCls = pct === null ? '' : pct >= 100 ? 'text-green-600 font-semibold' : pct >= 70 ? 'text-yellow-600' : 'text-red-600'
-  // Linha inteira em vermelho quando o % da meta está muito baixo.
   const critico = pct !== null && pct < PCT_META_CRITICO
   const rowCls = critico ? 'bg-red-50 dark:bg-red-950/30' : (stripe ? 'bg-muted/20' : '')
+
+  const alvos = calcAlvos(p.meta, orcEntry)
+
+  const cpvColor = colorCusto(cpv, alvos.tetoCpv)
+  // CPL: usa UTM se disponível, senão Clint
+  const cplRef = cplUtm ?? cplClint
+  const cplColor = colorCusto(cplRef, alvos.tetoCpl)
+  const roasColor = colorRoas(p.roas, alvos.roasEsperado)
 
   return (
     <>
@@ -239,14 +394,16 @@ function ProdutoRow({ p, stripe, month, onMeta, metaReadOnly, leadsUtm, leadsCli
         </td>
         {/* Faturamento */}
         <td className="px-4 py-2.5 text-right font-semibold">{fmtBRL(p.liquido)}</td>
-        {/* Meta + % embaixo */}
+        {/* Meta + % */}
         <EditableMeta month={month} goalName={p.goalName} meta={p.meta} onSaved={v => onMeta(p.goalName, v)} readOnly={metaReadOnly}
           pctNode={pct !== null ? <span className={pctCls}>{pct.toFixed(0)}%{pct >= 100 ? ' ✓' : ''}</span> : null} />
-        {/* Gasto (com tooltip de etapa) */}
+        {/* Gasto */}
         <GastoCell gasto={p.gasto} etapas={p.gastoEtapas} />
+        {/* Orçamento mês (editável) */}
+        <EditableOrcamento month={month} product={p.nome} token={token} entry={orcEntry} onSaved={e => onOrcamento(p.nome, e)} />
         {/* Vendas */}
         <td className="px-4 py-2.5 text-right">{p.vendas}</td>
-        {/* Leads: UTM em cima, Clint (interessado/abordado) embaixo */}
+        {/* Leads */}
         <td className="px-4 py-2.5 text-right">
           <div title="Leads UTM (BigQuery)">{leadsUtm != null && leadsUtm > 0 ? leadsUtm.toLocaleString('pt-BR') : '—'}</div>
           {clintAtivo && (
@@ -257,22 +414,39 @@ function ProdutoRow({ p, stripe, month, onMeta, metaReadOnly, leadsUtm, leadsCli
             </div>
           )}
         </td>
-        {/* CPV (gasto ÷ vendas) */}
-        <td className="px-4 py-2.5 text-right text-muted-foreground">{cpv !== null ? fmtBRL(cpv) : '—'}</td>
-        {/* CPL: UTM em cima, Clint (interessado) embaixo */}
-        <td className="px-4 py-2.5 text-right text-muted-foreground">
-          <div title="CPL UTM = gasto ÷ leads UTM">{cplUtm !== null ? fmtBRL(cplUtm) : '—'}</div>
-          {clintAtivo && (
-            <div className="text-xs" title="CPL Clint = gasto ÷ leads interessado (Clint)">
-              {cplClint !== null ? fmtBRL(cplClint) : '—'}
-            </div>
+        {/* CPV com teto */}
+        <td className="px-4 py-2.5 text-right">
+          <div className={cpv !== null ? cpvColor || 'text-muted-foreground' : 'text-muted-foreground'}>
+            {cpv !== null ? fmtBRL(cpv) : '—'}
+          </div>
+          {alvos.tetoCpv !== null && (
+            <div className="text-[11px] text-muted-foreground">teto {fmtBRL(alvos.tetoCpv)}</div>
           )}
         </td>
-        {/* ROAS */}
+        {/* CPL com teto */}
+        <td className="px-4 py-2.5 text-right">
+          <div title="CPL UTM = gasto ÷ leads UTM" className={cplUtm !== null ? cplColor || 'text-muted-foreground' : 'text-muted-foreground'}>
+            {cplUtm !== null ? fmtBRL(cplUtm) : '—'}
+          </div>
+          {clintAtivo && cplClint !== null && (
+            <div className={`text-xs ${cplUtm === null ? cplColor : ''}`} title="CPL Clint = gasto ÷ leads interessado (Clint)">
+              {fmtBRL(cplClint)}
+            </div>
+          )}
+          {alvos.tetoCpl !== null && (
+            <div className="text-[11px] text-muted-foreground">teto {fmtBRL(alvos.tetoCpl)}</div>
+          )}
+        </td>
+        {/* ROAS com esperado */}
         <td className="px-4 py-2.5 text-right">
           {p.roas !== null ? (
-            <span className={p.roas >= 1 ? 'text-green-600 font-medium' : 'text-red-600'}>{p.roas.toFixed(2)}x</span>
-          ) : '—'}
+            <div className={roasColor || (p.roas >= 1 ? 'text-green-600 font-medium' : 'text-red-600')}>
+              {p.roas.toFixed(2)}x
+            </div>
+          ) : <div className="text-muted-foreground">—</div>}
+          {alvos.roasEsperado !== null && (
+            <div className="text-[11px] text-muted-foreground">esp {alvos.roasEsperado.toFixed(2)}x</div>
+          )}
         </td>
       </tr>
       {open && p.ofertas?.map(o => (
@@ -281,7 +455,7 @@ function ProdutoRow({ p, stripe, month, onMeta, metaReadOnly, leadsUtm, leadsCli
             {o.nome}{o.nome !== o.code && <span className="not-italic opacity-50"> ({o.code})</span>}
           </td>
           <td className="px-4 py-1.5 text-right">{fmtBRL(o.liquido)}</td>
-          <td colSpan={3} />
+          <td colSpan={4} />
           <td className="px-4 py-1.5 text-right">{o.vendas}</td>
           <td colSpan={3} />
         </tr>
@@ -344,7 +518,6 @@ function CampanhaMapModal({ onClose, onChanged }: { onClose: () => void; onChang
           <button onClick={onClose} className="text-muted-foreground hover:text-foreground"><X className="h-4 w-4" /></button>
         </div>
 
-        {/* Seletor de conta */}
         <div className="px-5 py-3 border-b flex gap-2">
           {(['conta1', 'conta2'] as const).map(c => (
             <button key={c} onClick={() => setAccount(c)}
@@ -354,7 +527,6 @@ function CampanhaMapModal({ onClose, onChanged }: { onClose: () => void; onChang
           ))}
         </div>
 
-        {/* Nova regra */}
         <div className="px-5 py-3 border-b bg-muted/20">
           <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Nova regra</p>
           <div className="flex gap-2">
@@ -376,7 +548,6 @@ function CampanhaMapModal({ onClose, onChanged }: { onClose: () => void; onChang
           </div>
         </div>
 
-        {/* Lista */}
         <div className="overflow-y-auto flex-1 p-2">
           {loading && <div className="flex justify-center py-8 text-muted-foreground"><Loader2 className="h-5 w-5 animate-spin" /></div>}
           {!loading && rows.length === 0 && (
@@ -422,7 +593,6 @@ function ClintTagsModal({ token, onClose, onChanged }: { token: string; onClose:
     setLoading(false)
   }, [token])
 
-  // Lista de tags da Clint (id+nome) para o dropdown.
   const loadAvailable = useCallback(async () => {
     const r = await fetch('/api/clint-tags?available=1', { headers: { Authorization: `Bearer ${token}` } })
     const j = await r.json().catch(() => ({}))
@@ -432,7 +602,6 @@ function ClintTagsModal({ token, onClose, onChanged }: { token: string; onClose:
 
   useEffect(() => { load(); loadAvailable() }, [load, loadAvailable])
 
-  // já cadastradas (para não repetir no dropdown)
   const jaUsadas = new Set(rows.map(r => r.tag_id))
   const tagsFiltradas = (available ?? [])
     .filter(t => !jaUsadas.has(t.id))
@@ -453,7 +622,6 @@ function ClintTagsModal({ token, onClose, onChanged }: { token: string; onClose:
     await load(); onChanged()
   }
 
-  // Agrupa por produto para exibir.
   const porProduto = rows.reduce((acc, r) => { (acc[r.product_name] ??= []).push(r); return acc }, {} as Record<string, ClintTagRow[]>)
 
   return (
@@ -483,7 +651,6 @@ function ClintTagsModal({ token, onClose, onChanged }: { token: string; onClose:
                 onChange={e => { setSelectedTag(null); setTagSearch(e.target.value) }}
                 disabled={available === null}
               />
-              {/* lista filtrável */}
               {!selectedTag && tagSearch && tagsFiltradas.length > 0 && (
                 <div className="absolute z-20 left-0 right-0 mt-1 max-h-48 overflow-y-auto rounded-md border bg-white dark:bg-zinc-900 shadow-lg">
                   {tagsFiltradas.map(t => (
@@ -528,6 +695,8 @@ function ClintTagsModal({ token, onClose, onChanged }: { token: string; onClose:
 
 // ─── Main ────────────────────────────────────────────────────────────────────
 
+const EMPTY_ORC: OrcamentoEntry = { orcamento: null, ticket: null, conversao: null }
+
 export default function TabPlacar({ token, enabled }: Props) {
   const [month, setMonth] = useState(currentMonthStr)
   const [data, setData] = useState<PlacarResp | null>(null)
@@ -536,9 +705,10 @@ export default function TabPlacar({ token, enabled }: Props) {
   const [showMap, setShowMap] = useState(false)
   const [showClint, setShowClint] = useState(false)
   const [leads, setLeads] = useState<LeadsData | null>(null)
-  // Range opcional dentro do mês (de/até). Vazio = mês inteiro.
   const [rangeSince, setRangeSince] = useState('')
   const [rangeUntil, setRangeUntil] = useState('')
+  // Orçamento por produto: produto nome → OrcamentoEntry
+  const [orcamentos, setOrcamentos] = useState<Record<string, OrcamentoEntry>>({})
 
   const load = useCallback(async (m: string, since = '', until = '') => {
     setLoading(true)
@@ -558,19 +728,33 @@ export default function TabPlacar({ token, enabled }: Props) {
     }
   }, [token])
 
-  // Leads (UTM + Clint) — carrega em paralelo, não bloqueia a tabela.
   const loadLeads = useCallback(async (m: string, since = '', until = '') => {
     setLeads(null)
     try {
       const rangeQs = since && until ? `&since=${since}&until=${until}` : ''
       const r = await fetch(`/api/placar-leads?month=${m}${rangeQs}`, { headers: { Authorization: `Bearer ${token}` } })
       if (r.ok) setLeads(await r.json())
-    } catch { /* silencioso — leads são complementares */ }
+    } catch { /* silencioso */ }
   }, [token])
 
-  useEffect(() => { if (enabled) { load(month, rangeSince, rangeUntil); loadLeads(month, rangeSince, rangeUntil) } }, [enabled, month, rangeSince, rangeUntil, load, loadLeads])
+  const loadOrcamentos = useCallback(async (m: string) => {
+    try {
+      const r = await fetch(`/api/orcamento?month=${m}`, { headers: { Authorization: `Bearer ${token}` } })
+      if (r.ok) {
+        const j = await r.json()
+        setOrcamentos(j.produtos ?? {})
+      }
+    } catch { /* silencioso */ }
+  }, [token])
 
-  // Atualiza localmente a meta de todos os produtos que usam o mesmo goalName.
+  useEffect(() => {
+    if (enabled) {
+      load(month, rangeSince, rangeUntil)
+      loadLeads(month, rangeSince, rangeUntil)
+      loadOrcamentos(month)
+    }
+  }, [enabled, month, rangeSince, rangeUntil, load, loadLeads, loadOrcamentos])
+
   const onMeta = useCallback((goalName: string, v: number) => {
     setData(prev => {
       if (!prev) return prev
@@ -580,11 +764,14 @@ export default function TabPlacar({ token, enabled }: Props) {
     })
   }, [])
 
+  const onOrcamento = useCallback((nome: string, entry: OrcamentoEntry) => {
+    setOrcamentos(prev => ({ ...prev, [nome]: entry }))
+  }, [])
+
   const { dayOfMonth, lastDay, isCurrent } = daysInfo(month)
   const totalLiquido = data?.totalLiquido ?? 0
   const totalMeta = data?.totalMeta ?? 0
   const pctMeta = totalMeta > 0 ? (totalLiquido / totalMeta) * 100 : null
-  // Ritmo só faz sentido no mês corrente: % esperado = fração do mês já decorrida.
   const pctEsperado = (dayOfMonth / lastDay) * 100
   const abaixoDoRitmo = isCurrent && pctMeta !== null && pctMeta < pctEsperado
 
@@ -599,6 +786,10 @@ export default function TabPlacar({ token, enabled }: Props) {
   const gastoProdutos = produtos.reduce((s, p) => s + p.gasto, 0)
   const totalGasto = data?.meta?.totalGasto ?? 0
   const gastoSemVenda = data?.meta?.gastoSemVenda ?? []
+
+  // Total do orçamento (soma dos produtos que têm orçamento definido)
+  const totalOrcamento = Object.values(orcamentos).reduce((s, e) => s + (e.orcamento ?? 0), 0)
+  const roasEsperadoTotal = totalOrcamento > 0 && totalMeta > 0 ? totalMeta / totalOrcamento : null
 
   return (
     <div className="space-y-6">
@@ -629,7 +820,7 @@ export default function TabPlacar({ token, enabled }: Props) {
             <Settings className="h-3.5 w-3.5" />
             Tags Clint
           </button>
-          <button onClick={() => load(month)} disabled={loading} className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded border bg-background hover:bg-muted transition-colors disabled:opacity-50">
+          <button onClick={() => { load(month, rangeSince, rangeUntil); loadLeads(month, rangeSince, rangeUntil); loadOrcamentos(month) }} disabled={loading} className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded border bg-background hover:bg-muted transition-colors disabled:opacity-50">
             <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
             Atualizar
           </button>
@@ -643,7 +834,6 @@ export default function TabPlacar({ token, enabled }: Props) {
         ⚙️ Aba em construção. O gasto de cada campanha é atribuído ao produto pela aba <strong>Produtos/Campanhas</strong> (prefixo → produto). Campanha sem regra cai em <strong>Buco Approve</strong>.
       </div>
 
-      {/* Range ativo: metas proporcionais */}
       {(rangeSince || rangeUntil) && !data?.range && (
         <div className="rounded-md bg-destructive/10 border border-destructive/20 px-4 py-2.5 text-sm text-destructive">
           Período inválido — selecione <strong>de</strong> e <strong>até</strong> dentro do mês {month} (não pode cruzar dois meses).
@@ -657,7 +847,6 @@ export default function TabPlacar({ token, enabled }: Props) {
 
       {error && <div className="rounded-md bg-destructive/10 border border-destructive/20 px-4 py-3 text-sm text-destructive">{error}</div>}
 
-      {/* Hero: faturamento do mês (sem ritmo — ritmo vai no card separado) */}
       {data && (
         <div className="rounded-lg border bg-card p-5">
           <p className="text-xs text-muted-foreground mb-1">Faturamento líquido do mês</p>
@@ -672,15 +861,21 @@ export default function TabPlacar({ token, enabled }: Props) {
         </div>
       )}
 
-      {/* KPIs: Faturamento · Gasto · ROAS geral · Distância da meta / ritmo */}
       {data && (() => {
         const restante = totalMeta - totalLiquido
+        const roasGeral = gastoProdutos > 0 ? totalLiquido / gastoProdutos : null
+        const roasGeralColor = colorRoas(roasGeral, roasEsperadoTotal)
         return (
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
             {[
               { label: 'Faturamento', value: fmtBRL(totalLiquido), sub: pctMeta !== null ? `${pctMeta.toFixed(0)}% da meta` : null, cls: '' },
               { label: 'Gasto total (2 contas)', value: totalGasto > 0 ? fmtBRL(totalGasto) : '—', sub: gastoProdutos > 0 ? `${fmtBRL(gastoProdutos)} em produtos` : null, cls: '' },
-              { label: 'ROAS geral', value: gastoProdutos > 0 ? `${(totalLiquido / gastoProdutos).toFixed(2)}x` : '—', sub: 'líquido ÷ gasto produtos', cls: '' },
+              {
+                label: 'ROAS geral',
+                value: roasGeral !== null ? `${roasGeral.toFixed(2)}x` : '—',
+                sub: roasEsperadoTotal !== null ? `esp ${roasEsperadoTotal.toFixed(2)}x` : 'líquido ÷ gasto produtos',
+                cls: roasGeralColor,
+              },
               {
                 label: 'Distância da meta',
                 value: totalMeta > 0 ? (restante > 0 ? fmtBRL(restante) : 'atingida ✓') : '—',
@@ -700,17 +895,14 @@ export default function TabPlacar({ token, enabled }: Props) {
         )
       })()}
 
-      {/* Aviso se o gasto Meta falhou */}
       {data?.metaError && (
         <div className="rounded-md bg-yellow-50 border border-yellow-200 px-4 py-2.5 text-xs text-yellow-800">
           ⚠️ Gasto Meta indisponível ({data.metaError}). Verifique <code>META_AD_ACCOUNTS</code> e <code>META_ACCESS_TOKEN</code> no Vercel.
         </div>
       )}
 
-      {/* Tabela única de produtos (badge identifica a categoria) */}
-      {/* overflow-visible para o tooltip de gasto por etapa não ser cortado */}
       {produtos.length > 0 && (
-        <div className="rounded-lg border bg-card">
+        <div className="rounded-lg border bg-card overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b bg-muted/50">
@@ -718,37 +910,42 @@ export default function TabPlacar({ token, enabled }: Props) {
                 <th className="text-right px-4 py-2.5 font-medium">Faturamento</th>
                 <th className="text-right px-4 py-2.5 font-medium">Meta</th>
                 <th className="text-right px-4 py-2.5 font-medium">Gasto</th>
+                <th className="text-right px-4 py-2.5 font-medium">
+                  <span title="Orçamento mensal de tráfego. Clique no valor para editar junto com ticket e conversão.">Orç. mês ✎</span>
+                </th>
                 <th className="text-right px-4 py-2.5 font-medium">Vendas</th>
                 <th className="text-right px-4 py-2.5 font-medium" title="Leads UTM (BigQuery) e Leads Clint (interessado/abordado)">Leads</th>
-                <th className="text-right px-4 py-2.5 font-medium" title="Custo por venda (gasto ÷ vendas)">CPV</th>
-                <th className="text-right px-4 py-2.5 font-medium" title="CPL UTM (gasto÷leads UTM) e CPL Clint (gasto÷interessado)">CPL</th>
-                <th className="text-right px-4 py-2.5 font-medium">ROAS</th>
+                <th className="text-right px-4 py-2.5 font-medium" title="CPV real e teto calculado. Verde ≤ teto, Amarelo ≤ teto×1,10, Vermelho acima.">CPV</th>
+                <th className="text-right px-4 py-2.5 font-medium" title="CPL real e teto calculado. Verde ≤ teto, Amarelo ≤ teto×1,10, Vermelho acima.">CPL</th>
+                <th className="text-right px-4 py-2.5 font-medium" title="ROAS real e esperado. Verde ≥ esperado, Amarelo ≥ esperado×0,90, Vermelho abaixo.">ROAS</th>
               </tr>
             </thead>
             <tbody>
               {produtos.map((p, i) => (
-                <ProdutoRow key={p.nome} p={p} stripe={i % 2 !== 0} month={month} onMeta={onMeta}
+                <ProdutoRow key={p.nome} p={p} stripe={i % 2 !== 0} month={month} token={token} onMeta={onMeta} onOrcamento={onOrcamento}
                   metaReadOnly={!!data?.range}
                   leadsUtm={leads?.leadsUtm[p.nome] ?? null}
                   leadsClint={leads?.leadsClint[p.nome] ?? null}
-                  clintAtivo={leads?.clintAtivo ?? false} />
+                  clintAtivo={leads?.clintAtivo ?? false}
+                  orcEntry={orcamentos[p.nome] ?? EMPTY_ORC} />
               ))}
             </tbody>
             <tfoot>
               <tr className="border-t bg-muted/50 font-semibold">
                 <td className="px-4 py-2.5">Total</td>
-                {/* Faturamento */}
                 <td className="px-4 py-2.5 text-right">{fmtBRL(totalLiquido)}</td>
-                {/* Meta + % */}
                 <td className="px-4 py-2.5 text-right">
                   <div>{totalMeta > 0 ? fmtBRL(totalMeta) : '—'}</div>
                   {totalMeta > 0 && pctMeta !== null && <div className="text-xs font-normal"><span className={pctMeta >= 100 ? 'text-green-600' : ''}>{pctMeta.toFixed(0)}%{pctMeta >= 100 ? ' ✓' : ''}</span></div>}
                 </td>
-                {/* Gasto */}
                 <td className="px-4 py-2.5 text-right">{gastoProdutos > 0 ? fmtBRL(gastoProdutos) : '—'}</td>
-                {/* Vendas */}
+                {/* Orçamento total */}
+                <td className="px-4 py-2.5 text-right">
+                  {totalOrcamento > 0 ? (
+                    <span className="rounded px-1.5 py-0.5 bg-amber-50 text-amber-800 border border-amber-200">{fmtBRL(totalOrcamento)}</span>
+                  ) : '—'}
+                </td>
                 <td className="px-4 py-2.5 text-right">{data?.totalVendas ?? 0}</td>
-                {/* Leads */}
                 <td className="px-4 py-2.5 text-right">
                   {leads ? (
                     <>
@@ -757,13 +954,21 @@ export default function TabPlacar({ token, enabled }: Props) {
                     </>
                   ) : '—'}
                 </td>
-                {/* CPV */}
+                {/* CPV total */}
                 <td className="px-4 py-2.5 text-right">{gastoProdutos > 0 && (data?.totalVendas ?? 0) > 0 ? fmtBRL(gastoProdutos / (data?.totalVendas ?? 1)) : '—'}</td>
-                {/* CPL */}
                 <td className="px-4 py-2.5 text-right">—</td>
-                {/* ROAS */}
+                {/* ROAS total */}
                 <td className="px-4 py-2.5 text-right">
-                  {gastoProdutos > 0 ? <span className={totalLiquido / gastoProdutos >= 1 ? 'text-green-600' : 'text-red-600'}>{(totalLiquido / gastoProdutos).toFixed(2)}x</span> : '—'}
+                  {gastoProdutos > 0 ? (
+                    <>
+                      <div className={colorRoas(totalLiquido / gastoProdutos, roasEsperadoTotal) || (totalLiquido / gastoProdutos >= 1 ? 'text-green-600' : 'text-red-600')}>
+                        {(totalLiquido / gastoProdutos).toFixed(2)}x
+                      </div>
+                      {roasEsperadoTotal !== null && (
+                        <div className="text-[11px] font-normal text-muted-foreground">esp {roasEsperadoTotal.toFixed(2)}x</div>
+                      )}
+                    </>
+                  ) : '—'}
                 </td>
               </tr>
             </tfoot>
@@ -771,7 +976,6 @@ export default function TabPlacar({ token, enabled }: Props) {
         </div>
       )}
 
-      {/* Gasto atribuído a produto sem venda no mês (ex: Quiz, produto novo) */}
       {gastoSemVenda.length > 0 && (
         <div className="rounded-lg border bg-card overflow-hidden">
           <div className="px-4 py-2 bg-muted/50 border-b text-sm font-semibold">

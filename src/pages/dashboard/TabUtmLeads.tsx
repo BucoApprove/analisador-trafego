@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect, useMemo, useRef } from 'react'
 import { SectionHeader, TabLoading, CHART_COLORS } from './components'
 import { Button } from '@/components/ui/button'
 import { Play, Search, RefreshCw, ChevronDown } from 'lucide-react'
+import TabLeadJourney from './TabLeadJourney'
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
   PieChart, Pie, Cell, CartesianGrid,
@@ -835,6 +836,8 @@ function SalesSection({ token }: { token: string }) {
 // ─── Main Tab ─────────────────────────────────────────────────────────────────
 
 export default function TabUtmLeads({ token, enabled }: Props) {
+  const [subTab, setSubTab] = useState<'utm' | 'journey'>('utm')
+
   // Distribution state
   const [since, setSince] = useState(lastWeekStr)
   const [until, setUntil] = useState(todayStr)
@@ -909,6 +912,32 @@ export default function TabUtmLeads({ token, enabled }: Props) {
 
   return (
     <div className="space-y-6">
+
+      {/* ── Sub-abas ─────────────────────────────────────────────────────── */}
+      <div className="flex gap-1 border-b">
+        {([
+          { key: 'utm',     label: 'UTM Leads' },
+          { key: 'journey', label: 'Análise de Lead' },
+        ] as const).map(tab => (
+          <button
+            key={tab.key}
+            onClick={() => setSubTab(tab.key)}
+            className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+              subTab === tab.key
+                ? 'border-primary text-primary'
+                : 'border-transparent text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      {/* ── Aba: Análise de Lead ─────────────────────────────────────────── */}
+      {subTab === 'journey' && <TabLeadJourney token={token} enabled={true} />}
+
+      {/* ── Aba: UTM Leads (conteúdo original) ──────────────────────────── */}
+      {subTab === 'utm' && <>
 
       {/* ── Seção 1: Análise de Vendas ───────────────────────────────────── */}
       <SalesSection token={token} />
@@ -1088,6 +1117,8 @@ export default function TabUtmLeads({ token, enabled }: Props) {
           </div>
         )}
       </div>
+
+      </>}
     </div>
   )
 }

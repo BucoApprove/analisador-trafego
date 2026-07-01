@@ -115,6 +115,18 @@ create table if not exists monthly_goals (
 create index if not exists idx_monthly_goals_month on monthly_goals(month);
 alter table monthly_goals disable row level security;
 
+-- Orçamento de tráfego mensal por produto (Placar v2)
+create table if not exists orcamento_trafego (
+  month      text    not null,
+  product    text    not null,
+  orcamento  numeric,          -- orçamento de tráfego do mês (R$)
+  ticket     numeric,          -- ticket médio (histórico ou override manual)
+  conversao  numeric,          -- taxa de conversão 0–1 (ex: 0.186 = 18,6%)
+  updated_at timestamptz not null default now(),
+  primary key (month, product)
+);
+alter table orcamento_trafego disable row level security;
+
 -- ─────────────────────────────────────────────────────────────────────────────
 
 -- Agrupamento manual de produtos Hotmart → produto-meta (definido pela UI).
