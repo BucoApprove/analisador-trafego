@@ -19,7 +19,7 @@ const PRODUTOS_SELECIONAVEIS: Array<{ label: string; id: number }> = [
   { label: 'Segurança Clínica por Casos', id: 7812483 },
   { label: 'Low ticket',                  id: 6766383 },
 ]
-const ID_TO_LABEL: Record<number, string> = Object.fromEntries(PRODUTOS_SELECIONAVEIS.map(p => [p.id, p.label]))
+
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
