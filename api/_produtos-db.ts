@@ -100,5 +100,14 @@ export async function getIntensivoOffers(): Promise<Set<string>> {
   return new Set(row?.intensivo_offer_codes ?? [])
 }
 
+/** Retorna mapa nome canônico → categoria. Usado pelo placar para promover
+ *  produtos com gasto mas sem venda Hotmart à tabela principal. */
+export async function getCategoriaByNome(): Promise<Record<string, Categoria>> {
+  const rows = await loadRows()
+  const map: Record<string, Categoria> = {}
+  for (const r of rows) map[r.nome] = r.categoria as Categoria
+  return map
+}
+
 /** Invalida o cache manualmente (chamado após save na tela de gestão). */
 export function invalidateCache() { _cache = null }

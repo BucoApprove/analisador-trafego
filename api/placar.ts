@@ -15,7 +15,7 @@ import { authUser, requireAdmin } from './_supabase-auth.js'
 import { fetchHotmartLiquido } from './_hotmart-liquido.js'
 import { fetchAllGoals } from './_goals.js'
 import { fetchMetaGasto } from './_meta-gasto.js'
-import { getGoalNameByCanon } from './_produtos-db.js'
+import { getGoalNameByCanon, getCategoriaByNome } from './_produtos-db.js'
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const user = await authUser(req, res); if (!user) return
@@ -50,11 +50,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return { erro: e.message } as const
     })
 
-    const [hotmart, allGoals, metaResult, goalNameByCanon] = await Promise.all([
+    const [hotmart, allGoals, metaResult, goalNameByCanon, categoriaByNome] = await Promise.all([
       fetchHotmartLiquido(month, range),
       fetchAllGoals(month),
       metaGastoPromise,
       getGoalNameByCanon(),
+      getCategoriaByNome(),
     ])
 
     const meta = 'erro' in metaResult ? null : metaResult
@@ -77,10 +78,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return { ...p, meta: metaVal, goalName, gasto, roas, gastoEtapas: gastoPorEtapa[p.nome] ?? null }
     })
 
-    // Gasto atribuído a um produto que NÃO teve venda no Hotmart (ex: campanha de
-    // Quiz/produto sem faturamento no mês). Aparece à parte para não sumir.
-    const gastoSemVenda = Object.entries(gastoPorProduto)
-      .filter(([nome]) => !nomesHotmart.has(nome))
+    // Produtos com gasto Meta mas sem venda Hotmart no mês.
+    // Core/porta → promovidos à tabela principal (faturamento=0).
+    // Low/desconhecido → seção "Gasto sem venda" abaixo da tabela.
+    const semVenda = Object.entries(gastoPorProduto).filter(([nome]) => !nomesHotmart.has(nome))
+    for (const [nome, gasto] of semVenda) {
+      const categoria = categoriaByNome[nome] ?? 'low'
+      if (categoria === 'core' || categoria === 'porta') {
+        const goalName = goalNameByCanon[nome] ?? nome
+        const metaCheia = allGoals.get(goalName) ?? null
+        const metaVal = metaCheia != null ? Math.round(metaCheia * fatorMeta * 100) / 100 : null
+        produtos.push({
+          nome, categoria, vendas: 0, liquido: 0,
+          meta: metaVal, goalName, gasto, roas: null,
+          gastoEtapas: gastoPorEtapa[nome] ?? null,
+        })
+      }
+    }
+
+    const gastoSemVenda = semVenda
+      .filter(([nome]) => {
+        const cat = categoriaByNome[nome] ?? 'low'
+        return cat !== 'core' && cat !== 'porta'
+      })
       .map(([nome, gasto]) => ({ nome, gasto, etapas: gastoPorEtapa[nome] ?? null }))
       .sort((a, b) => b.gasto - a.gasto)
 
