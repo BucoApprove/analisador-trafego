@@ -1,4 +1,8 @@
 /**
+ * @deprecated Substituído por api/_produtos-db.ts, que lê do Supabase (tabela
+ * produtos_canonicos) com cache em memória. Este arquivo é mantido apenas para
+ * não quebrar imports residuais — não o modifique. Use _produtos-db.ts.
+ *
  * Mapa canônico de produtos Hotmart — fonte única de verdade da aba "Placar".
  *
  * Mapeamento por product.id (nunca por nome): agrupar por nome junta produtos

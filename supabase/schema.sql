@@ -129,6 +129,38 @@ alter table orcamento_trafego disable row level security;
 
 -- ─────────────────────────────────────────────────────────────────────────────
 
+-- Produtos canônicos (substitui o hardcode em api/_produtos-canonicos.ts).
+-- Gerenciado pela tela "Produtos Canônicos" no dashboard.
+create table if not exists produtos_canonicos (
+  product_id   bigint      not null,  -- product_id Hotmart (ou sentinela negativo)
+  nome         text        not null,  -- nome canônico exibido no Placar
+  categoria    text        not null check (categoria in ('core','porta','low')),
+  goal_name    text,                  -- nome na tabela monthly_goals (pode ser null)
+  intensivo_offer_codes text[],       -- offer codes que viram "Intensivo ENARE" (só para BUCO_PID)
+  is_low_ticket boolean   not null default false,  -- se true, qualquer id desconhecido vira este produto
+  is_intensivo_marker boolean not null default false, -- se true, é o sentinela -2016048
+  updated_at   timestamptz not null default now(),
+  primary key (product_id)
+);
+alter table produtos_canonicos disable row level security;
+
+insert into produtos_canonicos (product_id, nome, categoria, goal_name, intensivo_offer_codes, is_low_ticket, is_intensivo_marker) values
+  (2016048,   'Buco Approve',               'core',  'Buco Approve',      array['wgmh3qg1','32ypw9pk'], false, false),
+  (-2016048,  'Intensivo ENARE',            'core',  null,                null,                         false, true),
+  (3811518,   'Mentoria CTBMF',             'core',  'Mentoria',          null,                         false, false),
+  (5694443,   'Pós Patologia',              'core',  'Pós Pato',          null,                         false, false),
+  (6115663,   'Pós Anatomia',              'core',  'Pós Anato',         null,                         false, false),
+  (6739963,   'Planejamento ImpulsoR+',     'core',  'Planejamento',      null,                         false, false),
+  (3510472,   'Renovação de acesso',        'core',  'Renovação BA',      null,                         false, false),
+  (4739673,   'Rota Enare',                'core',  null,                null,                         false, false),
+  (2286372,   'BucoApp',                   'core',  null,                null,                         false, false),
+  (7737553,   'Imersão ENARE',             'porta', null,                null,                         false, false),
+  (7812483,   'Segurança Clínica por Casos','core', null,               null,                         false, false),
+  (6766383,   'Low ticket',               'low',   'Low tickets',       null,                         true,  false)
+on conflict (product_id) do nothing;
+
+-- ─────────────────────────────────────────────────────────────────────────────
+
 -- Agrupamento manual de produtos Hotmart → produto-meta (definido pela UI).
 -- Override por NOME EXATO do produto no Hotmart, vale para todos os meses.
 -- Tem prioridade sobre o PRODUCT_MAP de keywords hardcoded.

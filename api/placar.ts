@@ -15,7 +15,7 @@ import { authUser, requireAdmin } from './_supabase-auth.js'
 import { fetchHotmartLiquido } from './_hotmart-liquido.js'
 import { fetchAllGoals } from './_goals.js'
 import { fetchMetaGasto } from './_meta-gasto.js'
-import { GOAL_NAME_BY_CANON } from './_produtos-canonicos.js'
+import { getGoalNameByCanon } from './_produtos-db.js'
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const user = await authUser(req, res); if (!user) return
@@ -50,10 +50,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return { erro: e.message } as const
     })
 
-    const [hotmart, allGoals, metaResult] = await Promise.all([
+    const [hotmart, allGoals, metaResult, goalNameByCanon] = await Promise.all([
       fetchHotmartLiquido(month, range),
       fetchAllGoals(month),
       metaGastoPromise,
+      getGoalNameByCanon(),
     ])
 
     const meta = 'erro' in metaResult ? null : metaResult
@@ -67,7 +68,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     //   goalName = chave em monthly_goals (de/para p/ produtos antigos, nome
     //   canônico p/ novos) — edição no Placar sincroniza com a Metas Mensais.
     const produtos = hotmart.produtos.map(p => {
-      const goalName = GOAL_NAME_BY_CANON[p.nome] ?? p.nome
+      const goalName = goalNameByCanon[p.nome] ?? p.nome
       const metaCheia = allGoals.get(goalName) ?? null
       // meta proporcional ao range (fatorMeta = 1 quando mês inteiro)
       const metaVal = metaCheia != null ? Math.round(metaCheia * fatorMeta * 100) / 100 : null

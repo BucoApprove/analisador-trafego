@@ -14,7 +14,7 @@
  * (conversão / remarketing / descoberta / relacionamento). Default: conversão.
  */
 import { createClient } from '@supabase/supabase-js'
-import { classifyProduto } from './_produtos-canonicos.js'
+import { classifyProduto } from './_produtos-db.js'
 
 export type Etapa = 'conversão' | 'remarketing' | 'descoberta' | 'relacionamento'
 export const ETAPAS: Etapa[] = ['conversão', 'remarketing', 'descoberta', 'relacionamento']
@@ -90,8 +90,8 @@ async function fetchRegras(conta: string): Promise<Regra[]> {
     const ids = (r.produto_ids as number[]) ?? []
     if (ids.length === 0 || !r.prefixo) continue
     // 1º produto_id → nome canônico (sem oferta: ofertas só importam dentro do Buco)
-    const produtoCanonico = classifyProduto(Number(ids[0])).nome
-    regras.push({ prefixo: String(r.prefixo).toLowerCase().trim(), produtoCanonico })
+    const canon = await classifyProduto(Number(ids[0]))
+    regras.push({ prefixo: String(r.prefixo).toLowerCase().trim(), produtoCanonico: canon.nome })
   }
   // prefixo mais longo primeiro: regra mais específica vence
   return regras.sort((a, b) => b.prefixo.length - a.prefixo.length)

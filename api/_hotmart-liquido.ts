@@ -6,10 +6,10 @@
  * comissão PRODUCER, e mais preciso que a heurística base-fee-2.19 (que erra
  * R$2,19/venda nos produtos de baixo ticket).
  *
- * Agrupa pelo produto canônico (api/_produtos-canonicos.ts) e expõe o
+ * Agrupa pelo produto canônico (api/_produtos-db.ts) e expõe o
  * drill-down de ofertas do BucoApprove.
  */
-import { classifyProduto, BUCO_PID, INTENSIVO_OFFERS, type Categoria } from './_produtos-canonicos.js'
+import { classifyProduto, getBucoPid, type Categoria } from './_produtos-db.js'
 import { fetchOfertaNomes } from './_hotmart-ofertas.js'
 
 export interface ProdutoVendas {
@@ -74,7 +74,7 @@ export async function fetchHotmartLiquido(month: string, range?: { since: string
   const endMs = range?.until
     ? new Date(`${range.until}T23:59:59`).getTime()
     : new Date(y, m, 0, 23, 59, 59, 999).getTime()
-  const token = await getToken()
+  const [token, BUCO_PID] = await Promise.all([getToken(), getBucoPid()])
   const base = `start_date=${startMs}&end_date=${endMs}&max_results=50`
 
   // Líquido por transaction (PRODUCER)
@@ -118,7 +118,7 @@ export async function fetchHotmartLiquido(month: string, range?: { since: string
     const pid = it.product?.id ?? 0
     const offer = it.purchase?.offer?.code
 
-    const canon = classifyProduto(pid, offer)
+    const canon = await classifyProduto(pid, offer)
     const row = byCanon.get(canon.nome) ?? { nome: canon.nome, categoria: canon.categoria, vendas: 0, liquido: 0 }
     row.vendas++; row.liquido += liq
     byCanon.set(canon.nome, row)
@@ -199,7 +199,7 @@ export async function fetchVendasPorProdutoRange(
     if (tx && seen.has(tx)) continue
     if (tx) seen.add(tx)
     if ((it.purchase?.price?.currency_code ?? 'BRL') !== 'BRL') continue
-    const canon = classifyProduto(it.product?.id ?? 0, it.purchase?.offer?.code)
+    const canon = await classifyProduto(it.product?.id ?? 0, it.purchase?.offer?.code)
     const row = totais[canon.nome] ?? { vendas: 0, liquido: 0 }
     row.vendas++; row.liquido += producerByTx.get(tx) ?? 0
     totais[canon.nome] = row

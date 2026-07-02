@@ -11,7 +11,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { createClient } from '@supabase/supabase-js'
 import { bqQuery, tableLeads } from './_bq.js'
 import { authUser, requireAdmin } from './_supabase-auth.js'
-import { classifyProduto } from './_produtos-canonicos.js'
+import { classifyProduto } from './_produtos-db.js'
 import { fetchClintLeads } from './_clint.js'
 
 interface Regra { prefixo: string; produtoCanonico: string }
@@ -27,7 +27,8 @@ async function fetchRegras(): Promise<Regra[]> {
   for (const r of data ?? []) {
     const ids = (r.produto_ids as number[]) ?? []
     if (ids.length === 0 || !r.prefixo) continue
-    regras.push({ prefixo: String(r.prefixo).toLowerCase().trim(), produtoCanonico: classifyProduto(Number(ids[0])).nome })
+    const canon = await classifyProduto(Number(ids[0]))
+    regras.push({ prefixo: String(r.prefixo).toLowerCase().trim(), produtoCanonico: canon.nome })
   }
   return regras.sort((a, b) => b.prefixo.length - a.prefixo.length)
 }
