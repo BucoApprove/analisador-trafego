@@ -468,13 +468,28 @@ function ProdutoRow({ p, stripe, month, token, onMeta, onOrcamento, metaReadOnly
 
 interface MapRow { id: number; account: string; prefixo: string; produto_ids: number[]; label: string }
 
-function CampanhaMapModal({ onClose, onChanged }: { onClose: () => void; onChanged: () => void }) {
+function CampanhaMapModal({ token, onClose, onChanged }: { token: string; onClose: () => void; onChanged: () => void }) {
   const [account, setAccount] = useState<'conta1' | 'conta2'>('conta1')
   const [rows, setRows] = useState<MapRow[]>([])
   const [loading, setLoading] = useState(true)
   const [newPrefixo, setNewPrefixo] = useState('')
   const [newId, setNewId] = useState('')
   const [saving, setSaving] = useState(false)
+  const [produtoOpts, setProdutoOpts] = useState<Array<{ label: string; id: number }>>(PRODUTOS_SELECIONAVEIS)
+
+  // Carrega lista de produtos do banco (para refletir produtos adicionados via UI)
+  useEffect(() => {
+    fetch('/api/produtos-canonicos', { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : null)
+      .then((data: Array<{ product_id: number; nome: string }> | null) => {
+        if (data && data.length > 0) {
+          setProdutoOpts(data.map(p => ({ label: p.nome, id: p.product_id })).sort((a, b) => a.label.localeCompare(b.label)))
+        }
+      })
+      .catch(() => {/* fallback para PRODUTOS_SELECIONAVEIS já no state */})
+  }, [token])
+
+  const idToLabel = Object.fromEntries(produtoOpts.map(p => [p.id, p.label]))
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -493,7 +508,7 @@ function CampanhaMapModal({ onClose, onChanged }: { onClose: () => void; onChang
     const idNum = Number(newId)
     if (!newPrefixo.trim() || !idNum) return
     setSaving(true)
-    const label = ID_TO_LABEL[idNum] ?? ''
+    const label = idToLabel[idNum] ?? ''
     const { error } = await supabase.from('campaign_produto_map').insert({
       account, prefixo: newPrefixo.toLowerCase().trim(), produto_ids: [idNum], label,
     })
@@ -539,7 +554,7 @@ function CampanhaMapModal({ onClose, onChanged }: { onClose: () => void; onChang
             />
             <select className="text-sm border rounded px-2 py-1.5 bg-background" value={newId} onChange={e => setNewId(e.target.value)}>
               <option value="">produto…</option>
-              {PRODUTOS_SELECIONAVEIS.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
+              {produtoOpts.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
             </select>
             <button onClick={add} disabled={saving || !newPrefixo.trim() || !newId}
               className="text-xs px-3 py-1.5 rounded bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 flex items-center gap-1">
@@ -557,7 +572,7 @@ function CampanhaMapModal({ onClose, onChanged }: { onClose: () => void; onChang
             <div key={r.id} className="flex items-center gap-2 px-3 py-2 rounded hover:bg-muted/40 group">
               <code className="text-xs bg-muted px-1.5 py-0.5 rounded">{r.prefixo}</code>
               <span className="text-muted-foreground text-xs">→</span>
-              <span className="text-sm flex-1">{ID_TO_LABEL[r.produto_ids?.[0]] ?? r.label ?? `id ${r.produto_ids?.[0]}`}</span>
+              <span className="text-sm flex-1">{idToLabel[r.produto_ids?.[0]] ?? r.label ?? `id ${r.produto_ids?.[0]}`}</span>
               <button onClick={() => remove(r.id)} className="opacity-0 group-hover:opacity-100 p-1 text-muted-foreground hover:text-destructive transition-all">
                 <Trash2 className="h-3.5 w-3.5" />
               </button>
@@ -827,7 +842,7 @@ export default function TabPlacar({ token, enabled }: Props) {
         </div>
       </div>
 
-      {showMap && <CampanhaMapModal onClose={() => setShowMap(false)} onChanged={() => load(month, rangeSince, rangeUntil)} />}
+      {showMap && <CampanhaMapModal token={token} onClose={() => setShowMap(false)} onChanged={() => load(month, rangeSince, rangeUntil)} />}
       {showClint && <ClintTagsModal token={token} onClose={() => setShowClint(false)} onChanged={() => loadLeads(month, rangeSince, rangeUntil)} />}
 
       <div className="rounded-md bg-blue-50 border border-blue-200 px-4 py-2 text-xs text-blue-800">
