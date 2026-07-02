@@ -55,6 +55,9 @@ const ETAPA_KEYWORDS: Array<[string, Etapa]> = [
   ['vview', 'descoberta'],
   ['captura', 'descoberta'],
   ['aulas semanais', 'descoberta'],
+  ['leads_', 'descoberta'],
+  ['lead_', 'descoberta'],
+  ['quiz', 'descoberta'],
 ]
 
 function detectarEtapa(nome: string): Etapa {
