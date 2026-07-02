@@ -53,11 +53,13 @@ async function loadRows(): Promise<DbRow[]> {
 
 export async function classifyProduto(productId: number, offerCode?: string): Promise<ProdutoCanonico> {
   const rows = await loadRows()
+  // Compara como número (bigint do Supabase pode vir como string em alguns drivers)
+  const matchId = (r: DbRow) => Number(r.product_id) === productId
   // Sentinela negativo (Intensivo ENARE via campanha Meta)
-  const marker = rows.find(r => r.is_intensivo_marker && r.product_id === productId)
+  const marker = rows.find(r => r.is_intensivo_marker && matchId(r))
   if (marker) return { nome: marker.nome, categoria: marker.categoria as Categoria }
   // Produto específico pelo id
-  const row = rows.find(r => r.product_id === productId)
+  const row = rows.find(r => matchId(r))
   if (row) {
     // Verifica se é oferta de Intensivo dentro do BucoApprove
     if (offerCode && row.intensivo_offer_codes?.includes(offerCode)) {
@@ -91,7 +93,7 @@ export async function getBucoPid(): Promise<number> {
   const rows = await loadRows()
   // BucoApprove: produto com intensivo_offer_codes preenchido e não é o marcador
   const row = rows.find(r => r.intensivo_offer_codes && r.intensivo_offer_codes.length > 0 && !r.is_intensivo_marker)
-  return row?.product_id ?? 2016048
+  return row ? Number(row.product_id) : 2016048
 }
 
 export async function getIntensivoOffers(): Promise<Set<string>> {
