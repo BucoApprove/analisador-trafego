@@ -14,7 +14,8 @@ import { createClient } from '@supabase/supabase-js'
 import { fetchHotmartLiquido } from './_hotmart-liquido.js'
 import { fetchAllGoals } from './_goals.js'
 import { fetchMetaGasto } from './_meta-gasto.js'
-import { getGoalNameByCanon, getCategoriaByNome } from './_produtos-db.js'
+import { getGoalNameByCanon, getCategoriaByNome, classifyProduto } from './_produtos-db.js'
+import { bqQuery, tableLeads } from './_bq.js'
 
 const round2 = (n: number) => Math.round(n * 100) / 100
 
@@ -112,13 +113,53 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
-    // Ações do dia
-    const { data: acaoRows } = await sb()
-      .from('placar_acoes')
-      .select('produto, acao')
-      .eq('data', today)
+    // Ações do dia + leads UTM (campanha+content) em paralelo
+    const since = `${month}-01`
+    const until = new Date(my, mm, 0).toISOString().slice(0, 10)
+    const tLeads = tableLeads()
+
+    // Regras de mapeamento campanha → produto (para calcular leads por produto)
+    const { data: mapRows } = await sb().from('campaign_produto_map').select('prefixo, produto_ids')
+    const regras: Array<{ prefixo: string; produtoCanonico: string }> = []
+    for (const r of mapRows ?? []) {
+      const ids = (r.produto_ids as number[]) ?? []
+      if (!ids.length || !r.prefixo) continue
+      const canon = await classifyProduto(Number(ids[0]))
+      regras.push({ prefixo: String(r.prefixo).toLowerCase().trim(), produtoCanonico: canon.nome })
+    }
+    regras.sort((a, b) => b.prefixo.length - a.prefixo.length)
+    function matchP(campaign: string) {
+      const n = campaign.toLowerCase()
+      for (const r of regras) { if (r.prefixo && n.includes(r.prefixo)) return r.produtoCanonico }
+      return null
+    }
+
+    const [acaoRows, bqLeads] = await Promise.all([
+      sb().from('placar_acoes').select('produto, acao').eq('data', today),
+      bqQuery(`
+        SELECT utm_campaign, utm_content,
+               COUNT(DISTINCT LOWER(TRIM(lead_email))) AS leads
+        FROM ${tLeads}
+        WHERE utm_campaign IS NOT NULL
+          AND lead_email IS NOT NULL AND TRIM(lead_email) <> ''
+          AND DATE(lead_register) >= @since AND DATE(lead_register) <= @until
+        GROUP BY utm_campaign, utm_content ORDER BY leads DESC
+      `, [{ name: 'since', value: since }, { name: 'until', value: until }])
+        .catch(() => ({ rows: [] })),
+    ])
+
     const acoes: Record<string, string> = {}
-    for (const r of acaoRows ?? []) acoes[r.produto] = r.acao
+    for (const r of acaoRows.data ?? []) acoes[r.produto] = r.acao
+
+    const leadsUtm: Record<string, number> = {}
+    const leadsDist: Record<string, Array<{ campanha: string; content: string | null; leads: number }>> = {}
+    for (const row of bqLeads.rows as Array<{ utm_campaign?: string; utm_content?: string; leads?: number }>) {
+      const produto = matchP(row.utm_campaign ?? '')
+      if (!produto) continue
+      const n = Number(row.leads ?? 0)
+      leadsUtm[produto] = (leadsUtm[produto] ?? 0) + n
+      ;(leadsDist[produto] ??= []).push({ campanha: row.utm_campaign ?? '', content: row.utm_content ?? null, leads: n })
+    }
 
     // Monta resumo por produto com métricas derivadas
     const totalLiquido = hotmart.totalLiquido
@@ -167,6 +208,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         tetoCpvR$: tetoCpv,
         statusCpv: statusCusto(cpv, tetoCpv),
         gastoEtapas: p.gastoEtapas,
+        leadsUtm: leadsUtm[p.nome] ?? 0,
+        leadsDistribuicao: leadsDist[p.nome] ?? [],
         acaoHoje: acoes[p.nome] ?? null,
       }
     }).sort((a, b) => (b.liquidoR$ ?? 0) - (a.liquidoR$ ?? 0))

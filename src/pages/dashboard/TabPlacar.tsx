@@ -51,10 +51,12 @@ interface MetaInfo {
   campanhas: { campaign: string; conta: string; spend: number; produto: string; etapa: Etapa }[]
 }
 interface ClintLeads { total: number; interessado: number; abordado: number }
+interface LeadsDistRow { campanha: string; content: string | null; leads: number }
 interface LeadsData {
   leadsUtm: Record<string, number>
   leadsClint: Record<string, ClintLeads>
   clintAtivo: boolean
+  leadsDistribuicao: Record<string, LeadsDistRow[]>
 }
 interface RangeInfo { since: string; until: string; diasNoRange: number; diasNoMes: number; fatorMeta: number }
 interface PlacarResp {
@@ -347,6 +349,77 @@ function GastoCell({ gasto, etapas }: { gasto: number; etapas: EtapaGasto | null
   )
 }
 
+// ─── Modal de distribuição de leads por campanha + content ───────────────────
+
+function LeadsDistModal({ produto, rows, onClose }: {
+  produto: string
+  rows: LeadsDistRow[]
+  onClose: () => void
+}) {
+  const total = rows.reduce((s, r) => s + r.leads, 0)
+
+  // Agrupa por campanha para exibição hierárquica
+  const byCampanha = new Map<string, { total: number; contents: { content: string | null; leads: number }[] }>()
+  for (const r of rows) {
+    const entry = byCampanha.get(r.campanha) ?? { total: 0, contents: [] }
+    entry.total += r.leads
+    entry.contents.push({ content: r.content, leads: r.leads })
+    byCampanha.set(r.campanha, entry)
+  }
+  const campanhas = [...byCampanha.entries()].sort((a, b) => b[1].total - a[1].total)
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="absolute inset-0 bg-black/40" />
+      <div className="relative z-10 bg-white dark:bg-zinc-900 rounded-xl shadow-2xl w-full max-w-lg border flex flex-col max-h-[85vh]" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 py-4 border-b">
+          <div>
+            <h3 className="font-semibold">Leads — {produto}</h3>
+            <p className="text-xs text-muted-foreground">{total.toLocaleString('pt-BR')} leads únicos · por campanha e anúncio</p>
+          </div>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground"><X className="h-4 w-4" /></button>
+        </div>
+        <div className="overflow-y-auto flex-1 p-4 space-y-3">
+          {campanhas.length === 0 && (
+            <p className="text-sm text-muted-foreground text-center py-6">Sem dados de distribuição.</p>
+          )}
+          {campanhas.map(([campanha, { total: totCamp, contents }]) => (
+            <div key={campanha} className="rounded-lg border overflow-hidden">
+              {/* Cabeçalho da campanha */}
+              <div className="flex items-center justify-between px-3 py-2 bg-muted/50">
+                <span className="text-xs font-semibold truncate max-w-[340px]" title={campanha}>{campanha}</span>
+                <span className="text-xs font-bold tabular-nums ml-2 flex-shrink-0">{totCamp.toLocaleString('pt-BR')}</span>
+              </div>
+              {/* Linhas de content */}
+              <div className="divide-y">
+                {contents.sort((a, b) => b.leads - a.leads).map((c, i) => {
+                  const pct = total > 0 ? (c.leads / total) * 100 : 0
+                  return (
+                    <div key={i} className="flex items-center gap-3 px-3 py-1.5">
+                      <div className="flex-1 min-w-0">
+                        <span className="text-xs text-muted-foreground truncate block" title={c.content ?? '(sem utm_content)'}>
+                          {c.content ?? <span className="italic opacity-60">sem utm_content</span>}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        <div className="w-20 h-1.5 rounded-full bg-muted overflow-hidden">
+                          <div className="h-full rounded-full bg-primary/60" style={{ width: `${pct}%` }} />
+                        </div>
+                        <span className="text-xs tabular-nums w-8 text-right">{c.leads}</span>
+                        <span className="text-[10px] text-muted-foreground w-8 text-right">{pct.toFixed(0)}%</span>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ─── Ações rápidas por produto/dia ───────────────────────────────────────────
 
 function todayIso() { return new Date().toISOString().slice(0, 10) }
@@ -454,7 +527,7 @@ function AcoesModal({ acoes, produtos, onClose }: {
 
 const PCT_META_CRITICO = 40
 
-function ProdutoRow({ p, stripe, month, token, onMeta, onOrcamento, metaReadOnly, leadsUtm, leadsClint, clintAtivo, orcEntry, acoes, onAcao }: {
+function ProdutoRow({ p, stripe, month, token, onMeta, onOrcamento, metaReadOnly, leadsUtm, leadsClint, clintAtivo, orcEntry, acoes, onAcao, leadsDist }: {
   p: Produto; stripe: boolean; month: string; token: string
   onMeta: (goalName: string, v: number) => void
   onOrcamento: (nome: string, e: OrcamentoEntry) => void
@@ -463,8 +536,10 @@ function ProdutoRow({ p, stripe, month, token, onMeta, onOrcamento, metaReadOnly
   orcEntry: OrcamentoEntry
   acoes: Record<string, string>
   onAcao: (produto: string, valor: string) => void
+  leadsDist: LeadsDistRow[]
 }) {
   const [open, setOpen] = useState(false)
+  const [showDist, setShowDist] = useState(false)
   const pct = p.meta && p.meta > 0 ? (p.liquido / p.meta) * 100 : null
   const hasOfertas = (p.ofertas?.length ?? 0) > 1
   const cpv = p.gasto > 0 && p.vendas > 0 ? p.gasto / p.vendas : null
@@ -508,15 +583,26 @@ function ProdutoRow({ p, stripe, month, token, onMeta, onOrcamento, metaReadOnly
         <EditableOrcamento month={month} product={p.nome} token={token} entry={orcEntry} onSaved={e => onOrcamento(p.nome, e)} />
         {/* Vendas */}
         <td className="px-4 py-2.5 text-right">{p.vendas}</td>
-        {/* Leads */}
+        {/* Leads — clicável abre distribuição por campanha/content */}
         <td className="px-4 py-2.5 text-right">
-          <div title="Leads UTM (BigQuery)">{leadsUtm != null && leadsUtm > 0 ? leadsUtm.toLocaleString('pt-BR') : '—'}</div>
+          {leadsUtm != null && leadsUtm > 0 ? (
+            <button
+              onClick={() => setShowDist(true)}
+              className="font-medium tabular-nums hover:text-primary hover:underline transition-colors"
+              title="Clique para ver distribuição por campanha e anúncio"
+            >
+              {leadsUtm.toLocaleString('pt-BR')}
+            </button>
+          ) : <span className="text-muted-foreground">—</span>}
           {clintAtivo && (
             <div className="text-xs text-muted-foreground" title="Leads Clint: interessado / abordado">
               {leadsClint && leadsClint.total > 0
                 ? <>{leadsClint.interessado.toLocaleString('pt-BR')} int · {leadsClint.abordado.toLocaleString('pt-BR')} abord</>
                 : '—'}
             </div>
+          )}
+          {showDist && (
+            <LeadsDistModal produto={p.nome} rows={leadsDist} onClose={() => setShowDist(false)} />
           )}
         </td>
         {/* CPV com teto */}
@@ -1076,7 +1162,8 @@ export default function TabPlacar({ token, enabled }: Props) {
                   leadsClint={leads?.leadsClint[p.nome] ?? null}
                   clintAtivo={leads?.clintAtivo ?? false}
                   orcEntry={orcamentos[p.nome] ?? EMPTY_ORC}
-                  acoes={acoes} onAcao={onAcao} />
+                  acoes={acoes} onAcao={onAcao}
+                  leadsDist={leads?.leadsDistribuicao[p.nome] ?? []} />
               ))}
             </tbody>
             <tfoot>
