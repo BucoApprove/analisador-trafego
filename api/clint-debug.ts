@@ -7,13 +7,18 @@
  * e testa os endpoints de indicadores (novos interessados por produto).
  */
 import type { VercelRequest, VercelResponse } from '@vercel/node'
-import { authUser, requireAdmin } from './_supabase-auth.js'
+import { authUser } from './_supabase-auth.js'
 
 const BASE = 'https://api.clint.digital'
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  const user = await authUser(req, res); if (!user) return
-  if (!requireAdmin(user, res)) return
+  // Aceita skill key (para chamar direto pela URL) ou sessão normal
+  const skillKey = process.env.PLACAR_SKILL_KEY ?? ''
+  const providedKey = typeof req.query.key === 'string' ? req.query.key : ''
+  const hasSkillKey = skillKey && providedKey === skillKey
+  if (!hasSkillKey) {
+    const user = await authUser(req, res); if (!user) return
+  }
 
   const token = process.env.CLINT_API_TOKEN ?? ''
   if (!token) return res.status(500).json({ error: 'CLINT_API_TOKEN não configurado' })
