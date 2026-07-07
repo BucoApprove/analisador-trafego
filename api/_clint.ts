@@ -53,6 +53,20 @@ interface ClintDeal {
   origin_id: string
   created_at: string
   fields: Record<string, unknown>
+  contact?: { name?: string; phone?: string; email?: string }
+  user?: { full_name?: string }
+  stage?: string
+}
+
+export interface ClintDealDetail {
+  id: string
+  date: string        // YYYY-MM-DD em horário Brasília
+  name: string
+  phone: string | null
+  tipo: 'Interessado' | 'Abordado' | null
+  funil: string
+  stage: string
+  vendedor: string | null
 }
 
 // ─── Cache de origens ─────────────────────────────────────────────────────────
@@ -271,4 +285,73 @@ export async function fetchClintTagsList(): Promise<Array<{ id: string; name: st
 
     return [...tagsOut, ...gruposOut].sort((a, b) => a.name.localeCompare(b.name))
   } catch { return [] }
+}
+
+// ─── Detalhes dos deals de um produto (para o modal) ─────────────────────────
+
+export async function fetchClintLeadsDetalhados(
+  since: string,
+  until: string,
+  produto: string,
+): Promise<ClintDealDetail[]> {
+  const token = process.env.CLINT_API_TOKEN ?? ''
+  if (!token) return []
+
+  const [config, origins, allDeals] = await Promise.all([
+    fetchConfig(),
+    fetchOrigins(token),
+    fetchAllDeals(token, since, until),
+  ])
+
+  const tagRows = config.filter(r => r.product_name === produto && isUuid(r.tag_id))
+  const groupRows = config.filter(r => r.product_name === produto && !isUuid(r.tag_id))
+
+  // IDs dos deals por tag
+  const tagDealIds = new Set<string>()
+  if (tagRows.length > 0) {
+    const tagResults = await Promise.all(tagRows.map(r => fetchDealsByTag(token, r.tag_id, since, until)))
+    for (const ids of tagResults) for (const id of ids) tagDealIds.add(id)
+  }
+
+  // Todos os IDs de tag de subprodutos (para excluir dos deals de grupo)
+  const allTagConfig = config.filter(r => isUuid(r.tag_id))
+  const allSubTagIds = new Set<string>()
+  if (allTagConfig.length > 0) {
+    const all = await Promise.all(allTagConfig.map(r => fetchDealsByTag(token, r.tag_id, since, until)))
+    for (const ids of all) for (const id of ids) allSubTagIds.add(id)
+  }
+
+  function isFunilComercial(originName: string) {
+    return norm(originName) !== norm('Compras aprovadas')
+  }
+
+  // Filtra os deals do produto
+  const dealsDoP = allDeals.filter(d => {
+    if (tagRows.length > 0) return tagDealIds.has(d.id)
+    const origin = origins.get(d.origin_id)
+    if (!origin) return false
+    return groupRows.some(r => norm(origin.group.name) === norm(r.tag_id))
+      && !allSubTagIds.has(d.id)
+      && isFunilComercial(origin.name)
+  })
+
+  return dealsDoP
+    .map(d => {
+      const tipo = norm((d.fields?.tipo as string | undefined) ?? '')
+      const origin = origins.get(d.origin_id)
+      // Converte para horário Brasília
+      const dateBrasilia = new Date(new Date(d.created_at).getTime() - 3 * 60 * 60 * 1000)
+        .toISOString().slice(0, 10)
+      return {
+        id: d.id,
+        date: dateBrasilia,
+        name: d.contact?.name ?? '—',
+        phone: d.contact?.phone ?? null,
+        tipo: tipo === 'interessado' ? 'Interessado' : tipo === 'abordado' ? 'Abordado' : null,
+        funil: origin?.name ?? '—',
+        stage: d.stage ?? '—',
+        vendedor: d.user?.full_name ?? null,
+      } satisfies ClintDealDetail
+    })
+    .sort((a, b) => b.date.localeCompare(a.date))
 }

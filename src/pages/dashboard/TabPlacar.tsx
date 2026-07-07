@@ -420,6 +420,90 @@ function LeadsDistModal({ produto, rows, onClose }: {
   )
 }
 
+// ─── Modal de detalhes dos leads Clint ───────────────────────────────────────
+
+interface ClintDealDetail {
+  id: string; date: string; name: string; phone: string | null
+  tipo: 'Interessado' | 'Abordado' | null; funil: string; stage: string; vendedor: string | null
+}
+
+function ClintLeadsModal({ produto, token, since, until, total, onClose }: {
+  produto: string; token: string; since: string; until: string; total: number; onClose: () => void
+}) {
+  const [deals, setDeals] = useState<ClintDealDetail[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    const qs = new URLSearchParams({ produto, since, until })
+    fetch(`/api/clint-leads-detail?${qs}`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : r.json().then(j => Promise.reject(j.error)))
+      .then(j => setDeals(j.deals ?? []))
+      .catch(e => setError(String(e)))
+      .finally(() => setLoading(false))
+  }, [produto, token, since, until])
+
+  const TIPO_CLS: Record<string, string> = {
+    'Interessado': 'text-blue-600 bg-blue-50',
+    'Abordado':    'text-amber-600 bg-amber-50',
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="absolute inset-0 bg-black/40" />
+      <div className="relative z-10 bg-white dark:bg-zinc-900 rounded-xl shadow-2xl w-full max-w-2xl border flex flex-col max-h-[85vh]" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 py-4 border-b">
+          <div>
+            <h3 className="font-semibold">Leads Clint — {produto}</h3>
+            <p className="text-xs text-muted-foreground">{total} leads · {since} a {until}</p>
+          </div>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground"><X className="h-4 w-4" /></button>
+        </div>
+        <div className="overflow-y-auto flex-1">
+          {loading && <div className="flex justify-center py-10 text-muted-foreground"><Loader2 className="h-5 w-5 animate-spin" /></div>}
+          {error && <p className="text-sm text-destructive p-4">{error}</p>}
+          {!loading && !error && deals.length === 0 && (
+            <p className="text-sm text-muted-foreground text-center py-10">Nenhum deal encontrado.</p>
+          )}
+          {!loading && deals.length > 0 && (
+            <table className="w-full text-sm">
+              <thead className="bg-muted/50 sticky top-0">
+                <tr>
+                  <th className="text-left px-4 py-2 font-medium">Data</th>
+                  <th className="text-left px-4 py-2 font-medium">Nome</th>
+                  <th className="text-left px-4 py-2 font-medium">Tipo</th>
+                  <th className="text-left px-4 py-2 font-medium hidden sm:table-cell">Funil</th>
+                  <th className="text-left px-4 py-2 font-medium hidden sm:table-cell">Vendedor</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y">
+                {deals.map(d => (
+                  <tr key={d.id} className="hover:bg-muted/30">
+                    <td className="px-4 py-2 tabular-nums text-muted-foreground text-xs">{fmtDate(d.date)}</td>
+                    <td className="px-4 py-2 font-medium max-w-[180px] truncate" title={d.name}>{d.name}</td>
+                    <td className="px-4 py-2">
+                      {d.tipo ? (
+                        <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${TIPO_CLS[d.tipo] ?? ''}`}>{d.tipo}</span>
+                      ) : <span className="text-xs text-muted-foreground">—</span>}
+                    </td>
+                    <td className="px-4 py-2 text-xs text-muted-foreground hidden sm:table-cell truncate max-w-[140px]" title={d.funil}>{d.funil}</td>
+                    <td className="px-4 py-2 text-xs text-muted-foreground hidden sm:table-cell">{d.vendedor ?? '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function fmtDate(s: string) {
+  if (!s) return '—'
+  try { return new Date(s + 'T12:00:00Z').toLocaleDateString('pt-BR') } catch { return s }
+}
+
 // ─── Ações rápidas por produto/dia ───────────────────────────────────────────
 
 function todayIso() { return new Date().toISOString().slice(0, 10) }
@@ -527,7 +611,7 @@ function AcoesModal({ acoes, produtos, onClose }: {
 
 const PCT_META_CRITICO = 40
 
-function ProdutoRow({ p, stripe, month, token, onMeta, onOrcamento, metaReadOnly, leadsUtm, leadsClint, clintAtivo, orcEntry, acoes, onAcao, leadsDist }: {
+function ProdutoRow({ p, stripe, month, token, onMeta, onOrcamento, metaReadOnly, leadsUtm, leadsClint, clintAtivo, orcEntry, acoes, onAcao, leadsDist, since, until }: {
   p: Produto; stripe: boolean; month: string; token: string
   onMeta: (goalName: string, v: number) => void
   onOrcamento: (nome: string, e: OrcamentoEntry) => void
@@ -537,9 +621,11 @@ function ProdutoRow({ p, stripe, month, token, onMeta, onOrcamento, metaReadOnly
   acoes: Record<string, string>
   onAcao: (produto: string, valor: string) => void
   leadsDist: LeadsDistRow[]
+  since: string; until: string
 }) {
   const [open, setOpen] = useState(false)
   const [showDist, setShowDist] = useState(false)
+  const [showClintDetail, setShowClintDetail] = useState(false)
   const pct = p.meta && p.meta > 0 ? (p.liquido / p.meta) * 100 : null
   const hasOfertas = (p.ofertas?.length ?? 0) > 1
   const cpv = p.gasto > 0 && p.vendas > 0 ? p.gasto / p.vendas : null
@@ -595,8 +681,14 @@ function ProdutoRow({ p, stripe, month, token, onMeta, onOrcamento, metaReadOnly
             </button>
           ) : <span className="text-muted-foreground">—</span>}
           {clintAtivo && leadsClint && leadsClint.total > 0 && (
-            <div className="text-xs text-muted-foreground" title="Leads Clint: total (interessado / abordado)">
-              <span className="font-medium text-foreground">{leadsClint.total.toLocaleString('pt-BR')}</span>
+            <div className="text-xs text-muted-foreground">
+              <button
+                onClick={() => setShowClintDetail(true)}
+                className="font-medium text-foreground hover:text-primary hover:underline transition-colors"
+                title="Clique para ver os leads"
+              >
+                {leadsClint.total.toLocaleString('pt-BR')}
+              </button>
               {' '}
               <span title="Interessado / Abordado (campo tipo preenchido)">
                 ({leadsClint.interessado} int · {leadsClint.abordado} abord)
@@ -605,6 +697,12 @@ function ProdutoRow({ p, stripe, month, token, onMeta, onOrcamento, metaReadOnly
           )}
           {showDist && (
             <LeadsDistModal produto={p.nome} rows={leadsDist} onClose={() => setShowDist(false)} />
+          )}
+          {showClintDetail && leadsClint && (
+            <ClintLeadsModal
+              produto={p.nome} token={token} since={since} until={until}
+              total={leadsClint.total} onClose={() => setShowClintDetail(false)}
+            />
           )}
         </td>
         {/* CPV com teto */}
@@ -1165,7 +1263,9 @@ export default function TabPlacar({ token, enabled }: Props) {
                   clintAtivo={leads?.clintAtivo ?? false}
                   orcEntry={orcamentos[p.nome] ?? EMPTY_ORC}
                   acoes={acoes} onAcao={onAcao}
-                  leadsDist={leads?.leadsDistribuicao[p.nome] ?? []} />
+                  leadsDist={leads?.leadsDistribuicao[p.nome] ?? []}
+                  since={rangeSince || `${month}-01`}
+                  until={rangeUntil || new Date(Number(month.split('-')[0]), Number(month.split('-')[1]), 0).toISOString().slice(0, 10)} />
               ))}
             </tbody>
             <tfoot>
