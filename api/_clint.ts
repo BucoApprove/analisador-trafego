@@ -59,11 +59,15 @@ interface Deal { id?: string; created_at?: string; fields?: { tipo?: string } }
 async function dealsByTag(token: string, tagId: string, since: string, until: string): Promise<Map<string, string>> {
   const byId = new Map<string, string>()
   let page = 1
+  // A API Clint interpreta created_at_end como exclusivo (ou como 00:00 do dia).
+  // Passamos o fim do dia em horário de Brasília (-03:00) para não perder leads
+  // cadastrados à noite. O filtro local abaixo garante a correção final.
+  const untilEod = `${until}T23:59:59`
   for (let i = 0; i < 100; i++) {
     const url = new URL(`${BASE}/v1/deals`)
     url.searchParams.set('tag_ids', tagId)
     url.searchParams.set('created_at_start', since)
-    url.searchParams.set('created_at_end', until)
+    url.searchParams.set('created_at_end', untilEod)
     url.searchParams.set('limit', '100')
     url.searchParams.set('page', String(page))
     const r = await fetch(url.toString(), { headers: { 'api-token': token, Accept: 'application/json' } })
@@ -72,8 +76,11 @@ async function dealsByTag(token: string, tagId: string, since: string, until: st
     const data = json.data ?? json.items ?? []
     if (data.length === 0) break
     for (const d of data) {
-      const dt = (d.created_at ?? '').slice(0, 10)
-      if (d.id && dt >= since && dt <= until) byId.set(d.id, d.fields?.tipo ?? '')
+      if (!d.id || !d.created_at) continue
+      // Converte para data em horário de Brasília (UTC-3) antes de comparar
+      const dtBrasilia = new Date(new Date(d.created_at).getTime() - 3 * 60 * 60 * 1000)
+        .toISOString().slice(0, 10)
+      if (dtBrasilia >= since && dtBrasilia <= until) byId.set(d.id, d.fields?.tipo ?? '')
     }
     if (json.hasNext === false || data.length < 100) break
     page++
