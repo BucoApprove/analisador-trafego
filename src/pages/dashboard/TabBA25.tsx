@@ -30,6 +30,8 @@ interface Props {
   slotAfterMetas?: React.ReactNode  // conteúdo extra renderizado após "Metas × Realizado"
   // No pago, o card do topo mostra vendas (do ingresso) em vez de leads.
   vendasResumo?: { total: number; meta: number; diario: { date: string; vendas: number }[] } | null
+  // Data mínima para busca de vendas (abertura do carrinho). Se ausente, usa since do filtro.
+  salesSince?: string
 }
 
 const FIXED_PREFIX = 'BA25'
@@ -556,6 +558,7 @@ export default function TabBA25({
   tipo = 'interno',
   slotAfterMetas,
   vendasResumo,
+  salesSince,
 }: Props) {
   const pagoComVendas = (tipo === 'pago' || tipo === 'meteórico') && !!vendasResumo
   const [since, setSince] = useState(defaultSince)
@@ -620,7 +623,9 @@ export default function TabBA25({
       // params opcionais por lançamento (vazio = default BucoApprove/BA25 no backend)
       const pf = productFilter ? `&productFilter=${encodeURIComponent(productFilter)}` : ''
       const ss = surveySheetId ? `&surveySheetId=${encodeURIComponent(surveySheetId)}` : ''
-      const salesUrl  = `/api/launch-sales-utms?since=${since}&until=${until}${pf}${nc}`
+      // Vendas: usa salesSince (abertura do carrinho) quando disponível, senão since do filtro
+      const effectiveSalesSince = salesSince || since
+      const salesUrl  = `/api/launch-sales-utms?since=${effectiveSalesSince}&until=${until}${pf}${nc}`
       const surveyUrl  = `/api/survey-buyers?since=${since}&until=${until}${pf}${ss}${nc}`
       const profileUrl = `/api/ba25-profile?since=${since}&until=${until}${pf}${ss}${nc}`
 

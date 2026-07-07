@@ -547,6 +547,7 @@ function DetalheLancamento({ token, l }: { token: string; l: Lancamento }) {
       goalsOverride={goalsFromLancamento(l)}
       tipo={l.tipo}
       vendasResumo={vendasResumo}
+      salesSince={l.carrinho_inicio ?? undefined}
     />
   )
 }
