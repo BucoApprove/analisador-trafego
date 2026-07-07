@@ -627,7 +627,7 @@ export default function TabBA25({
       const effectiveSalesSince = salesSince || since
       const salesUrl  = `/api/launch-sales-utms?since=${effectiveSalesSince}&until=${until}${pf}${nc}`
       const surveyUrl  = `/api/survey-buyers?since=${since}&until=${until}${pf}${ss}${nc}`
-      const profileUrl = `/api/ba25-profile?since=${since}&until=${until}${pf}${ss}${nc}`
+      const profileUrl = `/api/ba25-profile?since=${effectiveSalesSince}&until=${until}${pf}${ss}${nc}`
 
       const t0 = Date.now()
       const [bqRes, metaRes, salesRes, surveyRes, profileRes] = await Promise.all([
