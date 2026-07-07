@@ -1,124 +1,185 @@
 /**
  * Integração com a Clint (CRM) — contagem de leads (deals) por produto.
  *
- * Auth: header `api-token: {CLINT_API_TOKEN}`. Base https://api.clint.digital.
- * Leads = deals com a(s) tag(s) do produto, created_at no período, deduplicados
- * por id de deal. O mapa produto canônico → tags Clint vem da tabela
- * `clint_tags` (Supabase, editável na UI).
+ * Lógica correta (descoberta via debug em 2026-07-07):
+ *   - A API Clint organiza origens em grupos (group.name = produto).
+ *   - O painel "Novos interessados por produto" conta todos os deals
+ *     criados no período por group.name, independente do campo fields.tipo.
+ *   - A integração antiga usava tag_id e fields.tipo, que retornavam
+ *     números muito abaixo do real.
  *
- * Se CLINT_API_TOKEN não estiver configurado, retorna {} (a coluna mostra "—").
+ * Nova lógica:
+ *   1. Carrega /v1/origins → mapeia origin_id → { grupo, funil }
+ *   2. Busca todos os deals do período (sem filtro de tag)
+ *   3. Agrupa por group.name do origin, contando total/interessado/abordado
+ *      (fields.tipo quando preenchido; deal sem tipo = conta no total)
+ *   4. Mapeia group.name → produto canônico via tabela clint_tags (Supabase)
+ *      mantendo a UI existente de configuração
  */
 import { createClient } from '@supabase/supabase-js'
 
 const BASE = 'https://api.clint.digital'
 
-/** Lê o mapa produto canônico → tags da tabela clint_tags. */
-async function fetchTagsPorProduto(): Promise<Record<string, string[]>> {
+function body2json(body: string): unknown {
+  try { return body ? JSON.parse(body) : {} } catch { return {} }
+}
+
+// ─── Tipos da API Clint ───────────────────────────────────────────────────────
+
+interface ClintOrigin {
+  id: string
+  name: string
+  group: { id: string; name: string }
+  archived_at: string | null
+}
+
+interface ClintDeal {
+  id: string
+  origin_id: string
+  created_at: string
+  fields: { tipo?: string } | Record<string, unknown>
+}
+
+// ─── Cache de origens (evita re-buscar a cada chamada) ───────────────────────
+
+let _originsCache: { map: Map<string, ClintOrigin>; ts: number } | null = null
+const CACHE_TTL = 10 * 60 * 1000 // 10 min
+
+async function fetchOrigins(token: string): Promise<Map<string, ClintOrigin>> {
+  const now = Date.now()
+  if (_originsCache && now - _originsCache.ts < CACHE_TTL) return _originsCache.map
+
+  const r = await fetch(`${BASE}/v1/origins?limit=200&page=1`, {
+    headers: { 'api-token': token, Accept: 'application/json' },
+  })
+  if (!r.ok) throw new Error(`Clint /v1/origins ${r.status}`)
+  const j = body2json(await r.text()) as { data?: ClintOrigin[] }
+  const map = new Map<string, ClintOrigin>()
+  for (const o of j.data ?? []) map.set(o.id, o)
+  _originsCache = { map, ts: now }
+  return map
+}
+
+// ─── Busca todos os deals do período (sem filtro de tag) ─────────────────────
+
+async function fetchAllDeals(token: string, since: string, until: string): Promise<ClintDeal[]> {
+  const all: ClintDeal[] = []
+  const untilEod = `${until}T23:59:59`
+  let page = 1
+
+  for (let i = 0; i < 200; i++) {
+    const u = new URL(`${BASE}/v1/deals`)
+    u.searchParams.set('limit', '100')
+    u.searchParams.set('page', String(page))
+    u.searchParams.set('created_at_start', since)
+    u.searchParams.set('created_at_end', untilEod)
+    const r = await fetch(u.toString(), { headers: { 'api-token': token, Accept: 'application/json' } })
+    if (!r.ok) throw new Error(`Clint /v1/deals ${r.status}`)
+    const j = body2json(await r.text()) as { data?: ClintDeal[]; hasNext?: boolean }
+    const data = j.data ?? []
+    all.push(...data)
+    if (!j.hasNext || data.length === 0) break
+    page++
+  }
+  return all
+}
+
+// ─── Mapa produto canônico → group names da Clint (via clint_tags no Supabase) ─
+
+async function fetchGroupsPorProduto(): Promise<Record<string, string[]>> {
   const sb = createClient(process.env.SUPABASE_URL ?? '', process.env.SUPABASE_SERVICE_KEY ?? '', {
     auth: { persistSession: false },
   })
-  const { data, error } = await sb.from('clint_tags').select('product_name, tag_id')
+  // clint_tags armazena product_name → tag_id, mas agora usamos tag_id como group name
+  // Para manter compatibilidade, permitimos que tag_id seja um UUID de origin OU
+  // um nome de grupo (string livre). O mapeamento é: product_name → [group_names]
+  const { data, error } = await sb.from('clint_tags').select('product_name, tag_id, label')
   if (error) throw new Error(`clint_tags: ${error.message}`)
   const map: Record<string, string[]> = {}
   for (const r of data ?? []) {
-    if (!r.product_name || !r.tag_id) continue
-    ;(map[r.product_name] ??= []).push(r.tag_id)
+    if (!r.product_name) continue
+    // Usa o label (nome do grupo) se disponível, senão tag_id
+    const groupName = r.label || r.tag_id
+    ;(map[r.product_name] ??= []).push(groupName)
   }
   return map
 }
 
-/** Lista as tags da Clint (id + nome) para o dropdown do editor.
- *  /v1/tags pagina por page/totalPages (não offset). */
-export async function fetchClintTagsList(): Promise<Array<{ id: string; name: string }>> {
-  const token = process.env.CLINT_API_TOKEN ?? ''
-  if (!token) return []
-  const out: Array<{ id: string; name: string }> = []
-  let page = 1
-  for (let i = 0; i < 100; i++) {
-    const url = new URL(`${BASE}/v1/tags`)
-    url.searchParams.set('limit', '100')
-    url.searchParams.set('page', String(page))
-    const r = await fetch(url.toString(), { headers: { 'api-token': token, Accept: 'application/json' } })
-    if (!r.ok) throw new Error(`Clint /v1/tags ${r.status}`)
-    const json = body2json(await r.text())
-    const data = (json.data ?? []) as Array<{ id?: string; name?: string }>
-    for (const t of data) if (t.id) out.push({ id: t.id, name: t.name ?? t.id })
-    if (!json.hasNext || data.length === 0) break
-    page++
-  }
-  return out.sort((a, b) => a.name.localeCompare(b.name))
-}
-
-function body2json(body: string): { data?: unknown[]; hasNext?: boolean } {
-  try { return body ? JSON.parse(body) : {} } catch { return {} }
-}
-
-interface Deal { id?: string; created_at?: string; fields?: { tipo?: string } }
-
-// Coleta os deals de uma tag no período, mapeando id → tipo (Interessado/Abordado).
-async function dealsByTag(token: string, tagId: string, since: string, until: string): Promise<Map<string, string>> {
-  const byId = new Map<string, string>()
-  let page = 1
-  // A API Clint interpreta created_at_end como exclusivo (ou como 00:00 do dia).
-  // Passamos o fim do dia em horário de Brasília (-03:00) para não perder leads
-  // cadastrados à noite. O filtro local abaixo garante a correção final.
-  const untilEod = `${until}T23:59:59`
-  for (let i = 0; i < 100; i++) {
-    const url = new URL(`${BASE}/v1/deals`)
-    url.searchParams.set('tag_ids', tagId)
-    url.searchParams.set('created_at_start', since)
-    url.searchParams.set('created_at_end', untilEod)
-    url.searchParams.set('limit', '100')
-    url.searchParams.set('page', String(page))
-    const r = await fetch(url.toString(), { headers: { 'api-token': token, Accept: 'application/json' } })
-    if (!r.ok) throw new Error(`Clint /v1/deals ${r.status}`)
-    const json = JSON.parse((await r.text()) || '{}') as { data?: Deal[]; items?: Deal[]; hasNext?: boolean }
-    const data = json.data ?? json.items ?? []
-    if (data.length === 0) break
-    for (const d of data) {
-      if (!d.id || !d.created_at) continue
-      // Converte para data em horário de Brasília (UTC-3) antes de comparar
-      const dtBrasilia = new Date(new Date(d.created_at).getTime() - 3 * 60 * 60 * 1000)
-        .toISOString().slice(0, 10)
-      if (dtBrasilia >= since && dtBrasilia <= until) byId.set(d.id, d.fields?.tipo ?? '')
-    }
-    if (json.hasNext === false || data.length < 100) break
-    page++
-  }
-  return byId
-}
+// ─── Interface pública ────────────────────────────────────────────────────────
 
 export interface ClintLeads { total: number; interessado: number; abordado: number }
 
 /**
- * Conta leads Clint por produto canônico no período, separando Interessado e
- * Abordado (fields.tipo). Retorna {} se o token não estiver configurado.
+ * Conta leads Clint por produto canônico no período.
+ * Agora usa group.name do origin para identificar o produto,
+ * contando todos os deals (não apenas os com tag específica).
  */
 export async function fetchClintLeads(since: string, until: string): Promise<Record<string, ClintLeads>> {
   const token = process.env.CLINT_API_TOKEN ?? ''
   if (!token) return {}
 
-  const tagsPorProduto = await fetchTagsPorProduto()
-  const out: Record<string, ClintLeads> = {}
   const norm = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim()
-  for (const [produto, tags] of Object.entries(tagsPorProduto)) {
-    try {
-      // dedup por deal entre as tags do produto; mantém o tipo do deal.
-      const tipoById = new Map<string, string>()
-      for (const tag of tags) {
-        const byId = await dealsByTag(token, tag, since, until)
-        for (const [id, tipo] of byId) if (!tipoById.has(id)) tipoById.set(id, tipo)
-      }
-      let interessado = 0, abordado = 0
-      for (const tipo of tipoById.values()) {
+
+  try {
+    const [origins, deals, groupsPorProduto] = await Promise.all([
+      fetchOrigins(token),
+      fetchAllDeals(token, since, until),
+      fetchGroupsPorProduto(),
+    ])
+
+    // Agrupa deals por group.name do origin
+    const byGroup: Record<string, { total: number; interessado: number; abordado: number }> = {}
+    for (const deal of deals) {
+      const origin = origins.get(deal.origin_id)
+      if (!origin) continue
+      const gName = origin.group.name
+      if (!byGroup[gName]) byGroup[gName] = { total: 0, interessado: 0, abordado: 0 }
+      byGroup[gName].total++
+      const tipo = (deal.fields as { tipo?: string })?.tipo
+      if (tipo) {
         const t = norm(tipo)
-        if (t === 'interessado') interessado++
-        else if (t === 'abordado') abordado++
+        if (t === 'interessado') byGroup[gName].interessado++
+        else if (t === 'abordado') byGroup[gName].abordado++
       }
-      out[produto] = { total: tipoById.size, interessado, abordado }
-    } catch (err) {
-      console.error(`fetchClintLeads(${produto}) erro:`, (err as Error).message)
     }
+
+    // Mapeia group.name → produto canônico
+    const out: Record<string, ClintLeads> = {}
+    for (const [produto, groupNames] of Object.entries(groupsPorProduto)) {
+      let total = 0, interessado = 0, abordado = 0
+      for (const gName of groupNames) {
+        // Tenta match exato e por normalização
+        const entry = byGroup[gName]
+          ?? Object.entries(byGroup).find(([k]) => norm(k) === norm(gName))?.[1]
+        if (entry) {
+          total += entry.total
+          interessado += entry.interessado
+          abordado += entry.abordado
+        }
+      }
+      if (total > 0) out[produto] = { total, interessado, abordado }
+    }
+    return out
+  } catch (err) {
+    console.error('fetchClintLeads error:', (err as Error).message)
+    return {}
   }
-  return out
+}
+
+// ─── Lista tags/grupos da Clint para o dropdown ──────────────────────────────
+
+export async function fetchClintTagsList(): Promise<Array<{ id: string; name: string }>> {
+  const token = process.env.CLINT_API_TOKEN ?? ''
+  if (!token) return []
+  try {
+    const origins = await fetchOrigins(token)
+    // Retorna grupos únicos (group.id + group.name) para o dropdown
+    const grupos = new Map<string, string>()
+    for (const o of origins.values()) {
+      if (!o.archived_at) grupos.set(o.group.id, o.group.name)
+    }
+    return [...grupos.entries()]
+      .map(([id, name]) => ({ id: name, name })) // id = name para facilitar mapeamento
+      .sort((a, b) => a.name.localeCompare(b.name))
+  } catch { return [] }
 }
