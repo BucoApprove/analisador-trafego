@@ -197,14 +197,27 @@ export async function fetchClintLeads(since: string, until: string): Promise<Rec
       for (const id of ids) tagDealIds.add(id)
     }
 
+    // Funis operacionais/pós-venda que não devem contar como leads comerciais
+    const FUNIS_EXCLUIDOS = [
+      'compras aprovadas', 'compras em aberto', 'compras expiradas',
+      'cartao recusado', 'cartão recusado', 'reembolso', 'chargeback',
+      'boletos', 'upsell', 'lista de espera',
+    ]
+    function isFunilComercial(originName: string): boolean {
+      const n = norm(originName)
+      return !FUNIS_EXCLUIDOS.some(ex => n.includes(norm(ex)))
+    }
+
     // 2. Para produtos mapeados por group.name: conta deals do grupo
-    //    excluindo os que já têm tag de subproduto
+    //    excluindo os que já têm tag de subproduto e funis operacionais
     for (const row of groupRows) {
       const groupName = row.tag_id // aqui tag_id é o nome do grupo
       const dealsDoGrupo = allDeals.filter(d => {
         const origin = origins.get(d.origin_id)
         if (!origin) return false
-        return norm(origin.group.name) === norm(groupName) && !tagDealIds.has(d.id)
+        return norm(origin.group.name) === norm(groupName)
+          && !tagDealIds.has(d.id)
+          && isFunilComercial(origin.name)
       })
       if (dealsDoGrupo.length === 0) continue
       const prev = out[row.product_name] ?? { total: 0, interessado: 0, abordado: 0 }
