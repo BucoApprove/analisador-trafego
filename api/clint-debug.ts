@@ -155,5 +155,39 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
   } catch (e) { out.tag_test_error = (e as Error).message }
 
+  // 9. Contagem por funil (origin.name) dentro do grupo Buco Approve — julho inteiro
+  try {
+    const { createClient } = await import('@supabase/supabase-js')
+    const sb = createClient(process.env.SUPABASE_URL ?? '', process.env.SUPABASE_SERVICE_KEY ?? '', { auth: { persistSession: false } })
+
+    // Busca origens
+    const origR = await fetch(`${BASE}/v1/origins?limit=200&page=1`, { headers })
+    const origJ = await origR.json() as { data?: Array<{ id: string; name: string; group: { name: string }; archived_at: string | null }> }
+    const origins = new Map((origJ.data ?? []).map(o => [o.id, o]))
+
+    // Busca todos os deals de julho até hoje
+    const allDeals: Array<{ id: string; origin_id: string; created_at: string }> = []
+    for (let p = 1; p <= 20; p++) {
+      const u = new URL(`${BASE}/v1/deals`)
+      u.searchParams.set('limit', '100')
+      u.searchParams.set('page', String(p))
+      u.searchParams.set('created_at_start', '2026-07-01')
+      u.searchParams.set('created_at_end', '2026-07-07T23:59:59')
+      const r = await fetch(u.toString(), { headers })
+      const j = await r.json() as { data?: typeof allDeals; hasNext?: boolean }
+      allDeals.push(...(j.data ?? []))
+      if (!j.hasNext) break
+    }
+
+    // Agrupa por funil dentro do grupo Buco Approve
+    const porFunil: Record<string, number> = {}
+    for (const d of allDeals) {
+      const o = origins.get(d.origin_id)
+      if (!o || o.group.name !== 'Buco Approve') continue
+      porFunil[o.name] = (porFunil[o.name] ?? 0) + 1
+    }
+    out.buco_por_funil = { total_deals: allDeals.filter(d => origins.get(d.origin_id)?.group.name === 'Buco Approve').length, por_funil: porFunil }
+  } catch (e) { out.buco_por_funil_error = (e as Error).message }
+
   return res.json(out)
 }
