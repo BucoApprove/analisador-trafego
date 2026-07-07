@@ -135,5 +135,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     out.total_fetched = allDeals.length
   } catch (e) { out.deals_by_origin_error = (e as Error).message }
 
+  // 8. Buscar deals por tag específica (ex: rte_intensivo) para ver estrutura
+  // Pega a primeira tag cadastrada no Supabase para testar
+  try {
+    const { createClient } = await import('@supabase/supabase-js')
+    const sb = createClient(process.env.SUPABASE_URL ?? '', process.env.SUPABASE_SERVICE_KEY ?? '', { auth: { persistSession: false } })
+    const { data: tags } = await sb.from('clint_tags').select('tag_id, label, product_name').limit(3)
+    out.clint_tags_cadastradas = tags
+
+    if (tags && tags.length > 0) {
+      const tagId = tags[0].tag_id
+      const u = new URL(`${BASE}/v1/deals`)
+      u.searchParams.set('tag_ids', tagId)
+      u.searchParams.set('limit', '3')
+      u.searchParams.set('page', '1')
+      const r = await fetch(u.toString(), { headers })
+      const j = await r.json()
+      out.deals_por_tag_sample = { tag_id: tagId, label: tags[0].label, product: tags[0].product_name, result: j }
+    }
+  } catch (e) { out.tag_test_error = (e as Error).message }
+
   return res.json(out)
 }
