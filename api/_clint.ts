@@ -1,30 +1,45 @@
 /**
  * Integração com a Clint (CRM) — contagem de leads (deals) por produto.
  *
- * Lógica correta (descoberta via debug em 2026-07-07):
- *   - A API Clint organiza origens em grupos (group.name = produto).
- *   - O painel "Novos interessados por produto" conta todos os deals
- *     criados no período por group.name, independente do campo fields.tipo.
- *   - A integração antiga usava tag_id e fields.tipo, que retornavam
- *     números muito abaixo do real.
+ * Lógica de atribuição (descoberta via debug 2026-07-07):
  *
- * Nova lógica:
- *   1. Carrega /v1/origins → mapeia origin_id → { grupo, funil }
- *   2. Busca todos os deals do período (sem filtro de tag)
- *   3. Agrupa por group.name do origin, contando total/interessado/abordado
- *      (fields.tipo quando preenchido; deal sem tipo = conta no total)
- *   4. Mapeia group.name → produto canônico via tabela clint_tags (Supabase)
- *      mantendo a UI existente de configuração
+ * A Clint organiza deals em "origens" (funis) que pertencem a "grupos" (produto).
+ * O painel "Novos interessados" conta todos os deals criados no período por grupo.
+ *
+ * Problema: Intensivo ENARE e Buco Approve vivem no mesmo grupo "Buco Approve".
+ * A distinção é feita via tag da Clint (cadastrada em clint_tags no Supabase).
+ *
+ * Regras de atribuição (em ordem de prioridade):
+ *   1. Produtos com tag cadastrada (ex: Intensivo ENARE) → conta deals que têm
+ *      aquela tag, independente do grupo. Conta TODOS os deals (não só com fields.tipo).
+ *   2. Produtos sem tag (ex: Buco Approve via group "Buco Approve") → conta deals
+ *      do grupo correspondente que NÃO têm nenhuma tag de subproduto cadastrada.
+ *   3. Outros grupos simples (Pós Anatomia, Mentoria, etc.) → todos os deals do grupo.
+ *
+ * Configuração em clint_tags (Supabase):
+ *   - product_name = nome canônico do produto no Placar
+ *   - tag_id       = UUID da tag na Clint (para subprodutos com tag)
+ *                    OU nome do grupo (para produtos mapeados por grupo)
+ *   - label        = nome legível (usado para identificar se é grupo ou tag)
+ *   - is_group     = se true, é mapeamento por group.name; se false/null, é tag UUID
+ *
+ * Como não há campo is_group ainda, diferenciamos pelo formato do tag_id:
+ *   - UUID (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx) → tag real da Clint
+ *   - qualquer outra string → nome de grupo
  */
 import { createClient } from '@supabase/supabase-js'
 
 const BASE = 'https://api.clint.digital'
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+function isUuid(s: string) { return UUID_RE.test(s) }
+
 function body2json(body: string): unknown {
   try { return body ? JSON.parse(body) : {} } catch { return {} }
 }
 
-// ─── Tipos da API Clint ───────────────────────────────────────────────────────
+// ─── Tipos da API ─────────────────────────────────────────────────────────────
 
 interface ClintOrigin {
   id: string
@@ -37,18 +52,17 @@ interface ClintDeal {
   id: string
   origin_id: string
   created_at: string
-  fields: { tipo?: string } | Record<string, unknown>
+  fields: Record<string, unknown>
 }
 
-// ─── Cache de origens (evita re-buscar a cada chamada) ───────────────────────
+// ─── Cache de origens ─────────────────────────────────────────────────────────
 
 let _originsCache: { map: Map<string, ClintOrigin>; ts: number } | null = null
-const CACHE_TTL = 10 * 60 * 1000 // 10 min
+const CACHE_TTL = 10 * 60 * 1000
 
 async function fetchOrigins(token: string): Promise<Map<string, ClintOrigin>> {
   const now = Date.now()
   if (_originsCache && now - _originsCache.ts < CACHE_TTL) return _originsCache.map
-
   const r = await fetch(`${BASE}/v1/origins?limit=200&page=1`, {
     headers: { 'api-token': token, Accept: 'application/json' },
   })
@@ -60,13 +74,35 @@ async function fetchOrigins(token: string): Promise<Map<string, ClintOrigin>> {
   return map
 }
 
-// ─── Busca todos os deals do período (sem filtro de tag) ─────────────────────
+// ─── Busca deals por tag (subprodutos) ───────────────────────────────────────
+
+async function fetchDealsByTag(token: string, tagId: string, since: string, until: string): Promise<Set<string>> {
+  const ids = new Set<string>()
+  const untilEod = `${until}T23:59:59`
+  let page = 1
+  for (let i = 0; i < 200; i++) {
+    const u = new URL(`${BASE}/v1/deals`)
+    u.searchParams.set('tag_ids', tagId)
+    u.searchParams.set('created_at_start', since)
+    u.searchParams.set('created_at_end', untilEod)
+    u.searchParams.set('limit', '100')
+    u.searchParams.set('page', String(page))
+    const r = await fetch(u.toString(), { headers: { 'api-token': token, Accept: 'application/json' } })
+    if (!r.ok) throw new Error(`Clint /v1/deals (tag) ${r.status}`)
+    const j = body2json(await r.text()) as { data?: ClintDeal[]; hasNext?: boolean }
+    for (const d of j.data ?? []) if (d.id) ids.add(d.id)
+    if (!j.hasNext || (j.data ?? []).length === 0) break
+    page++
+  }
+  return ids
+}
+
+// ─── Busca todos os deals do período ─────────────────────────────────────────
 
 async function fetchAllDeals(token: string, since: string, until: string): Promise<ClintDeal[]> {
   const all: ClintDeal[] = []
   const untilEod = `${until}T23:59:59`
   let page = 1
-
   for (let i = 0; i < 200; i++) {
     const u = new URL(`${BASE}/v1/deals`)
     u.searchParams.set('limit', '100')
@@ -76,89 +112,110 @@ async function fetchAllDeals(token: string, since: string, until: string): Promi
     const r = await fetch(u.toString(), { headers: { 'api-token': token, Accept: 'application/json' } })
     if (!r.ok) throw new Error(`Clint /v1/deals ${r.status}`)
     const j = body2json(await r.text()) as { data?: ClintDeal[]; hasNext?: boolean }
-    const data = j.data ?? []
-    all.push(...data)
-    if (!j.hasNext || data.length === 0) break
+    all.push(...(j.data ?? []))
+    if (!j.hasNext || (j.data ?? []).length === 0) break
     page++
   }
   return all
 }
 
-// ─── Mapa produto canônico → group names da Clint (via clint_tags no Supabase) ─
+// ─── Lê configuração do Supabase ─────────────────────────────────────────────
 
-async function fetchGroupsPorProduto(): Promise<Record<string, string[]>> {
+interface ClintTagRow { product_name: string; tag_id: string; label: string }
+
+async function fetchConfig(): Promise<ClintTagRow[]> {
   const sb = createClient(process.env.SUPABASE_URL ?? '', process.env.SUPABASE_SERVICE_KEY ?? '', {
     auth: { persistSession: false },
   })
-  // clint_tags armazena product_name → tag_id, mas agora usamos tag_id como group name
-  // Para manter compatibilidade, permitimos que tag_id seja um UUID de origin OU
-  // um nome de grupo (string livre). O mapeamento é: product_name → [group_names]
   const { data, error } = await sb.from('clint_tags').select('product_name, tag_id, label')
   if (error) throw new Error(`clint_tags: ${error.message}`)
-  const map: Record<string, string[]> = {}
-  for (const r of data ?? []) {
-    if (!r.product_name) continue
-    // Usa o label (nome do grupo) se disponível, senão tag_id
-    const groupName = r.label || r.tag_id
-    ;(map[r.product_name] ??= []).push(groupName)
-  }
-  return map
+  return (data ?? []).filter(r => r.product_name && r.tag_id)
 }
 
 // ─── Interface pública ────────────────────────────────────────────────────────
 
 export interface ClintLeads { total: number; interessado: number; abordado: number }
 
-/**
- * Conta leads Clint por produto canônico no período.
- * Agora usa group.name do origin para identificar o produto,
- * contando todos os deals (não apenas os com tag específica).
- */
+function norm(s: string) {
+  return s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim()
+}
+
+function countTipo(deals: ClintDeal[]): { total: number; interessado: number; abordado: number } {
+  let interessado = 0, abordado = 0
+  for (const d of deals) {
+    const tipo = (d.fields?.tipo as string | undefined) ?? ''
+    if (tipo) {
+      const t = norm(tipo)
+      if (t === 'interessado') interessado++
+      else if (t === 'abordado') abordado++
+    }
+  }
+  return { total: deals.length, interessado, abordado }
+}
+
 export async function fetchClintLeads(since: string, until: string): Promise<Record<string, ClintLeads>> {
   const token = process.env.CLINT_API_TOKEN ?? ''
   if (!token) return {}
 
-  const norm = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim()
-
   try {
-    const [origins, deals, groupsPorProduto] = await Promise.all([
+    const [config, origins, allDeals] = await Promise.all([
+      fetchConfig(),
       fetchOrigins(token),
       fetchAllDeals(token, since, until),
-      fetchGroupsPorProduto(),
     ])
 
-    // Agrupa deals por group.name do origin
-    const byGroup: Record<string, { total: number; interessado: number; abordado: number }> = {}
-    for (const deal of deals) {
-      const origin = origins.get(deal.origin_id)
-      if (!origin) continue
-      const gName = origin.group.name
-      if (!byGroup[gName]) byGroup[gName] = { total: 0, interessado: 0, abordado: 0 }
-      byGroup[gName].total++
-      const tipo = (deal.fields as { tipo?: string })?.tipo
-      if (tipo) {
-        const t = norm(tipo)
-        if (t === 'interessado') byGroup[gName].interessado++
-        else if (t === 'abordado') byGroup[gName].abordado++
+    // Separa config em: tag-based (UUID) vs group-based (string livre)
+    const tagRows = config.filter(r => isUuid(r.tag_id))
+    const groupRows = config.filter(r => !isUuid(r.tag_id))
+
+    // 1. Para cada produto com tag: busca deals pela tag
+    //    Coleta também o set de deal IDs que pertencem a alguma tag
+    //    (para excluir do produto "pai" de grupo)
+    const tagDealIds = new Set<string>() // todos os IDs que têm qualquer tag de subproduto
+    const out: Record<string, ClintLeads> = {}
+
+    // Busca por tag em paralelo
+    const tagResults = await Promise.all(
+      tagRows.map(async row => {
+        const ids = await fetchDealsByTag(token, row.tag_id, since, until)
+        return { row, ids }
+      })
+    )
+
+    for (const { row, ids } of tagResults) {
+      // Acumula por produto (pode haver múltiplas tags para o mesmo produto)
+      const prev = out[row.product_name] ?? { total: 0, interessado: 0, abordado: 0 }
+      // Pega os deals completos para contar tipo
+      const dealsDestaTag = allDeals.filter(d => ids.has(d.id))
+      const counts = countTipo(dealsDestaTag)
+      out[row.product_name] = {
+        total: prev.total + counts.total,
+        interessado: prev.interessado + counts.interessado,
+        abordado: prev.abordado + counts.abordado,
+      }
+      // Marca esses IDs como "pertencentes a subproduto com tag"
+      for (const id of ids) tagDealIds.add(id)
+    }
+
+    // 2. Para produtos mapeados por group.name: conta deals do grupo
+    //    excluindo os que já têm tag de subproduto
+    for (const row of groupRows) {
+      const groupName = row.tag_id // aqui tag_id é o nome do grupo
+      const dealsDoGrupo = allDeals.filter(d => {
+        const origin = origins.get(d.origin_id)
+        if (!origin) return false
+        return norm(origin.group.name) === norm(groupName) && !tagDealIds.has(d.id)
+      })
+      if (dealsDoGrupo.length === 0) continue
+      const prev = out[row.product_name] ?? { total: 0, interessado: 0, abordado: 0 }
+      const counts = countTipo(dealsDoGrupo)
+      out[row.product_name] = {
+        total: prev.total + counts.total,
+        interessado: prev.interessado + counts.interessado,
+        abordado: prev.abordado + counts.abordado,
       }
     }
 
-    // Mapeia group.name → produto canônico
-    const out: Record<string, ClintLeads> = {}
-    for (const [produto, groupNames] of Object.entries(groupsPorProduto)) {
-      let total = 0, interessado = 0, abordado = 0
-      for (const gName of groupNames) {
-        // Tenta match exato e por normalização
-        const entry = byGroup[gName]
-          ?? Object.entries(byGroup).find(([k]) => norm(k) === norm(gName))?.[1]
-        if (entry) {
-          total += entry.total
-          interessado += entry.interessado
-          abordado += entry.abordado
-        }
-      }
-      if (total > 0) out[produto] = { total, interessado, abordado }
-    }
     return out
   } catch (err) {
     console.error('fetchClintLeads error:', (err as Error).message)
@@ -166,20 +223,39 @@ export async function fetchClintLeads(since: string, until: string): Promise<Rec
   }
 }
 
-// ─── Lista tags/grupos da Clint para o dropdown ──────────────────────────────
+// ─── Lista disponível para o dropdown da UI ───────────────────────────────────
+// Retorna tanto as tags reais (UUID) quanto os grupos como opções configuráveis
 
 export async function fetchClintTagsList(): Promise<Array<{ id: string; name: string }>> {
   const token = process.env.CLINT_API_TOKEN ?? ''
   if (!token) return []
   try {
+    // Tags da Clint (para subprodutos)
+    const tagsOut: Array<{ id: string; name: string }> = []
+    let page = 1
+    for (let i = 0; i < 20; i++) {
+      const u = new URL(`${BASE}/v1/tags`)
+      u.searchParams.set('limit', '100')
+      u.searchParams.set('page', String(page))
+      const r = await fetch(u.toString(), { headers: { 'api-token': token, Accept: 'application/json' } })
+      if (!r.ok) break
+      const j = body2json(await r.text()) as { data?: Array<{ id?: string; name?: string }>; hasNext?: boolean }
+      for (const t of j.data ?? []) if (t.id) tagsOut.push({ id: t.id, name: t.name ?? t.id })
+      if (!j.hasNext || (j.data ?? []).length === 0) break
+      page++
+    }
+
+    // Grupos (para produtos mapeados por grupo)
     const origins = await fetchOrigins(token)
-    // Retorna grupos únicos (group.id + group.name) para o dropdown
     const grupos = new Map<string, string>()
     for (const o of origins.values()) {
-      if (!o.archived_at) grupos.set(o.group.id, o.group.name)
+      if (!o.archived_at) grupos.set(o.group.name, o.group.name)
     }
-    return [...grupos.entries()]
-      .map(([id, name]) => ({ id: name, name })) // id = name para facilitar mapeamento
-      .sort((a, b) => a.name.localeCompare(b.name))
+    const gruposOut = [...grupos.entries()].map(([name]) => ({
+      id: name, // id = nome do grupo (identificador para a lógica de group-based)
+      name: `[Grupo] ${name}`,
+    }))
+
+    return [...tagsOut, ...gruposOut].sort((a, b) => a.name.localeCompare(b.name))
   } catch { return [] }
 }
