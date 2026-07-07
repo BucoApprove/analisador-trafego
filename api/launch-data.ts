@@ -36,23 +36,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const since = typeof req.query.since === 'string' ? req.query.since : firstOfMonthStr()
   const until = typeof req.query.until === 'string' ? req.query.until : todayStr()
-  const containsPattern = `%${prefix}%`
+  const containsPattern = `%${prefix.toLowerCase()}%`
   const broadSearch = req.query.broadSearch === 'true'
-  // tagFilter: com broadSearch também captura leads sem tag mas com utm_campaign contendo o prefixo
+  // tagFilter: case-insensitive via LOWER(). broadSearch também pega utm_campaign.
   const tagFilter = broadSearch
-    ? `(tag_name LIKE @pattern OR LOWER(COALESCE(utm_campaign,'')) LIKE @utmPattern)`
-    : `tag_name LIKE @pattern`
+    ? `(LOWER(COALESCE(tag_name,'')) LIKE @pattern OR LOWER(COALESCE(utm_campaign,'')) LIKE @pattern)`
+    : `LOWER(COALESCE(tag_name,'')) LIKE @pattern`
 
   res.setHeader('Cache-Control', 's-maxage=120, stale-while-revalidate=60')
 
-  const broadParam = broadSearch ? [{ name: 'utmPattern', value: `%${prefix.toLowerCase()}%` }] : []
-  const paramsDate = [
-    { name: 'pattern', value: containsPattern },
-    { name: 'since', value: since },
-    { name: 'until', value: until },
-    ...broadParam,
-  ]
-  const paramsAll = [{ name: 'pattern', value: containsPattern }, ...broadParam]
+  const paramsAll = [{ name: 'pattern', value: containsPattern }]
 
   try {
     // Query deduplicada por email+tag+data — frontend faz os cálculos
