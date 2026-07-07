@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
-import { RefreshCw, ChevronDown, ChevronUp, Pencil, Loader2, Settings, Plus, Trash2, X } from 'lucide-react'
+import { RefreshCw, ChevronDown, ChevronUp, Pencil, Loader2, Settings, Plus, Trash2, X, ClipboardList } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 
 // Produtos selecionáveis no editor de mapeamento (label → product_id gravado
@@ -347,17 +347,122 @@ function GastoCell({ gasto, etapas }: { gasto: number; etapas: EtapaGasto | null
   )
 }
 
+// ─── Ações rápidas por produto/dia ───────────────────────────────────────────
+
+function todayIso() { return new Date().toISOString().slice(0, 10) }
+
+function AcaoCell({ produto, acoes, onChange }: {
+  produto: string
+  acoes: Record<string, string>
+  onChange: (produto: string, valor: string) => void
+}) {
+  const valor = acoes[produto] ?? ''
+  const [draft, setDraft] = useState(valor)
+  const [saving, setSaving] = useState(false)
+  const debounce = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Sincroniza quando acoes muda externamente (carga inicial)
+  useEffect(() => { setDraft(acoes[produto] ?? '') }, [acoes, produto])
+
+  async function persist(text: string) {
+    setSaving(true)
+    await supabase.from('placar_acoes').upsert(
+      { data: todayIso(), produto, acao: text, updated_at: new Date().toISOString() },
+      { onConflict: 'data,produto' }
+    )
+    setSaving(false)
+    onChange(produto, text)
+  }
+
+  function handleChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
+    const text = e.target.value
+    setDraft(text)
+    if (debounce.current) clearTimeout(debounce.current)
+    debounce.current = setTimeout(() => persist(text), 800)
+  }
+
+  return (
+    <td className="px-3 py-2 min-w-[180px] max-w-[260px]">
+      <div className="relative">
+        <textarea
+          rows={1}
+          value={draft}
+          onChange={handleChange}
+          placeholder="ação rápida…"
+          className="w-full resize-none rounded border px-2 py-1 text-xs bg-background leading-snug placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/40"
+          style={{ minHeight: '28px', maxHeight: '80px', overflow: 'hidden' }}
+          onInput={e => {
+            const t = e.target as HTMLTextAreaElement
+            t.style.height = 'auto'
+            t.style.height = Math.min(t.scrollHeight, 80) + 'px'
+          }}
+        />
+        {saving && <Loader2 className="absolute right-1.5 top-1.5 h-3 w-3 animate-spin text-muted-foreground/60" />}
+      </div>
+    </td>
+  )
+}
+
+function AcoesModal({ acoes, produtos, onClose }: {
+  acoes: Record<string, string>
+  produtos: string[]
+  onClose: () => void
+}) {
+  const hoje = new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' })
+  const com = produtos.filter(p => acoes[p]?.trim())
+
+  function copiar() {
+    const linhas = [`📋 Ações do Placar — ${hoje}`, '']
+    for (const p of com) {
+      linhas.push(`• *${p}*: ${acoes[p].trim()}`)
+    }
+    navigator.clipboard.writeText(linhas.join('\n'))
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="absolute inset-0 bg-black/40" />
+      <div className="relative z-10 bg-white dark:bg-zinc-900 rounded-xl shadow-2xl w-full max-w-lg border flex flex-col max-h-[85vh]" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 py-4 border-b">
+          <div>
+            <h3 className="font-semibold">Ações do dia</h3>
+            <p className="text-xs text-muted-foreground capitalize">{hoje}</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <button onClick={copiar} className="text-xs px-3 py-1.5 rounded border hover:bg-muted transition-colors">
+              Copiar texto
+            </button>
+            <button onClick={onClose} className="text-muted-foreground hover:text-foreground"><X className="h-4 w-4" /></button>
+          </div>
+        </div>
+        <div className="overflow-y-auto flex-1 p-4 space-y-3">
+          {com.length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-6">Nenhuma ação registrada hoje.</p>
+          ) : com.map(p => (
+            <div key={p} className="rounded-lg border p-3">
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1">{p}</p>
+              <p className="text-sm whitespace-pre-wrap">{acoes[p].trim()}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ─── Linha de produto (com drill-down de ofertas) ────────────────────────────
 
 const PCT_META_CRITICO = 40
 
-function ProdutoRow({ p, stripe, month, token, onMeta, onOrcamento, metaReadOnly, leadsUtm, leadsClint, clintAtivo, orcEntry }: {
+function ProdutoRow({ p, stripe, month, token, onMeta, onOrcamento, metaReadOnly, leadsUtm, leadsClint, clintAtivo, orcEntry, acoes, onAcao }: {
   p: Produto; stripe: boolean; month: string; token: string
   onMeta: (goalName: string, v: number) => void
   onOrcamento: (nome: string, e: OrcamentoEntry) => void
   metaReadOnly: boolean
   leadsUtm: number | null; leadsClint: ClintLeads | null; clintAtivo: boolean
   orcEntry: OrcamentoEntry
+  acoes: Record<string, string>
+  onAcao: (produto: string, valor: string) => void
 }) {
   const [open, setOpen] = useState(false)
   const pct = p.meta && p.meta > 0 ? (p.liquido / p.meta) * 100 : null
@@ -448,6 +553,8 @@ function ProdutoRow({ p, stripe, month, token, onMeta, onOrcamento, metaReadOnly
             <div className="text-[11px] text-muted-foreground">esp {alvos.roasEsperado.toFixed(2)}x</div>
           )}
         </td>
+        {/* Ação rápida */}
+        <AcaoCell produto={p.nome} acoes={acoes} onChange={onAcao} />
       </tr>
       {open && p.ofertas?.map(o => (
         <tr key={o.code} className="border-b bg-muted/5 text-xs text-muted-foreground">
@@ -457,7 +564,7 @@ function ProdutoRow({ p, stripe, month, token, onMeta, onOrcamento, metaReadOnly
           <td className="px-4 py-1.5 text-right">{fmtBRL(o.liquido)}</td>
           <td colSpan={4} />
           <td className="px-4 py-1.5 text-right">{o.vendas}</td>
-          <td colSpan={3} />
+          <td colSpan={4} />
         </tr>
       ))}
     </>
@@ -719,11 +826,14 @@ export default function TabPlacar({ token, enabled }: Props) {
   const [error, setError] = useState('')
   const [showMap, setShowMap] = useState(false)
   const [showClint, setShowClint] = useState(false)
+  const [showAcoes, setShowAcoes] = useState(false)
   const [leads, setLeads] = useState<LeadsData | null>(null)
   const [rangeSince, setRangeSince] = useState('')
   const [rangeUntil, setRangeUntil] = useState('')
   // Orçamento por produto: produto nome → OrcamentoEntry
   const [orcamentos, setOrcamentos] = useState<Record<string, OrcamentoEntry>>({})
+  // Ações rápidas do dia: produto → texto
+  const [acoes, setAcoes] = useState<Record<string, string>>({})
 
   const load = useCallback(async (m: string, since = '', until = '') => {
     setLoading(true)
@@ -762,13 +872,30 @@ export default function TabPlacar({ token, enabled }: Props) {
     } catch { /* silencioso */ }
   }, [token])
 
+  const loadAcoes = useCallback(async () => {
+    try {
+      const { data: rows } = await supabase
+        .from('placar_acoes')
+        .select('produto, acao')
+        .eq('data', todayIso())
+      const map: Record<string, string> = {}
+      for (const r of rows ?? []) map[r.produto] = r.acao
+      setAcoes(map)
+    } catch { /* silencioso */ }
+  }, [])
+
+  const onAcao = useCallback((produto: string, valor: string) => {
+    setAcoes(prev => ({ ...prev, [produto]: valor }))
+  }, [])
+
   useEffect(() => {
     if (enabled) {
       load(month, rangeSince, rangeUntil)
       loadLeads(month, rangeSince, rangeUntil)
       loadOrcamentos(month)
+      loadAcoes()
     }
-  }, [enabled, month, rangeSince, rangeUntil, load, loadLeads, loadOrcamentos])
+  }, [enabled, month, rangeSince, rangeUntil, load, loadLeads, loadOrcamentos, loadAcoes])
 
   const onMeta = useCallback((goalName: string, v: number) => {
     setData(prev => {
@@ -827,6 +954,10 @@ export default function TabPlacar({ token, enabled }: Props) {
               <button onClick={() => { setRangeSince(''); setRangeUntil('') }} className="underline hover:no-underline">limpar</button>
             )}
           </div>
+          <button onClick={() => setShowAcoes(true)} className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded border bg-background hover:bg-muted transition-colors" title="Ver ações do dia">
+            <ClipboardList className="h-3.5 w-3.5" />
+            Ver ações
+          </button>
           <button onClick={() => setShowMap(true)} className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded border bg-background hover:bg-muted transition-colors" title="Mapear campanhas para produtos">
             <Settings className="h-3.5 w-3.5" />
             Campanhas
@@ -844,6 +975,7 @@ export default function TabPlacar({ token, enabled }: Props) {
 
       {showMap && <CampanhaMapModal token={token} onClose={() => setShowMap(false)} onChanged={() => load(month, rangeSince, rangeUntil)} />}
       {showClint && <ClintTagsModal token={token} onClose={() => setShowClint(false)} onChanged={() => loadLeads(month, rangeSince, rangeUntil)} />}
+      {showAcoes && <AcoesModal acoes={acoes} produtos={produtos.map(p => p.nome)} onClose={() => setShowAcoes(false)} />}
 
       <div className="rounded-md bg-blue-50 border border-blue-200 px-4 py-2 text-xs text-blue-800">
         ⚙️ Aba em construção. O gasto de cada campanha é atribuído ao produto pela aba <strong>Produtos/Campanhas</strong> (prefixo → produto). Campanha sem regra cai em <strong>Buco Approve</strong>.
@@ -933,6 +1065,7 @@ export default function TabPlacar({ token, enabled }: Props) {
                 <th className="text-right px-4 py-2.5 font-medium" title="CPV real e teto calculado. Verde ≤ teto, Amarelo ≤ teto×1,10, Vermelho acima.">CPV</th>
                 <th className="text-right px-4 py-2.5 font-medium" title="CPL real e teto calculado. Verde ≤ teto, Amarelo ≤ teto×1,10, Vermelho acima.">CPL</th>
                 <th className="text-right px-4 py-2.5 font-medium" title="ROAS real e esperado. Verde ≥ esperado, Amarelo ≥ esperado×0,90, Vermelho abaixo.">ROAS</th>
+                <th className="text-left px-3 py-2.5 font-medium text-muted-foreground">Ação</th>
               </tr>
             </thead>
             <tbody>
@@ -942,7 +1075,8 @@ export default function TabPlacar({ token, enabled }: Props) {
                   leadsUtm={leads?.leadsUtm[p.nome] ?? null}
                   leadsClint={leads?.leadsClint[p.nome] ?? null}
                   clintAtivo={leads?.clintAtivo ?? false}
-                  orcEntry={orcamentos[p.nome] ?? EMPTY_ORC} />
+                  orcEntry={orcamentos[p.nome] ?? EMPTY_ORC}
+                  acoes={acoes} onAcao={onAcao} />
               ))}
             </tbody>
             <tfoot>
@@ -985,6 +1119,7 @@ export default function TabPlacar({ token, enabled }: Props) {
                     </>
                   ) : '—'}
                 </td>
+                <td />
               </tr>
             </tfoot>
           </table>

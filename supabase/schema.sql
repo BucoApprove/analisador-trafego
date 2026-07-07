@@ -159,6 +159,17 @@ insert into produtos_canonicos (product_id, nome, categoria, goal_name, intensiv
   (6766383,   'Low ticket',               'low',   'Low tickets',       null,                         true,  false)
 on conflict (product_id) do nothing;
 
+-- Ações rápidas do Placar por produto/dia (reunião matinal Gabriel + Bianco)
+create table if not exists placar_acoes (
+  id         uuid        primary key default gen_random_uuid(),
+  data       date        not null default current_date,
+  produto    text        not null,
+  acao       text        not null default '',
+  updated_at timestamptz not null default now(),
+  unique (data, produto)
+);
+alter table placar_acoes disable row level security;
+
 -- ─────────────────────────────────────────────────────────────────────────────
 
 -- Agrupamento manual de produtos Hotmart → produto-meta (definido pela UI).
