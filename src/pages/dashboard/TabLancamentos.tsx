@@ -69,7 +69,9 @@ const emptyForm = {
   orcamento_total: '', orcamento_captura: '', orcamento_descoberta: '',
   orcamento_aquecimento: '', orcamento_lembrete: '', orcamento_remarketing: '',
   produto_ingresso_id: '', produto_principal_id: '', produto_downsell_id: '',
+  produto_antecipado_id: '', meta_vendas_antecipado: '',
   meta_vendas_ingresso: '', meta_vendas_principal: '', meta_vendas_downsell: '',
+  tem_aula: 'nao', aula_data: '', aula_horario: '', aula_tag: '',
 }
 type FormState = typeof emptyForm
 
@@ -92,7 +94,9 @@ function LancamentoModal({ initial, onClose, onSaved }: {
     orcamento_total: numStr(initial.orcamento_total), orcamento_captura: numStr(initial.orcamento_captura), orcamento_descoberta: numStr(initial.orcamento_descoberta),
     orcamento_aquecimento: numStr(initial.orcamento_aquecimento), orcamento_lembrete: numStr(initial.orcamento_lembrete), orcamento_remarketing: numStr(initial.orcamento_remarketing),
     produto_ingresso_id: idStr(initial.produto_ingresso_id), produto_principal_id: idStr(initial.produto_principal_id), produto_downsell_id: idStr(initial.produto_downsell_id),
+    produto_antecipado_id: idStr(initial.produto_antecipado_id), meta_vendas_antecipado: numStr(initial.meta_vendas_antecipado),
     meta_vendas_ingresso: numStr(initial.meta_vendas_ingresso), meta_vendas_principal: numStr(initial.meta_vendas_principal), meta_vendas_downsell: numStr(initial.meta_vendas_downsell),
+    tem_aula: initial.tem_aula ? 'sim' : 'nao', aula_data: initial.aula_data ?? '', aula_horario: initial.aula_horario ?? '', aula_tag: initial.aula_tag ?? '',
   } : emptyForm)
   const [saving, setSaving] = useState(false)
 
@@ -113,9 +117,11 @@ function LancamentoModal({ initial, onClose, onSaved }: {
       produto_ingresso_id: idOrNull(form.produto_ingresso_id),
       produto_principal_id: idOrNull(form.produto_principal_id),
       produto_downsell_id: idOrNull(form.produto_downsell_id),
+      produto_antecipado_id: idOrNull(form.produto_antecipado_id),
       meta_vendas_ingresso: int(form.meta_vendas_ingresso),
       meta_vendas_principal: int(form.meta_vendas_principal),
       meta_vendas_downsell: int(form.meta_vendas_downsell),
+      meta_vendas_antecipado: int(form.meta_vendas_antecipado),
       data_inicio: form.data_inicio || null,
       captura_inicio: form.captura_inicio || null,
       captura_fim: form.captura_fim || null,
@@ -132,6 +138,10 @@ function LancamentoModal({ initial, onClose, onSaved }: {
       orcamento_aquecimento: num(form.orcamento_aquecimento),
       orcamento_lembrete: num(form.orcamento_lembrete),
       orcamento_remarketing: num(form.orcamento_remarketing),
+      tem_aula: form.tipo === 'meteórico' ? form.tem_aula === 'sim' : false,
+      aula_data: form.tipo === 'meteórico' && form.tem_aula === 'sim' ? (form.aula_data || null) : null,
+      aula_horario: form.tipo === 'meteórico' && form.tem_aula === 'sim' ? (form.aula_horario.trim() || null) : null,
+      aula_tag: form.tipo === 'meteórico' && form.tem_aula === 'sim' ? (form.aula_tag.trim() || null) : null,
     }
     const { error } = initial
       ? await supabase.from('lancamentos').update(payload).eq('id', initial.id)
@@ -171,8 +181,12 @@ function LancamentoModal({ initial, onClose, onSaved }: {
 
           <div>
             <span className="text-xs text-muted-foreground block mb-1">Tipo de lançamento</span>
-            <div className="flex gap-2">
-              {([['interno', 'Interno (3 aulas → lead → venda)'], ['pago', 'Pago (evento/ingresso → venda)']] as const).map(([v, lbl]) => (
+            <div className="flex gap-2 flex-wrap">
+              {([
+                ['interno', 'Interno (3 aulas)'],
+                ['pago', 'Pago (ingresso)'],
+                ['meteórico', 'Meteórico (1 aula opt.)'],
+              ] as const).map(([v, lbl]) => (
                 <button key={v} type="button" onClick={() => set('tipo', v)}
                   className={`flex-1 text-xs px-3 py-2 rounded border transition-colors ${form.tipo === v ? 'bg-primary text-primary-foreground' : 'bg-background hover:bg-muted'}`}>
                   {lbl}
@@ -213,6 +227,49 @@ function LancamentoModal({ initial, onClose, onSaved }: {
           <div className="border-t pt-4">
             <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Produtos & metas de venda (qtd)</p>
             <div className="space-y-3">
+              {form.tipo === 'meteórico' && (
+                <>
+                  <div className="rounded-lg bg-purple-50 border border-purple-200 px-3 py-2.5 space-y-3">
+                    <p className="text-xs font-semibold text-purple-700">Cupom / Acesso Antecipado</p>
+                    <div className="grid grid-cols-[2fr_1fr] gap-3">
+                      <label className="flex flex-col gap-1">
+                        <span className="text-xs text-muted-foreground">Produto antecipado (Hotmart ID)</span>
+                        <input value={form.produto_antecipado_id} onChange={e => set('produto_antecipado_id', e.target.value)}
+                          placeholder="6993137" className="text-sm border rounded px-2.5 py-1.5 bg-background font-mono" inputMode="numeric" />
+                      </label>
+                      {textField('Meta vendas antecipado', 'meta_vendas_antecipado')}
+                    </div>
+                  </div>
+                  <div className="rounded-lg bg-purple-50 border border-purple-200 px-3 py-2.5 space-y-3">
+                    <div className="flex items-center gap-3">
+                      <p className="text-xs font-semibold text-purple-700">Aula única (opcional)</p>
+                      <div className="flex gap-2">
+                        {(['sim', 'nao'] as const).map(v => (
+                          <button key={v} type="button" onClick={() => set('tem_aula', v)}
+                            className={`text-xs px-2.5 py-1 rounded border transition-colors ${form.tem_aula === v ? 'bg-purple-600 text-white border-purple-600' : 'bg-background hover:bg-muted'}`}>
+                            {v === 'sim' ? 'Sim' : 'Não'}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    {form.tem_aula === 'sim' && (
+                      <div className="grid grid-cols-3 gap-3">
+                        {dateField('Data da aula', 'aula_data')}
+                        <label className="flex flex-col gap-1">
+                          <span className="text-xs text-muted-foreground">Horário</span>
+                          <input value={form.aula_horario} onChange={e => set('aula_horario', e.target.value)}
+                            placeholder="20:00" className="text-sm border rounded px-2 py-1.5 bg-background" />
+                        </label>
+                        <label className="flex flex-col gap-1">
+                          <span className="text-xs text-muted-foreground">Tag BigQuery</span>
+                          <input value={form.aula_tag} onChange={e => set('aula_tag', e.target.value)}
+                            placeholder="Aula" className="text-sm border rounded px-2 py-1.5 bg-background font-mono" />
+                        </label>
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
               {form.tipo === 'pago' && (
                 <div className="grid grid-cols-[2fr_1fr] gap-3">
                   <label className="flex flex-col gap-1">
@@ -303,13 +360,18 @@ const ID_TO_NOME: Record<number, string> = Object.fromEntries(PRODUTOS.map(p => 
 type VendasMap = Record<string, { vendas: number; liquido: number }>
 
 function VendasProdutoBlock({ token, l }: { token: string; l: Lancamento }) {
-  // Duas janelas: ingresso vende no período do evento (captura→carrinho_fim);
-  // produto principal/downsell só a partir da abertura do carrinho.
+  // Três janelas:
+  //   antecipado: captação → fim captação (só meteórico)
+  //   ingresso:   captação → fim carrinho (só pago)
+  //   principal/downsell: abertura → fim carrinho
+  const antSince = l.captura_inicio ?? l.data_inicio ?? ''
+  const antUntil = l.captura_fim ?? ''
   const ingSince = l.captura_inicio ?? l.data_inicio ?? ''
   const ingUntil = l.carrinho_fim ?? ''
   const prodSince = l.carrinho_inicio ?? ''
   const prodUntil = l.carrinho_fim ?? ''
 
+  const [vendasAntecipado, setVendasAntecipado] = useState<VendasMap | null>(null)
   const [vendasIngresso, setVendasIngresso] = useState<VendasMap | null>(null)
   const [vendasProduto, setVendasProduto] = useState<VendasMap | null>(null)
   const [gastoTotal, setGastoTotal] = useState<number | null>(null)
@@ -323,17 +385,21 @@ function VendasProdutoBlock({ token, l }: { token: string; l: Lancamento }) {
             .then(r => r.ok ? r.json() : Promise.reject(new Error(String(r.status))))
             .then(j => j.vendasPorProduto ?? {})
             .catch(() => ({}))
-    // Gasto Meta total do lançamento (período do evento), p/ CPV total.
     const getGasto = (): Promise<number> =>
       (!ingSince || !ingUntil) ? Promise.resolve(0)
         : fetch(`/api/meta-spend?since=${ingSince}&until=${ingUntil}&spendFilter=${encodeURIComponent(l.spend_filter)}&orFilter=${encodeURIComponent(l.or_filter)}`, { headers: { Authorization: `Bearer ${token}` } })
             .then(r => r.ok ? r.json() : Promise.reject(new Error(String(r.status))))
             .then(j => Number(j.metaSpend ?? 0))
             .catch(() => 0)
-    Promise.all([get(ingSince, ingUntil), get(prodSince, prodUntil), getGasto()])
-      .then(([ing, prod, gasto]) => { setVendasIngresso(ing); setVendasProduto(prod); setGastoTotal(gasto) })
+    Promise.all([
+      l.tipo === 'meteórico' ? get(antSince, antUntil) : Promise.resolve({}),
+      get(ingSince, ingUntil),
+      get(prodSince, prodUntil),
+      getGasto(),
+    ])
+      .then(([ant, ing, prod, gasto]) => { setVendasAntecipado(ant); setVendasIngresso(ing); setVendasProduto(prod); setGastoTotal(gasto) })
       .finally(() => setLoading(false))
-  }, [token, ingSince, ingUntil, prodSince, prodUntil, l.spend_filter, l.or_filter])
+  }, [token, antSince, antUntil, ingSince, ingUntil, prodSince, prodUntil, l.spend_filter, l.or_filter, l.tipo])
 
   const fmtBRL = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 
@@ -342,10 +408,13 @@ function VendasProdutoBlock({ token, l }: { token: string; l: Lancamento }) {
   //   - pago: o gasto é para vender o ingresso → CPV total só no ingresso.
   //   - interno: o gasto é para captar e vender o principal → CPV total no principal.
   const linhas: { papel: string; id: number | null; metaQtd: number; vendas: VendasMap | null; janela: string; aposCarrinho: boolean; cpvAplicavel: boolean }[] = [
+    ...(l.tipo === 'meteórico' && l.produto_antecipado_id != null
+      ? [{ papel: 'Antecipado (captação)', id: l.produto_antecipado_id, metaQtd: l.meta_vendas_antecipado, vendas: vendasAntecipado, janela: antSince ? `${antSince} → ${antUntil}` : '—', aposCarrinho: false, cpvAplicavel: false }]
+      : []),
     ...(l.tipo === 'pago'
       ? [{ papel: 'Ingresso', id: l.produto_ingresso_id, metaQtd: l.meta_vendas_ingresso, vendas: vendasIngresso, janela: `${ingSince} → ${ingUntil}`, aposCarrinho: false, cpvAplicavel: true }]
       : []),
-    { papel: 'Produto principal', id: l.produto_principal_id, metaQtd: l.meta_vendas_principal, vendas: vendasProduto, janela: prodSince ? `${prodSince} → ${prodUntil}` : '—', aposCarrinho: true, cpvAplicavel: l.tipo === 'interno' },
+    { papel: 'Produto principal', id: l.produto_principal_id, metaQtd: l.meta_vendas_principal, vendas: vendasProduto, janela: prodSince ? `${prodSince} → ${prodUntil}` : '—', aposCarrinho: true, cpvAplicavel: l.tipo === 'interno' || l.tipo === 'meteórico' },
     { papel: 'Downsell', id: l.produto_downsell_id, metaQtd: l.meta_vendas_downsell, vendas: vendasProduto, janela: prodSince ? `${prodSince} → ${prodUntil}` : '—', aposCarrinho: true, cpvAplicavel: false },
   ].filter(r => r.id != null)
 
@@ -423,25 +492,44 @@ function DetalheLancamento({ token, l }: { token: string; l: Lancamento }) {
 
   const ingSince = l.captura_inicio ?? l.data_inicio ?? ''
   const ingUntil = l.carrinho_fim ?? ''
+  const antSince = l.captura_inicio ?? l.data_inicio ?? ''
+  const antUntil = l.captura_fim ?? ''
 
   useEffect(() => {
-    if (l.tipo !== 'pago' || !ingSince || !ingUntil || l.produto_ingresso_id == null) {
-      setVendasResumo(null)
+    // Pago: mostra vendas do ingresso no card do topo
+    if (l.tipo === 'pago') {
+      if (!ingSince || !ingUntil || l.produto_ingresso_id == null) { setVendasResumo(null); return }
+      const nome = ID_TO_NOME[l.produto_ingresso_id] ?? ''
+      fetch(`/api/lancamento-vendas?since=${ingSince}&until=${ingUntil}`, { headers: { Authorization: `Bearer ${token}` } })
+        .then(r => r.ok ? r.json() : Promise.reject(new Error(String(r.status))))
+        .then(j => {
+          const total = j.vendasPorProduto?.[nome]?.vendas ?? 0
+          const diarioObj: Record<string, number> = j.diarioPorProduto?.[nome] ?? {}
+          const diario = Object.entries(diarioObj).map(([date, vendas]) => ({ date, vendas: vendas as number })).sort((a, b) => a.date.localeCompare(b.date))
+          setVendasResumo({ total, meta: l.meta_vendas_ingresso, diario })
+        })
+        .catch(() => setVendasResumo(null))
       return
     }
-    const nome = ID_TO_NOME[l.produto_ingresso_id] ?? ''
-    fetch(`/api/lancamento-vendas?since=${ingSince}&until=${ingUntil}`, { headers: { Authorization: `Bearer ${token}` } })
-      .then(r => r.ok ? r.json() : Promise.reject(new Error(String(r.status))))
-      .then(j => {
-        const total = j.vendasPorProduto?.[nome]?.vendas ?? 0
-        const diarioObj: Record<string, number> = j.diarioPorProduto?.[nome] ?? {}
-        const diario = Object.entries(diarioObj)
-          .map(([date, vendas]) => ({ date, vendas: vendas as number }))
-          .sort((a, b) => a.date.localeCompare(b.date))
-        setVendasResumo({ total, meta: l.meta_vendas_ingresso, diario })
-      })
-      .catch(() => setVendasResumo(null))
-  }, [token, l.tipo, ingSince, ingUntil, l.produto_ingresso_id, l.meta_vendas_ingresso])
+    // Meteórico: mostra vendas do antecipado durante a captação
+    if (l.tipo === 'meteórico' && l.produto_antecipado_id != null && antSince && antUntil) {
+      fetch(`/api/lancamento-vendas?since=${antSince}&until=${antUntil}`, { headers: { Authorization: `Bearer ${token}` } })
+        .then(r => r.ok ? r.json() : Promise.reject(new Error(String(r.status))))
+        .then(j => {
+          // Busca por product_id direto (antecipado pode não ter nome canônico)
+          const allVendas: Record<string, { vendas: number }> = j.vendasPorProduto ?? {}
+          const total = allVendas[String(l.produto_antecipado_id)]?.vendas
+            ?? Object.values(allVendas).reduce((s, v) => s + v.vendas, 0)
+          const diarioAll: Record<string, Record<string, number>> = j.diarioPorProduto ?? {}
+          const diarioObj = diarioAll[String(l.produto_antecipado_id)] ?? {}
+          const diario = Object.entries(diarioObj).map(([date, vendas]) => ({ date, vendas: vendas as number })).sort((a, b) => a.date.localeCompare(b.date))
+          setVendasResumo({ total, meta: l.meta_vendas_antecipado, diario })
+        })
+        .catch(() => setVendasResumo(null))
+      return
+    }
+    setVendasResumo(null)
+  }, [token, l.tipo, ingSince, ingUntil, antSince, antUntil, l.produto_ingresso_id, l.produto_antecipado_id, l.meta_vendas_ingresso, l.meta_vendas_antecipado])
 
   return (
     <TabBA25
@@ -476,8 +564,12 @@ function LancamentoCard({ l, onOpen, onEdit, onDelete }: {
       <button onClick={onOpen} className="w-full text-left p-4">
         <div className="flex items-center gap-2 mb-2">
           <h3 className="font-semibold text-base">{l.nome}</h3>
-          <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${l.tipo === 'pago' ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'}`}>
-            {l.tipo === 'pago' ? 'pago' : 'interno'}
+          <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
+            l.tipo === 'pago' ? 'bg-amber-100 text-amber-700' :
+            l.tipo === 'meteórico' ? 'bg-purple-100 text-purple-700' :
+            'bg-blue-100 text-blue-700'
+          }`}>
+            {l.tipo === 'pago' ? 'pago' : l.tipo === 'meteórico' ? 'meteórico' : 'interno'}
           </span>
         </div>
         <div className="space-y-1 text-xs text-muted-foreground">

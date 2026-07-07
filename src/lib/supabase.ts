@@ -74,12 +74,18 @@ export interface Lancamento {
   orcamento_aquecimento: number
   orcamento_lembrete: number
   orcamento_remarketing: number
-  tipo: 'interno' | 'pago'
+  tipo: 'interno' | 'pago' | 'meteórico'
   produto_ingresso_id: number | null
   produto_principal_id: number | null
   produto_downsell_id: number | null
+  produto_antecipado_id: number | null
   meta_vendas_ingresso: number
   meta_vendas_principal: number
   meta_vendas_downsell: number
+  meta_vendas_antecipado: number
+  tem_aula: boolean
+  aula_data: string | null
+  aula_horario: string | null
+  aula_tag: string | null
   created_at: string
 }

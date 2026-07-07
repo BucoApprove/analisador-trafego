@@ -235,13 +235,20 @@ create table if not exists lancamentos (
   -- Tipo de lançamento e produtos vinculados (para metas de venda + cruzamento):
   --   interno = 3 aulas → captura lead → vende produto principal (ev. downsell)
   --   pago    = evento pago (ingresso já é venda) → vende produto principal + downsell
-  tipo                    text not null default 'interno' check (tipo in ('interno', 'pago')),
+  tipo                    text not null default 'interno' check (tipo in ('interno', 'pago', 'meteórico')),
   produto_ingresso_id     int,                          -- só "pago": o produto do evento
   produto_principal_id    int,                          -- produto vendido após o lançamento
   produto_downsell_id     int,                          -- produto de downsell (opcional)
+  produto_antecipado_id   int,                          -- só "meteórico": cupom/acesso antecipado vendido durante captação
   meta_vendas_ingresso    int not null default 0,       -- só "pago"
   meta_vendas_principal   int not null default 0,
   meta_vendas_downsell    int not null default 0,
+  meta_vendas_antecipado  int not null default 0,       -- só "meteórico": meta de vendas do antecipado
+  -- Campos do meteórico: aula única opcional antes do carrinho
+  tem_aula        boolean not null default false,
+  aula_data       date,
+  aula_horario    text,                                 -- ex: '20:00'
+  aula_tag        text,                                 -- tag da aula no BigQuery
   created_at      timestamptz not null default now()
 );
 alter table lancamentos disable row level security;

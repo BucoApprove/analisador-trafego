@@ -26,7 +26,7 @@ interface Props {
   productFilter?: string   // filtro LIKE de produto de venda (default BucoApprove)
   surveySheetId?: string   // planilha de pesquisa de boas-vindas
   goalsOverride?: GoalsData | null  // metas vindas do lançamento (substitui /api/goals-data)
-  tipo?: 'interno' | 'pago' // pago mostra CPV (custo por venda) nas UTMs
+  tipo?: 'interno' | 'pago' | 'meteórico'
   slotAfterMetas?: React.ReactNode  // conteúdo extra renderizado após "Metas × Realizado"
   // No pago, o card do topo mostra vendas (do ingresso) em vez de leads.
   vendasResumo?: { total: number; meta: number; diario: { date: string; vendas: number }[] } | null
@@ -557,7 +557,7 @@ export default function TabBA25({
   slotAfterMetas,
   vendasResumo,
 }: Props) {
-  const pagoComVendas = tipo === 'pago' && !!vendasResumo
+  const pagoComVendas = (tipo === 'pago' || tipo === 'meteórico') && !!vendasResumo
   const [since, setSince] = useState(defaultSince)
   const [until, setUntil] = useState(defaultUntil)
   const [data, setData] = useState<LaunchData | null>(null)
@@ -903,9 +903,9 @@ export default function TabBA25({
 
             <div className="flex flex-wrap gap-px border-b">
               {(pagoComVendas ? [
-                // Lançamento pago: foco em vendas (do ingresso), não leads.
-                { label: 'Total vendas', value: vendasResumo!.total.toLocaleString('pt-BR'), color: CHART_COLORS[1], sub: 'ingresso, no período' },
-                { label: 'Meta de vendas', value: vendasResumo!.meta > 0 ? vendasResumo!.meta.toLocaleString('pt-BR') : '—', color: CHART_COLORS[0], sub: 'ingresso' },
+                // Pago: foco em vendas do ingresso. Meteórico: foco em vendas do antecipado.
+                { label: 'Total vendas', value: vendasResumo!.total.toLocaleString('pt-BR'), color: CHART_COLORS[1], sub: tipo === 'meteórico' ? 'antecipado, captação' : 'ingresso, no período' },
+                { label: 'Meta de vendas', value: vendasResumo!.meta > 0 ? vendasResumo!.meta.toLocaleString('pt-BR') : '—', color: CHART_COLORS[0], sub: tipo === 'meteórico' ? 'antecipado' : 'ingresso' },
                 { label: '% da meta', value: vendasResumo!.meta > 0 ? `${Math.round((vendasResumo!.total / vendasResumo!.meta) * 100)}%` : '—', color: '#7c9885', sub: 'realizado ÷ meta' },
                 { label: 'Leads no período', value: data.totalUnique.toLocaleString('pt-BR'), color: '#888', sub: 'tags + UTM' },
               ] : [
@@ -965,7 +965,7 @@ export default function TabBA25({
               {/* Gráfico: vendas diárias (pago) ou captação de leads (interno) */}
               {pagoComVendas && (vendasResumo!.diario.length > 0) ? (
                 <div className="p-3">
-                  <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1">Vendas diárias (ingresso)</p>
+                  <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1">{tipo === 'meteórico' ? 'Vendas diárias (antecipado — captação)' : 'Vendas diárias (ingresso)'}</p>
                   <ResponsiveContainer width="100%" height={120}>
                     <LineChart data={vendasResumo!.diario} margin={{ top: 2, right: 8, left: -24, bottom: 0 }}>
                       <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
@@ -1143,8 +1143,8 @@ export default function TabBA25({
                   description={`Planilha de metas: ${goals.inicioCaptacao} → ${goals.finalCaptacao} · ${diasRestantes} dia(s) restante(s)`}
                 />
 
-                {/* Leads: metas gerais — ocultas no lançamento pago (foco em venda) */}
-                {tipo !== 'pago' && (
+                {/* Leads: metas gerais — ocultas no lançamento pago */}
+                {tipo !== 'pago' && tipo !== 'meteórico' && (
                 <div className="rounded-lg border bg-card overflow-hidden">
                   <div className="px-4 py-2 border-b bg-muted/40">
                     <p className="text-xs font-semibold">Metas de Leads</p>
