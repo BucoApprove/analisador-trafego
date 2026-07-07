@@ -92,5 +92,48 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     out.deals_with_expand = r.ok ? await r.json() : { status: r.status }
   } catch (e) { out.deals_with_expand_error = (e as Error).message }
 
+  // 6. Listar funis/origens (para mapear origin_id → produto)
+  const originEndpoints = ['/v1/funnels', '/v1/origins', '/v1/pipelines', '/v1/sources']
+  out.origins_probe = {}
+  for (const path of originEndpoints) {
+    try {
+      const r = await fetch(`${BASE}${path}`, { headers })
+      ;(out.origins_probe as Record<string, unknown>)[path] = {
+        status: r.status,
+        body: r.ok ? await r.json() : (await r.text()).slice(0, 100),
+      }
+    } catch (e) {
+      ;(out.origins_probe as Record<string, unknown>)[path] = { error: (e as Error).message }
+    }
+  }
+
+  // 7. Contagem por origin_id no dia (sem filtro de tag)
+  try {
+    const allDeals: Array<{ origin_id: string; fields: Record<string, string>; stage: string }> = []
+    for (let page = 1; page <= 10; page++) {
+      const u = new URL(`${BASE}/v1/deals`)
+      u.searchParams.set('limit', '100')
+      u.searchParams.set('page', String(page))
+      u.searchParams.set('created_at_start', date)
+      u.searchParams.set('created_at_end', `${date}T23:59:59`)
+      const r = await fetch(u.toString(), { headers })
+      const j = await r.json() as { data?: typeof allDeals; hasNext?: boolean; totalCount?: number }
+      if (page === 1) out.total_deals_no_tag_filter = j.totalCount
+      allDeals.push(...(j.data ?? []))
+      if (!j.hasNext) break
+    }
+    // Agrupa por origin_id
+    const byOrigin: Record<string, { total: number; comTipo: number; stages: Record<string, number> }> = {}
+    for (const d of allDeals) {
+      const o = d.origin_id ?? 'sem-origin'
+      if (!byOrigin[o]) byOrigin[o] = { total: 0, comTipo: 0, stages: {} }
+      byOrigin[o].total++
+      if (d.fields?.tipo) byOrigin[o].comTipo++
+      byOrigin[o].stages[d.stage] = (byOrigin[o].stages[d.stage] ?? 0) + 1
+    }
+    out.deals_by_origin = byOrigin
+    out.total_fetched = allDeals.length
+  } catch (e) { out.deals_by_origin_error = (e as Error).message }
+
   return res.json(out)
 }
