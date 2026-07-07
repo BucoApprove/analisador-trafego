@@ -140,17 +140,22 @@ function norm(s: string) {
   return s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim()
 }
 
+// Replica a lógica do painel "Novos interessados" da Clint:
+//   - total     = deals com tipo != "Abordado" (inclui vazio, "Interessado", outros)
+//   - interessado = deals com tipo == "Interessado" explícito
+//   - abordado   = deals com tipo == "Abordado"
+// O painel exclui "Compras aprovadas" e conta os demais exceto os marcados como Abordado.
 function countTipo(deals: ClintDeal[]): { total: number; interessado: number; abordado: number } {
   let interessado = 0, abordado = 0
   for (const d of deals) {
-    const tipo = (d.fields?.tipo as string | undefined) ?? ''
-    if (tipo) {
-      const t = norm(tipo)
-      if (t === 'interessado') interessado++
-      else if (t === 'abordado') abordado++
-    }
+    const tipo = norm((d.fields?.tipo as string | undefined) ?? '')
+    if (tipo === 'abordado') abordado++
+    else if (tipo === 'interessado') interessado++
+    // vazio ou outro tipo = conta no total mas não em nenhuma subcategoria
   }
-  return { total: deals.length, interessado, abordado }
+  // total = todos exceto abordados (replica filtro do painel Clint)
+  const total = deals.length - abordado
+  return { total, interessado, abordado }
 }
 
 export async function fetchClintLeads(since: string, until: string): Promise<Record<string, ClintLeads>> {
@@ -197,15 +202,10 @@ export async function fetchClintLeads(since: string, until: string): Promise<Rec
       for (const id of ids) tagDealIds.add(id)
     }
 
-    // Funis operacionais/pós-venda que não devem contar como leads comerciais
-    const FUNIS_EXCLUIDOS = [
-      'compras aprovadas', 'compras em aberto', 'compras expiradas',
-      'cartao recusado', 'cartão recusado', 'reembolso', 'chargeback',
-      'boletos', 'upsell', 'lista de espera',
-    ]
+    // Replica o filtro do painel Clint "Novos interessados":
+    // exclui apenas o funil "Compras aprovadas" (origin name exato)
     function isFunilComercial(originName: string): boolean {
-      const n = norm(originName)
-      return !FUNIS_EXCLUIDOS.some(ex => n.includes(norm(ex)))
+      return norm(originName) !== norm('Compras aprovadas')
     }
 
     // 2. Para produtos mapeados por group.name: conta deals do grupo
