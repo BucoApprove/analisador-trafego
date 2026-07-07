@@ -594,11 +594,13 @@ function ProdutoRow({ p, stripe, month, token, onMeta, onOrcamento, metaReadOnly
               {leadsUtm.toLocaleString('pt-BR')}
             </button>
           ) : <span className="text-muted-foreground">—</span>}
-          {clintAtivo && (
-            <div className="text-xs text-muted-foreground" title="Leads Clint: interessado / abordado">
-              {leadsClint && leadsClint.total > 0
-                ? <>{leadsClint.interessado.toLocaleString('pt-BR')} int · {leadsClint.abordado.toLocaleString('pt-BR')} abord</>
-                : '—'}
+          {clintAtivo && leadsClint && leadsClint.total > 0 && (
+            <div className="text-xs text-muted-foreground" title="Leads Clint: total (interessado / abordado)">
+              <span className="font-medium text-foreground">{leadsClint.total.toLocaleString('pt-BR')}</span>
+              {' '}
+              <span title="Interessado / Abordado (campo tipo preenchido)">
+                ({leadsClint.interessado} int · {leadsClint.abordado} abord)
+              </span>
             </div>
           )}
           {showDist && (
@@ -1186,7 +1188,7 @@ export default function TabPlacar({ token, enabled }: Props) {
                   {leads ? (
                     <>
                       <div>{Object.values(leads.leadsUtm).reduce((s, v) => s + v, 0).toLocaleString('pt-BR')}</div>
-                      {leads.clintAtivo && <div className="text-xs font-normal text-muted-foreground">{Object.values(leads.leadsClint).reduce((s, v) => s + v.interessado, 0).toLocaleString('pt-BR')} int</div>}
+                      {leads.clintAtivo && <div className="text-xs font-normal text-muted-foreground">{Object.values(leads.leadsClint).reduce((s, v) => s + v.total, 0).toLocaleString('pt-BR')} total Clint</div>}
                     </>
                   ) : '—'}
                 </td>
