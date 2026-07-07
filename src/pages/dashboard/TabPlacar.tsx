@@ -849,7 +849,7 @@ function ClintTagsModal({ token, onClose, onChanged }: { token: string; onClose:
           <div className="flex gap-2">
             <select value={prod} onChange={e => setProd(e.target.value)} className="text-sm border rounded px-2 py-1.5 bg-background">
               <option value="">produto…</option>
-              {PRODUTOS_SELECIONAVEIS.filter(p => p.id > 0).map(p => <option key={p.id} value={p.label}>{p.label}</option>)}
+              {PRODUTOS_SELECIONAVEIS.map(p => <option key={p.id} value={p.label}>{p.label}</option>)}
             </select>
             <div className="flex-1 relative">
               <input
