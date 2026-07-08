@@ -4,6 +4,7 @@ import {
   SectionHeader, TabLoading, TabError,
   ChartTooltip, CHART_COLORS,
   UtmTable, RevenueTable, LancamentoLeadsKpis, AdThumbTooltip,
+  CampaignTree, type CampaignTreeRow,
 } from './components'
 import {
   LineChart, Line,
@@ -559,6 +560,69 @@ function TopAdsBlock({
   )
 }
 
+// ─── Árvore Campanha → Conjunto → Anúncio (drill-down estrutural) ─────────────
+
+function CampaignTreeBlock({
+  token, since, until, spendFilter, orFilter, prefix,
+}: {
+  token: string; since: string; until: string; spendFilter: string; orFilter: string; prefix: string
+}) {
+  const [campaigns, setCampaigns] = useState<CampaignTreeRow[] | null>(null)
+  const [leadsByContent, setLeadsByContent] = useState<Record<string, number> | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!since || !until) return
+
+    function load() {
+      setLoading(true)
+      setError(null)
+      const headers = { Authorization: `Bearer ${token}` }
+
+      const treeUrl = `/api/lancamento-ads-tree?since=${since}&until=${until}&spendFilter=${encodeURIComponent(spendFilter)}&orFilter=${encodeURIComponent(orFilter)}`
+      const leadsUrl = `/api/lancamento-leads-by-content?prefix=${encodeURIComponent(prefix)}&since=${since}&until=${until}&broadSearch=true`
+
+      Promise.all([
+        fetch(treeUrl, { headers }).then(r => r.ok ? r.json() : Promise.reject(new Error(String(r.status)))),
+        fetch(leadsUrl, { headers }).then(r => r.ok ? r.json() : Promise.reject(new Error(String(r.status)))),
+      ])
+        .then(([tree, leads]) => {
+          setCampaigns(tree.campaigns ?? [])
+          setLeadsByContent(leads.leadsByContent ?? {})
+        })
+        .catch(e => setError(e.message))
+        .finally(() => setLoading(false))
+    }
+
+    load()
+  }, [token, since, until, spendFilter, orFilter, prefix])
+
+  return (
+    <div className="space-y-3">
+      <div>
+        <p className="text-sm font-semibold">Campanhas · Conjuntos · Anúncios</p>
+        <p className="text-xs text-muted-foreground">
+          Leads e CPL em destaque vêm do BigQuery (mesma fonte do card do topo). Resultado/CPR Meta é o que a própria Meta reporta, como comparação.
+        </p>
+      </div>
+      {loading ? (
+        <div className="flex justify-center py-6 text-muted-foreground"><RefreshCw className="h-5 w-5 animate-spin" /></div>
+      ) : error ? (
+        <p className="text-xs text-red-500">Erro ao carregar: {error}</p>
+      ) : !campaigns || campaigns.length === 0 ? (
+        <p className="text-xs text-muted-foreground py-4">Nenhuma campanha encontrada para o período/filtro.</p>
+      ) : (
+        <div className="space-y-3">
+          {campaigns.map(c => (
+            <CampaignTree key={c.campaignId} campaign={c} leadsByContent={leadsByContent} token={token} />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function TabBA25({
   token, enabled,
   prefix = FIXED_PREFIX,
@@ -1073,6 +1137,16 @@ export default function TabBA25({
               prefix={prefix}
             />
           )}
+
+          {/* Árvore Campanha → Conjunto → Anúncio */}
+          <CampaignTreeBlock
+            token={token}
+            since={since}
+            until={until}
+            spendFilter={spendFilter}
+            orFilter={orFilter}
+            prefix={prefix}
+          />
 
           {/* Metas × Realizado */}
           {goals && (() => {

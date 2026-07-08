@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Loader2, AlertTriangle, RefreshCw } from 'lucide-react'
+import { Loader2, AlertTriangle, RefreshCw, ChevronDown, Trophy } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import type { UtmSalesAttribution, BA25ProfileEntry } from './types'
@@ -123,6 +123,237 @@ export function AdThumbTooltip({
         </div>
       )}
     </span>
+  )
+}
+
+// ─── Árvore Campanha → Conjunto → Anúncio (drill-down estrutural) ─────────────
+// Portado de TabPerpetuo.tsx (CampaignCard), generalizado para uso em qualquer
+// lançamento: sem etapas/vídeo/seguidores do Perpétuo. Métrica principal de
+// leads/CPL vem do BigQuery (leadsByContent, fonte de verdade do negócio);
+// o resultado que a própria Meta reporta (metaResults/metaCostPerResult)
+// aparece como comparação secundária, em cinza.
+export interface AdTreeRow {
+  adId: string
+  adName: string
+  spend: number
+  metaResults: number
+  metaCostPerResult: number
+}
+
+export interface AdsetTreeRow {
+  adsetId: string
+  adsetName: string
+  adsetStatus: string
+  dailyBudget: number | null
+  lifetimeBudget: number | null
+  spend: number
+  metaResults: number
+  metaCostPerResult: number
+  ads: AdTreeRow[]
+}
+
+export interface CampaignTreeRow {
+  campaignId: string
+  campaignName: string
+  adsets: AdsetTreeRow[]
+}
+
+function ctBrl(v: number) {
+  return v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 2 })
+}
+function ctFmt(v: number) {
+  return v.toLocaleString('pt-BR')
+}
+
+function BudgetCell({ daily, lifetime }: { daily: number | null; lifetime: number | null }) {
+  if (daily != null) return <span>{ctBrl(daily)}<span className="text-muted-foreground text-xs ml-0.5">/dia</span></span>
+  if (lifetime != null) return <span>{ctBrl(lifetime)}<span className="text-muted-foreground text-xs ml-0.5"> total</span></span>
+  return <span className="text-muted-foreground">—</span>
+}
+
+export function CampaignTree({
+  campaign,
+  leadsByContent,
+  token,
+}: {
+  campaign: CampaignTreeRow
+  leadsByContent: Record<string, number> | null
+  token: string
+}) {
+  const [open, setOpen] = useState(false)
+  const [openAdsets, setOpenAdsets] = useState<Set<string>>(new Set())
+
+  function toggleAdset(id: string) {
+    setOpenAdsets(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const totSpend = campaign.adsets.reduce((s, a) => s + a.spend, 0)
+  const totMetaResults = campaign.adsets.reduce((s, a) => s + a.metaResults, 0)
+  const totMetaCpr = totMetaResults > 0 ? totSpend / totMetaResults : 0
+  const hasActive = campaign.adsets.some(a => a.adsetStatus === 'ACTIVE')
+
+  const leadsFor = (adsetName: string, adName?: string) => {
+    if (!leadsByContent) return null
+    const key = `${campaign.campaignName.toLowerCase().trim()}|||${adsetName.toLowerCase().trim()}|||${(adName ?? '').toLowerCase().trim()}`
+    return leadsByContent[key] ?? 0
+  }
+  const totLeadsBQ = leadsByContent
+    ? campaign.adsets.reduce((s, a) => s + (leadsFor(a.adsetName) ?? 0), 0)
+    : null
+
+  return (
+    <div className="rounded-2xl border border-border bg-card overflow-hidden shadow-sm">
+      <button
+        onClick={() => setOpen(v => !v)}
+        className="w-full flex items-center gap-3 px-5 py-4 hover:bg-muted/40 transition-colors text-left"
+      >
+        <span className={`h-2.5 w-2.5 rounded-full shrink-0 ${hasActive ? 'bg-emerald-500 shadow-[0_0_0_3px_#d1fae5]' : 'bg-muted-foreground/40'}`} />
+        <span className="flex-1 font-semibold text-sm truncate">{campaign.campaignName}</span>
+        <div className="hidden sm:flex items-center gap-6 shrink-0">
+          <div className="text-right">
+            <p className="text-[10px] text-muted-foreground uppercase tracking-wide font-semibold">Investido</p>
+            <p className="text-sm font-bold">{ctBrl(totSpend)}</p>
+          </div>
+          {totLeadsBQ !== null && (
+            <>
+              <div className="text-right">
+                <p className="text-[10px] text-muted-foreground uppercase tracking-wide font-semibold">Leads</p>
+                <p className="text-sm font-bold text-emerald-600 dark:text-emerald-400">{ctFmt(totLeadsBQ)}</p>
+              </div>
+              <div className="text-right">
+                <p className="text-[10px] text-muted-foreground uppercase tracking-wide font-semibold">CPL</p>
+                <p className="text-sm font-bold text-emerald-600 dark:text-emerald-400">
+                  {totLeadsBQ > 0 ? ctBrl(totSpend / totLeadsBQ) : '—'}
+                </p>
+              </div>
+            </>
+          )}
+          <div className="text-right">
+            <p className="text-[10px] text-muted-foreground uppercase tracking-wide font-semibold">Resultado Meta</p>
+            <p className="text-sm font-bold text-muted-foreground">{ctFmt(totMetaResults)}</p>
+          </div>
+          <div className="text-right">
+            <p className="text-[10px] text-muted-foreground uppercase tracking-wide font-semibold">CPR Meta</p>
+            <p className="text-sm font-bold text-muted-foreground">{totMetaCpr > 0 ? ctBrl(totMetaCpr) : '—'}</p>
+          </div>
+        </div>
+        <ChevronDown className={`h-4 w-4 text-muted-foreground shrink-0 transition-transform duration-200 ${open ? 'rotate-180' : ''}`} />
+      </button>
+
+      {open && (
+        <div className="bg-muted/30 border-t border-border divide-y divide-border">
+          {campaign.adsets.map(adset => {
+            const isPaused = adset.adsetStatus !== 'ACTIVE'
+            const adsetOpen = openAdsets.has(adset.adsetId)
+            const hasAds = adset.ads.length > 0
+            const adsetLeadsBQ = leadsFor(adset.adsetName)
+
+            return (
+              <div key={adset.adsetId} className={isPaused ? 'opacity-40' : ''}>
+                <div
+                  className={`flex items-center gap-3 px-5 py-3 ${hasAds ? 'cursor-pointer hover:bg-muted/50' : ''} transition-colors`}
+                  onClick={() => hasAds && toggleAdset(adset.adsetId)}
+                >
+                  <span className={`h-2 w-2 rounded-full shrink-0 ${isPaused ? 'bg-muted-foreground/30' : 'bg-emerald-400'}`} />
+                  <span className="flex-1 text-sm font-medium truncate">
+                    {adset.adsetName}
+                    {isPaused && <span className="ml-2 text-xs font-normal text-muted-foreground">(pausado)</span>}
+                  </span>
+                  <div className="hidden sm:flex items-center gap-5 text-right shrink-0">
+                    <div>
+                      <p className="text-[10px] text-muted-foreground">Orçamento</p>
+                      <p className="text-xs font-semibold"><BudgetCell daily={adset.dailyBudget} lifetime={adset.lifetimeBudget} /></p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] text-muted-foreground">Investido</p>
+                      <p className="text-xs font-semibold">{ctBrl(adset.spend)}</p>
+                    </div>
+                    {adsetLeadsBQ !== null && (
+                      <>
+                        <div>
+                          <p className="text-[10px] text-muted-foreground">Leads</p>
+                          <p className="text-xs font-semibold text-emerald-600 dark:text-emerald-400">{ctFmt(adsetLeadsBQ)}</p>
+                        </div>
+                        <div>
+                          <p className="text-[10px] text-muted-foreground">CPL</p>
+                          <p className="text-xs font-semibold text-emerald-600 dark:text-emerald-400">
+                            {adsetLeadsBQ > 0 ? ctBrl(adset.spend / adsetLeadsBQ) : '—'}
+                          </p>
+                        </div>
+                      </>
+                    )}
+                    <div>
+                      <p className="text-[10px] text-muted-foreground">Result. Meta</p>
+                      <p className="text-xs font-semibold text-muted-foreground">{ctFmt(adset.metaResults)}</p>
+                    </div>
+                    <div>
+                      <p className="text-[10px] text-muted-foreground">CPR Meta</p>
+                      <p className="text-xs font-semibold text-muted-foreground">{adset.metaCostPerResult > 0 ? ctBrl(adset.metaCostPerResult) : '—'}</p>
+                    </div>
+                  </div>
+                  {hasAds && (
+                    <ChevronDown className={`h-3.5 w-3.5 text-muted-foreground shrink-0 transition-transform duration-200 ${adsetOpen ? 'rotate-180' : ''}`} />
+                  )}
+                </div>
+
+                {hasAds && adsetOpen && (
+                  <div className="bg-background/60 border-t border-border divide-y divide-border/60">
+                    {adset.ads.map((ad, i) => {
+                      const isTop = i === 0 && ad.metaResults > 0
+                      const maxRes = adset.ads[0]?.metaResults ?? 1
+                      const barPct = maxRes > 0 ? (ad.metaResults / maxRes) * 100 : 0
+                      const adLeadsBQ = leadsFor(adset.adsetName, ad.adName)
+                      return (
+                        <div key={ad.adId} className={`flex items-center gap-3 px-7 py-2.5 ${ad.metaResults === 0 && (adLeadsBQ ?? 0) === 0 ? 'opacity-40' : ''}`}>
+                          <span className="w-5 shrink-0 text-sm">
+                            {isTop ? <Trophy className="h-3.5 w-3.5 text-amber-500" /> : <span className="opacity-0"><Trophy className="h-3.5 w-3.5" /></span>}
+                          </span>
+                          <span className="w-40 shrink-0">
+                            <AdThumbTooltip
+                              label={ad.adName}
+                              cacheKey={ad.adId}
+                              className="text-xs text-muted-foreground truncate block"
+                              fetchThumb={() =>
+                                fetch(`/api/meta-creative-thumbs?adIds=${ad.adId}`, { headers: { Authorization: `Bearer ${token}` } })
+                                  .then(r => r.ok ? r.json() : null)
+                                  .then(data => data?.[ad.adId] ?? null)
+                              }
+                            />
+                          </span>
+                          <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden max-w-40">
+                            <div className={`h-full rounded-full ${isTop ? 'bg-amber-400' : 'bg-primary/60'}`} style={{ width: `${barPct}%` }} />
+                          </div>
+                          {adLeadsBQ !== null && (
+                            <>
+                              <span className="text-xs font-semibold w-16 text-right shrink-0 text-emerald-600 dark:text-emerald-400">
+                                {ctFmt(adLeadsBQ)} leads
+                              </span>
+                              <span className="text-xs text-right shrink-0 w-16 text-emerald-600 dark:text-emerald-400">
+                                {adLeadsBQ > 0 ? ctBrl(ad.spend / adLeadsBQ) : '—'}
+                              </span>
+                            </>
+                          )}
+                          <span className="text-xs font-semibold w-20 text-right shrink-0 text-muted-foreground">{ctFmt(ad.metaResults)} meta</span>
+                          <span className="text-xs text-muted-foreground w-16 text-right shrink-0">
+                            {ad.metaResults > 0 ? ctBrl(ad.metaCostPerResult) : '—'}
+                          </span>
+                          <span className="text-xs text-muted-foreground w-16 text-right shrink-0">{ctBrl(ad.spend)}</span>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
   )
 }
 
