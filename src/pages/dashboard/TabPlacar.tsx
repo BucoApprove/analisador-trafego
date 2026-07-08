@@ -2,7 +2,7 @@ import { useState, useCallback, useEffect, useRef } from 'react'
 import { RefreshCw, ChevronDown, ChevronUp, Pencil, Loader2, Settings, Plus, Trash2, X, ClipboardList } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import type { Lancamento } from '@/lib/supabase'
-import { LancamentoLeadsKpis, CHART_COLORS } from './components'
+import { LancamentoLeadsKpis, CHART_COLORS, AdThumbTooltip } from './components'
 
 // Produtos selecionáveis no editor de mapeamento (label → product_id gravado
 // na campaign_produto_map; o backend converte o id de volta no nome canônico).
@@ -353,9 +353,10 @@ function GastoCell({ gasto, etapas }: { gasto: number; etapas: EtapaGasto | null
 
 // ─── Modal de distribuição de leads por campanha + content ───────────────────
 
-function LeadsDistModal({ produto, rows, onClose }: {
+function LeadsDistModal({ produto, rows, token, onClose }: {
   produto: string
   rows: LeadsDistRow[]
+  token: string
   onClose: () => void
 }) {
   const total = rows.reduce((s, r) => s + r.leads, 0)
@@ -399,9 +400,20 @@ function LeadsDistModal({ produto, rows, onClose }: {
                   return (
                     <div key={i} className="flex items-center gap-3 px-3 py-1.5">
                       <div className="flex-1 min-w-0">
-                        <span className="text-xs text-muted-foreground truncate block" title={c.content ?? '(sem utm_content)'}>
-                          {c.content ?? <span className="italic opacity-60">sem utm_content</span>}
-                        </span>
+                        {c.content ? (
+                          <AdThumbTooltip
+                            label={c.content}
+                            cacheKey={c.content}
+                            className="text-xs text-muted-foreground truncate block"
+                            fetchThumb={() =>
+                              fetch(`/api/meta-thumb-by-name?name=${encodeURIComponent(c.content!)}`, { headers: { Authorization: `Bearer ${token}` } })
+                                .then(res => res.ok ? res.json() : null)
+                                .then(data => data?.thumbnail ?? null)
+                            }
+                          />
+                        ) : (
+                          <span className="text-xs text-muted-foreground truncate block italic opacity-60">sem utm_content</span>
+                        )}
                       </div>
                       <div className="flex items-center gap-2 flex-shrink-0">
                         <div className="w-20 h-1.5 rounded-full bg-muted overflow-hidden">
@@ -698,7 +710,7 @@ function ProdutoRow({ p, stripe, month, token, onMeta, onOrcamento, metaReadOnly
             </div>
           )}
           {showDist && (
-            <LeadsDistModal produto={p.nome} rows={leadsDist} onClose={() => setShowDist(false)} />
+            <LeadsDistModal produto={p.nome} rows={leadsDist} token={token} onClose={() => setShowDist(false)} />
           )}
           {showClintDetail && leadsClint && (
             <ClintLeadsModal

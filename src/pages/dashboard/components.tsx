@@ -71,6 +71,61 @@ export function LancamentoLeadsKpis({ totalLeads, metaLeads, investimento, recei
   )
 }
 
+// ─── Tooltip de thumbnail de anúncio (hover) ──────────────────────────────────
+// Componente genérico: recebe uma chave de cache e uma função de busca, para
+// funcionar tanto com ad_id direto (BA25) quanto resolução por nome (Placar).
+// Usa position:fixed calculado no hover para não ser cortado por overflow-hidden
+// dos containers ancestrais (cards e tabelas com scroll).
+const _adThumbCache = new Map<string, string | null>()
+const _adThumbInFlight = new Set<string>()
+
+export function AdThumbTooltip({
+  label,
+  cacheKey,
+  fetchThumb,
+  className,
+}: {
+  label: string
+  cacheKey: string | undefined
+  fetchThumb: () => Promise<string | null>
+  className?: string
+}) {
+  const [thumb, setThumb] = useState<string | null | undefined>(() => cacheKey ? _adThumbCache.get(cacheKey) : undefined)
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null)
+
+  function loadThumb() {
+    if (!cacheKey || _adThumbCache.has(cacheKey) || _adThumbInFlight.has(cacheKey)) return
+    _adThumbInFlight.add(cacheKey)
+    fetchThumb()
+      .then(url => { _adThumbCache.set(cacheKey, url); setThumb(url) })
+      .catch(() => {})
+      .finally(() => _adThumbInFlight.delete(cacheKey))
+  }
+
+  return (
+    <span
+      className={className ?? 'truncate block max-w-[160px]'}
+      title={cacheKey ? undefined : label}
+      onMouseEnter={e => { setPos({ top: e.currentTarget.getBoundingClientRect().bottom + 4, left: e.currentTarget.getBoundingClientRect().left }); loadThumb() }}
+      onMouseLeave={() => setPos(null)}
+    >
+      {label}
+      {pos && cacheKey && (
+        <div className="fixed z-50 rounded-md border bg-popover shadow-lg p-1.5 w-36" style={{ top: pos.top, left: pos.left }}>
+          {thumb === undefined ? (
+            <div className="flex items-center justify-center h-24 text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /></div>
+          ) : thumb ? (
+            <img src={thumb} alt={label} className="w-full h-auto rounded" />
+          ) : (
+            <p className="text-[10px] text-muted-foreground text-center py-6">Sem thumbnail</p>
+          )}
+          <p className="text-[10px] text-center text-muted-foreground mt-1 truncate">{label}</p>
+        </div>
+      )}
+    </span>
+  )
+}
+
 // ─── Section Header ───────────────────────────────────────────────────────────
 interface SectionHeaderProps {
   title: string
