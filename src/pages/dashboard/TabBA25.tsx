@@ -567,44 +567,90 @@ function CampaignTreeBlock({
 }: {
   token: string; since: string; until: string; spendFilter: string; orFilter: string; prefix: string
 }) {
+  // Datas próprias da seção, inicializadas com o filtro do topo mas editáveis
+  // independentemente — só recarrega ao clicar em "Atualizar".
+  const [localSince, setLocalSince] = useState(since)
+  const [localUntil, setLocalUntil] = useState(until)
   const [campaigns, setCampaigns] = useState<CampaignTreeRow[] | null>(null)
   const [leadsByContent, setLeadsByContent] = useState<Record<string, number> | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
+  // Segue o filtro do topo quando ele muda (troca de lançamento, etc). Ajuste
+  // durante o render (padrão React para "resetar estado quando uma prop
+  // muda") em vez de useEffect, evitando o passo extra de re-render.
+  const [trackedFilter, setTrackedFilter] = useState({ since, until, spendFilter, orFilter, prefix })
+  const filterChanged = trackedFilter.since !== since || trackedFilter.until !== until
+    || trackedFilter.spendFilter !== spendFilter || trackedFilter.orFilter !== orFilter || trackedFilter.prefix !== prefix
+  if (filterChanged) {
+    setTrackedFilter({ since, until, spendFilter, orFilter, prefix })
+    setLocalSince(since)
+    setLocalUntil(until)
+  }
+
+  const load = useCallback((s: string, u: string, sf: string, of: string, pfx: string) => {
+    if (!s || !u) return
+    setLoading(true)
+    setError(null)
+    const headers = { Authorization: `Bearer ${token}` }
+
+    const treeUrl = `/api/lancamento-ads-tree?since=${s}&until=${u}&spendFilter=${encodeURIComponent(sf)}&orFilter=${encodeURIComponent(of)}`
+    const leadsUrl = `/api/lancamento-leads-by-content?prefix=${encodeURIComponent(pfx)}&since=${s}&until=${u}&broadSearch=true`
+
+    Promise.all([
+      fetch(treeUrl, { headers }).then(r => r.ok ? r.json() : Promise.reject(new Error(String(r.status)))),
+      fetch(leadsUrl, { headers }).then(r => r.ok ? r.json() : Promise.reject(new Error(String(r.status)))),
+    ])
+      .then(([tree, leads]) => {
+        setCampaigns(tree.campaigns ?? [])
+        setLeadsByContent(leads.leadsByContent ?? {})
+      })
+      .catch(e => setError(e.message))
+      .finally(() => setLoading(false))
+  }, [token])
+
   useEffect(() => {
-    if (!since || !until) return
-
-    function load() {
-      setLoading(true)
-      setError(null)
-      const headers = { Authorization: `Bearer ${token}` }
-
-      const treeUrl = `/api/lancamento-ads-tree?since=${since}&until=${until}&spendFilter=${encodeURIComponent(spendFilter)}&orFilter=${encodeURIComponent(orFilter)}`
-      const leadsUrl = `/api/lancamento-leads-by-content?prefix=${encodeURIComponent(prefix)}&since=${since}&until=${until}&broadSearch=true`
-
-      Promise.all([
-        fetch(treeUrl, { headers }).then(r => r.ok ? r.json() : Promise.reject(new Error(String(r.status)))),
-        fetch(leadsUrl, { headers }).then(r => r.ok ? r.json() : Promise.reject(new Error(String(r.status)))),
-      ])
-        .then(([tree, leads]) => {
-          setCampaigns(tree.campaigns ?? [])
-          setLeadsByContent(leads.leadsByContent ?? {})
-        })
-        .catch(e => setError(e.message))
-        .finally(() => setLoading(false))
-    }
-
-    load()
-  }, [token, since, until, spendFilter, orFilter, prefix])
+    function run() { load(since, until, spendFilter, orFilter, prefix) }
+    run()
+  }, [token, since, until, spendFilter, orFilter, prefix, load])
 
   return (
     <div className="space-y-3">
-      <div>
-        <p className="text-sm font-semibold">Campanhas · Conjuntos · Anúncios</p>
-        <p className="text-xs text-muted-foreground">
-          Leads e CPL em destaque vêm do BigQuery (mesma fonte do card do topo). Resultado/CPR Meta é o que a própria Meta reporta, como comparação.
-        </p>
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <p className="text-sm font-semibold">Campanhas · Conjuntos · Anúncios</p>
+          <p className="text-xs text-muted-foreground">
+            Leads e CPL em destaque vêm do BigQuery (mesma fonte do card do topo). Resultado/CPR Meta é o que a própria Meta reporta, como comparação.
+          </p>
+        </div>
+        <div className="flex items-end gap-2">
+          <div>
+            <label className="mb-1 block text-[10px] font-medium text-muted-foreground">De</label>
+            <input
+              type="date"
+              value={localSince}
+              onChange={e => setLocalSince(e.target.value)}
+              className="rounded-md border bg-background px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-ring"
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-[10px] font-medium text-muted-foreground">Até</label>
+            <input
+              type="date"
+              value={localUntil}
+              onChange={e => setLocalUntil(e.target.value)}
+              className="rounded-md border bg-background px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-ring"
+            />
+          </div>
+          <button
+            onClick={() => load(localSince, localUntil, spendFilter, orFilter, prefix)}
+            disabled={loading}
+            className="flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-opacity disabled:opacity-50"
+          >
+            <RefreshCw className={`h-3 w-3 ${loading ? 'animate-spin' : ''}`} />
+            Atualizar
+          </button>
+        </div>
       </div>
       {loading ? (
         <div className="flex justify-center py-6 text-muted-foreground"><RefreshCw className="h-5 w-5 animate-spin" /></div>
