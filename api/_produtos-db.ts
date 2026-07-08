@@ -30,7 +30,11 @@ interface Cache {
 }
 
 let _cache: Cache | null = null
-const CACHE_TTL_MS = 5 * 60 * 1000
+// TTL curto: cada instância serverless mantém seu próprio cache em memória, e
+// invalidateCache() só afeta a instância que processou o save — um TTL longo
+// fazia edições em produtos_canonicos (ex: intensivo_offer_codes) demorarem
+// minutos para refletir em instâncias que não receberam o save diretamente.
+const CACHE_TTL_MS = 30 * 1000
 
 function sb() {
   return createClient(
