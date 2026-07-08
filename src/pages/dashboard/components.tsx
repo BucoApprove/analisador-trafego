@@ -31,6 +31,46 @@ export function KpiCard({ label, value, sub, color = '#d4a853' }: KpiCardProps) 
   )
 }
 
+// ─── KPIs de lançamento meteórico (Investimento/Leads/CPL/Antecipado) ─────────
+// Usado no card do topo do lançamento (TabBA25) e no resumo do lançamento
+// ativo no Placar (TabPlacar) — mesma fórmula, dois lugares de exibição.
+export interface LancamentoLeadsKpisInput {
+  totalLeads: number
+  metaLeads: number
+  investimento: number       // gasto captura (Meta Ads)
+  receitaAntecipado: number  // líquido das vendas do produto de antecipação
+  qtdVendasAntecipado: number
+}
+
+export function LancamentoLeadsKpis({ totalLeads, metaLeads, investimento, receitaAntecipado, qtdVendasAntecipado }: LancamentoLeadsKpisInput) {
+  const brl2 = (v: number) => v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  const cpl = totalLeads > 0 && investimento > 0 ? investimento / totalLeads : null
+  const investLiquido = investimento - receitaAntecipado
+  const cplReal = totalLeads > 0 && investimento > 0 ? investLiquido / totalLeads : null
+  const pctMetaLeads = metaLeads > 0 ? Math.round((totalLeads / metaLeads) * 100) : null
+
+  const stats = [
+    { label: 'Investimento total', value: `R$ ${brl2(investimento)}`, color: CHART_COLORS[3], sub: 'gasto captura (Meta Ads)' },
+    { label: 'Leads totais', value: totalLeads.toLocaleString('pt-BR'), color: CHART_COLORS[1], sub: metaLeads > 0 ? `meta: ${metaLeads.toLocaleString('pt-BR')}` : 'tags + UTM' },
+    { label: 'Custo por lead', value: cpl != null ? `R$ ${brl2(cpl)}` : '—', color: CHART_COLORS[4], sub: 'invest ÷ leads' },
+    { label: 'Vendas antecipadas', value: `R$ ${brl2(receitaAntecipado)}`, color: CHART_COLORS[0], sub: `${qtdVendasAntecipado.toLocaleString('pt-BR')} venda(s)` },
+    { label: 'Custo por lead real', value: cplReal != null ? `R$ ${brl2(cplReal)}` : '—', color: cplReal != null && cplReal <= 0 ? '#7c9885' : CHART_COLORS[2], sub: 'invest líquido ÷ leads' },
+    { label: '% da meta de leads', value: pctMetaLeads != null ? `${pctMetaLeads}%` : '—', color: '#7c9885', sub: 'leads ÷ meta' },
+  ]
+
+  return (
+    <div className="flex flex-wrap gap-px border-b">
+      {stats.map(s => (
+        <div key={s.label} className="flex-1 min-w-[100px] px-4 py-2">
+          <p className="text-[10px] text-muted-foreground">{s.label}</p>
+          <p className="text-lg font-bold tabular-nums leading-tight" style={{ color: s.color }}>{s.value}</p>
+          <p className="text-[9px] text-muted-foreground truncate">{s.sub}</p>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 // ─── Section Header ───────────────────────────────────────────────────────────
 interface SectionHeaderProps {
   title: string

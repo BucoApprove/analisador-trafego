@@ -1,6 +1,8 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { RefreshCw, ChevronDown, ChevronUp, Pencil, Loader2, Settings, Plus, Trash2, X, ClipboardList } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
+import type { Lancamento } from '@/lib/supabase'
+import { LancamentoLeadsKpis, CHART_COLORS } from './components'
 
 // Produtos selecionáveis no editor de mapeamento (label → product_id gravado
 // na campaign_produto_map; o backend converte o id de volta no nome canônico).
@@ -1001,6 +1003,119 @@ function ClintTagsModal({ token, onClose, onChanged }: { token: string; onClose:
   )
 }
 
+// ─── Lançamento ativo (rodando agora: captura_inicio ≤ hoje ≤ carrinho_fim) ───
+
+function todayIsoDate() {
+  return new Date().toISOString().slice(0, 10)
+}
+
+function findLancamentoAtivo(lancamentos: Lancamento[]): Lancamento | null {
+  const today = todayIsoDate()
+  return lancamentos.find(l => {
+    const inicio = l.captura_inicio ?? l.data_inicio
+    const fim = l.carrinho_fim
+    if (!inicio || !fim) return false
+    return inicio <= today && today <= fim
+  }) ?? null
+}
+
+function LancamentoAtivoCard({ token }: { token: string }) {
+  const [lancamento, setLancamento] = useState<Lancamento | null | undefined>(undefined)
+  const [totalLeads, setTotalLeads] = useState<number | null>(null)
+  const [gastoCaptura, setGastoCaptura] = useState<number | null>(null)
+  const [vendasAntecipado, setVendasAntecipado] = useState<{ vendas: number; liquido: number } | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    supabase.from('lancamentos').select('*').order('ordem').order('created_at', { ascending: false })
+      .then(({ data }) => setLancamento(findLancamentoAtivo((data ?? []) as Lancamento[])))
+  }, [])
+
+  useEffect(() => {
+    if (!lancamento) return
+
+    const since = lancamento.captura_inicio ?? lancamento.data_inicio ?? ''
+    const until = lancamento.carrinho_fim ?? ''
+    if (!since || !until) return
+
+    const headers = { Authorization: `Bearer ${token}` }
+
+    const leadsPromise = fetch(
+      `/api/launch-data?prefix=${encodeURIComponent(lancamento.prefixo)}&since=${since}&until=${until}&broadSearch=true`,
+      { headers },
+    )
+      .then(r => r.ok ? r.json() : Promise.reject(new Error(String(r.status))))
+      .then(j => {
+        const rows: Array<{ lead_email?: string; date?: string }> = j.rows ?? []
+        const emails = new Set<string>()
+        for (const row of rows) {
+          const email = row.lead_email
+          const date = row.date?.slice(0, 10) ?? ''
+          if (email && date >= since && date <= until) emails.add(email)
+        }
+        return emails.size
+      })
+      .catch(() => null)
+
+    const gastoPromise = fetch(
+      `/api/meta-spend?since=${since}&until=${until}&spendFilter=${encodeURIComponent(lancamento.spend_filter)}&orFilter=${encodeURIComponent(lancamento.or_filter)}`,
+      { headers },
+    )
+      .then(r => r.ok ? r.json() : Promise.reject(new Error(String(r.status))))
+      .then(j => {
+        const campaigns: Array<{ name: string; spend: number }> = j.metaCampaigns ?? []
+        const pfx = lancamento.prefixo.toLowerCase()
+        return campaigns
+          .filter(c => { const n = c.name.toLowerCase(); return n.includes(pfx) && n.includes('captura') && !n.includes('engajamento') })
+          .reduce((s, c) => s + c.spend, 0)
+      })
+      .catch(() => null)
+
+    const vendasPromise = lancamento.tipo === 'meteórico' && lancamento.produto_antecipado_id != null
+      ? fetch(`/api/lancamento-vendas?since=${since}&until=${lancamento.captura_fim ?? until}`, { headers })
+          .then(r => r.ok ? r.json() : Promise.reject(new Error(String(r.status))))
+          .then(j => j.vendasPorProdutoId?.[lancamento.produto_antecipado_id!] ?? { vendas: 0, liquido: 0 })
+          .catch(() => ({ vendas: 0, liquido: 0 }))
+      : Promise.resolve({ vendas: 0, liquido: 0 })
+
+    Promise.all([leadsPromise, gastoPromise, vendasPromise]).then(([leads, gasto, vendas]) => {
+      setTotalLeads(leads)
+      setGastoCaptura(gasto)
+      setVendasAntecipado(vendas)
+      setLoading(false)
+    })
+  }, [token, lancamento])
+
+  if (lancamento === undefined) return null
+  if (lancamento === null) return null
+
+  const metaLeads = lancamento.meta_leads_trafico + lancamento.meta_leads_organico + lancamento.meta_leads_manychat
+
+  return (
+    <div className="rounded-lg border bg-card overflow-hidden">
+      <div className="flex flex-wrap items-center justify-between gap-x-4 px-4 py-2 border-b bg-muted/40">
+        <span className="text-sm font-semibold">
+          Lançamento em andamento: <span style={{ color: CHART_COLORS[1] }}>{lancamento.nome}</span>
+        </span>
+        <span className="text-xs text-muted-foreground">
+          {lancamento.captura_inicio ?? lancamento.data_inicio} → {lancamento.carrinho_fim}
+        </span>
+      </div>
+      {loading ? (
+        <div className="flex justify-center py-6 text-muted-foreground"><Loader2 className="h-5 w-5 animate-spin" /></div>
+      ) : (
+        <LancamentoLeadsKpis
+          totalLeads={totalLeads ?? 0}
+          metaLeads={metaLeads}
+          investimento={gastoCaptura ?? 0}
+          receitaAntecipado={vendasAntecipado?.liquido ?? 0}
+          qtdVendasAntecipado={vendasAntecipado?.vendas ?? 0}
+        />
+      )}
+    </div>
+  )
+}
+
 // ─── Main ────────────────────────────────────────────────────────────────────
 
 const EMPTY_ORC: OrcamentoEntry = { orcamento: null, ticket: null, conversao: null }
@@ -1314,6 +1429,8 @@ export default function TabPlacar({ token, enabled }: Props) {
           </table>
         </div>
       )}
+
+      <LancamentoAtivoCard token={token} />
 
       {gastoSemVenda.length > 0 && (
         <div className="rounded-lg border bg-card overflow-hidden">

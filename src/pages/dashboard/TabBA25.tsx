@@ -3,7 +3,7 @@ import type { LaunchData, GoalsData, RawLaunchResponse, SalesUtmData, UtmSalesAt
 import {
   SectionHeader, TabLoading, TabError,
   ChartTooltip, CHART_COLORS,
-  UtmTable, RevenueTable,
+  UtmTable, RevenueTable, LancamentoLeadsKpis,
 } from './components'
 import {
   LineChart, Line,
@@ -912,48 +912,40 @@ export default function TabBA25({
               <span className="text-xs text-muted-foreground">{data.dateRange.since} → {data.dateRange.until}</span>
             </div>
 
-            <div className="flex flex-wrap gap-px border-b">
-              {(tipo === 'meteórico' && vendasResumo ? (() => {
-                const brl2 = (v: number) => v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-                const totalLeads = data.totalUnique
-                const metaLeads = goals ? goals.metaLeadsTrafico + goals.metaLeadsOrganico + goals.metaLeadsManychat : 0
-                const investimento = gastoCaptura
-                const receitaAntecipado = vendasResumo.liquido
-                const cpl = totalLeads > 0 && investimento > 0 ? investimento / totalLeads : null
-                const investLiquido = investimento - receitaAntecipado
-                const cplReal = totalLeads > 0 && investimento > 0 ? investLiquido / totalLeads : null
-                const pctMetaLeads = metaLeads > 0 ? Math.round((totalLeads / metaLeads) * 100) : null
-                return [
-                  { label: 'Investimento total', value: `R$ ${brl2(investimento)}`, color: CHART_COLORS[3], sub: 'gasto captura (Meta Ads)' },
-                  { label: 'Leads totais', value: totalLeads.toLocaleString('pt-BR'), color: CHART_COLORS[1], sub: metaLeads > 0 ? `meta: ${metaLeads.toLocaleString('pt-BR')}` : 'tags + UTM' },
-                  { label: 'Custo por lead', value: cpl != null ? `R$ ${brl2(cpl)}` : '—', color: CHART_COLORS[4], sub: 'invest ÷ leads' },
-                  { label: 'Vendas antecipadas', value: `R$ ${brl2(receitaAntecipado)}`, color: CHART_COLORS[0], sub: `${vendasResumo.total.toLocaleString('pt-BR')} venda(s)` },
-                  { label: 'Custo por lead real', value: cplReal != null ? `R$ ${brl2(cplReal)}` : '—', color: cplReal != null && cplReal <= 0 ? '#7c9885' : CHART_COLORS[2], sub: 'invest líquido ÷ leads' },
-                  { label: '% da meta de leads', value: pctMetaLeads != null ? `${pctMetaLeads}%` : '—', color: '#7c9885', sub: 'leads ÷ meta' },
-                ]
-              })() : pagoComVendas ? [
-                // Pago: foco em vendas do ingresso.
-                { label: 'Total vendas', value: vendasResumo!.total.toLocaleString('pt-BR'), color: CHART_COLORS[1], sub: 'ingresso, no período' },
-                { label: 'Meta de vendas', value: vendasResumo!.meta > 0 ? vendasResumo!.meta.toLocaleString('pt-BR') : '—', color: CHART_COLORS[0], sub: 'ingresso' },
-                { label: '% da meta', value: vendasResumo!.meta > 0 ? `${Math.round((vendasResumo!.total / vendasResumo!.meta) * 100)}%` : '—', color: '#7c9885', sub: 'realizado ÷ meta' },
-                { label: 'Leads no período', value: data.totalUnique.toLocaleString('pt-BR'), color: '#888', sub: 'tags + UTM' },
-              ] : [
-                { label: 'Total leads', value: data.totalUniqueAll.toLocaleString('pt-BR'), color: CHART_COLORS[1], sub: 'histórico (tags + UTM)' },
-                { label: 'No período', value: data.totalUnique.toLocaleString('pt-BR'), color: CHART_COLORS[0], sub: data.dateRange.since + ' → ' + data.dateRange.until },
-                { label: 'Soma bruta', value: data.sumByTag.toLocaleString('pt-BR'), color: '#888', sub: 'c/ duplicatas (tags)' },
-                { label: 'Sobreposição', value: data.overlap > 0 ? data.overlap.toLocaleString('pt-BR') : '0', color: data.overlap > 0 ? '#c17c74' : '#7c9885', sub: 'em múltiplas tags' },
-                ...(interactionStats != null ? [
-                  { label: 'Vendas c/ interação', value: interactionStats.with.toLocaleString('pt-BR'), color: CHART_COLORS[1], sub: 'lead captado no período → comprou' },
-                  { label: 'Vendas s/ interação', value: interactionStats.without.toLocaleString('pt-BR'), color: CHART_COLORS[3], sub: 'comprou sem lead no período' },
-                ] : []),
-              ]).map(s => (
-                <div key={s.label} className="flex-1 min-w-[100px] px-4 py-2">
-                  <p className="text-[10px] text-muted-foreground">{s.label}</p>
-                  <p className="text-lg font-bold tabular-nums leading-tight" style={{ color: s.color }}>{s.value}</p>
-                  <p className="text-[9px] text-muted-foreground truncate">{s.sub}</p>
-                </div>
-              ))}
-            </div>
+            {tipo === 'meteórico' && vendasResumo ? (
+              <LancamentoLeadsKpis
+                totalLeads={data.totalUnique}
+                metaLeads={goals ? goals.metaLeadsTrafico + goals.metaLeadsOrganico + goals.metaLeadsManychat : 0}
+                investimento={gastoCaptura}
+                receitaAntecipado={vendasResumo.liquido}
+                qtdVendasAntecipado={vendasResumo.total}
+              />
+            ) : (
+              <div className="flex flex-wrap gap-px border-b">
+                {(pagoComVendas ? [
+                  // Pago: foco em vendas do ingresso.
+                  { label: 'Total vendas', value: vendasResumo!.total.toLocaleString('pt-BR'), color: CHART_COLORS[1], sub: 'ingresso, no período' },
+                  { label: 'Meta de vendas', value: vendasResumo!.meta > 0 ? vendasResumo!.meta.toLocaleString('pt-BR') : '—', color: CHART_COLORS[0], sub: 'ingresso' },
+                  { label: '% da meta', value: vendasResumo!.meta > 0 ? `${Math.round((vendasResumo!.total / vendasResumo!.meta) * 100)}%` : '—', color: '#7c9885', sub: 'realizado ÷ meta' },
+                  { label: 'Leads no período', value: data.totalUnique.toLocaleString('pt-BR'), color: '#888', sub: 'tags + UTM' },
+                ] : [
+                  { label: 'Total leads', value: data.totalUniqueAll.toLocaleString('pt-BR'), color: CHART_COLORS[1], sub: 'histórico (tags + UTM)' },
+                  { label: 'No período', value: data.totalUnique.toLocaleString('pt-BR'), color: CHART_COLORS[0], sub: data.dateRange.since + ' → ' + data.dateRange.until },
+                  { label: 'Soma bruta', value: data.sumByTag.toLocaleString('pt-BR'), color: '#888', sub: 'c/ duplicatas (tags)' },
+                  { label: 'Sobreposição', value: data.overlap > 0 ? data.overlap.toLocaleString('pt-BR') : '0', color: data.overlap > 0 ? '#c17c74' : '#7c9885', sub: 'em múltiplas tags' },
+                  ...(interactionStats != null ? [
+                    { label: 'Vendas c/ interação', value: interactionStats.with.toLocaleString('pt-BR'), color: CHART_COLORS[1], sub: 'lead captado no período → comprou' },
+                    { label: 'Vendas s/ interação', value: interactionStats.without.toLocaleString('pt-BR'), color: CHART_COLORS[3], sub: 'comprou sem lead no período' },
+                  ] : []),
+                ]).map(s => (
+                  <div key={s.label} className="flex-1 min-w-[100px] px-4 py-2">
+                    <p className="text-[10px] text-muted-foreground">{s.label}</p>
+                    <p className="text-lg font-bold tabular-nums leading-tight" style={{ color: s.color }}>{s.value}</p>
+                    <p className="text-[9px] text-muted-foreground truncate">{s.sub}</p>
+                  </div>
+                ))}
+              </div>
+            )}
 
             <div className="grid lg:grid-cols-2 divide-y lg:divide-y-0 lg:divide-x">
               {/* Tags */}
