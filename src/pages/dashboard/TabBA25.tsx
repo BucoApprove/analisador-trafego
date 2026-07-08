@@ -543,13 +543,10 @@ function TopAdsBlock({
   }
 
   return (
-    <div className="rounded-lg border bg-card overflow-hidden">
-      <div className="px-4 py-2.5 border-b bg-muted/40">
-        <p className="text-sm font-semibold">Top 10 Anúncios — {prefix} Captura</p>
-        <p className="text-xs text-muted-foreground">
-          Leads: registros com tag {prefix}-Captura · Vendas: compradores por criativo (last-touch na coluna de leads) · Invest.: Meta Ads spend
-        </p>
-      </div>
+    <div>
+      <p className="text-xs text-muted-foreground px-4 pt-3">
+        Leads: registros com tag {prefix}-Captura · Vendas: compradores por criativo (last-touch na coluna de leads) · Invest.: Meta Ads spend
+      </p>
       <div className="p-4 grid gap-6 grid-cols-1 md:grid-cols-2">
         <Table title="Por Leads Capturados" rows={top5Leads} salesLabel="Vendas (last)" />
         <Table title="Por Vendas (First-Touch)" rows={top5First} salesLabel="Vendas" />
@@ -615,14 +612,11 @@ function CampaignTreeBlock({
   }, [token, since, until, spendFilter, orFilter, prefix, load])
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-3 p-4">
       <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <p className="text-sm font-semibold">Campanhas · Conjuntos · Anúncios</p>
-          <p className="text-xs text-muted-foreground">
-            Leads e CPL em destaque vêm do BigQuery (mesma fonte do card do topo). Resultado/CPR Meta é o que a própria Meta reporta, como comparação.
-          </p>
-        </div>
+        <p className="text-xs text-muted-foreground max-w-md">
+          Leads e CPL em destaque vêm do BigQuery (mesma fonte do card do topo). Resultado/CPR Meta é o que a própria Meta reporta, como comparação.
+        </p>
         <div className="flex items-end gap-2">
           <div>
             <label className="mb-1 block text-[10px] font-medium text-muted-foreground">De</label>
@@ -1153,7 +1147,7 @@ export default function TabBA25({
             const cplc = leadsCaptura > 0 && gastoCaptura > 0 ? gastoCaptura / leadsCaptura : null
 
             return (
-              <div className="rounded-lg border bg-card overflow-hidden">
+              <AccordionItem title="Gasto Meta Ads" defaultOpen>
                 <div className="flex flex-wrap gap-px">
                   {[
                     { label: 'Gasto Meta Ads', value: `R$ ${brl2(data.metaSpend)}`, sub: `${campaigns.length} campanha(s)`, color: CHART_COLORS[3] },
@@ -1168,31 +1162,9 @@ export default function TabBA25({
                     </div>
                   ))}
                 </div>
-              </div>
+              </AccordionItem>
             )
           })()}
-
-          {/* Top 5 Anúncios */}
-          {captureAdLeads.length > 0 && (
-            <TopAdsBlock
-              byLeads={captureAdLeads}
-              salesByContent={salesUtmData?.byContent}
-              spendByContent={data.spendByUtm?.content}
-              adIdByContent={data.adIdByContent}
-              token={token}
-              prefix={prefix}
-            />
-          )}
-
-          {/* Árvore Campanha → Conjunto → Anúncio */}
-          <CampaignTreeBlock
-            token={token}
-            since={since}
-            until={until}
-            spendFilter={spendFilter}
-            orFilter={orFilter}
-            prefix={prefix}
-          />
 
           {/* Metas × Realizado */}
           {goals && (() => {
@@ -1289,11 +1261,11 @@ export default function TabBA25({
             const diasRestantes = Math.max(1, Math.ceil((finalDate.getTime() - today.getTime()) / 86400000) + 1)
 
             return (
-              <div className="space-y-4">
-                <SectionHeader
-                  title="Metas × Realizado"
-                  description={`Planilha de metas: ${goals.inicioCaptacao} → ${goals.finalCaptacao} · ${diasRestantes} dia(s) restante(s)`}
-                />
+              <AccordionItem title="Metas × Realizado" defaultOpen>
+              <div className="space-y-4 p-4">
+                <p className="text-xs text-muted-foreground">
+                  Planilha de metas: {goals.inicioCaptacao} → {goals.finalCaptacao} · {diasRestantes} dia(s) restante(s)
+                </p>
 
                 {/* Leads: metas gerais — ocultas no lançamento pago */}
                 {tipo !== 'pago' && tipo !== 'meteórico' && (
@@ -1410,12 +1382,40 @@ export default function TabBA25({
                   </table>
                 </div>
               </div>
+              </AccordionItem>
             )
           })()}
 
+          {/* Top 5 Anúncios */}
+          {captureAdLeads.length > 0 && (
+            <AccordionItem title="Top 10 Anúncios" defaultOpen>
+              <TopAdsBlock
+                byLeads={captureAdLeads}
+                salesByContent={salesUtmData?.byContent}
+                spendByContent={data.spendByUtm?.content}
+                adIdByContent={data.adIdByContent}
+                token={token}
+                prefix={prefix}
+              />
+            </AccordionItem>
+          )}
+
+          {/* Árvore Campanha → Conjunto → Anúncio */}
+          <AccordionItem title="Campanhas · Conjuntos · Anúncios" defaultOpen={false}>
+            <CampaignTreeBlock
+              token={token}
+              since={since}
+              until={until}
+              spendFilter={spendFilter}
+              orFilter={orFilter}
+              prefix={prefix}
+            />
+          </AccordionItem>
+
           {/* Distribuição de vendas por UTM (gráficos de pizza) */}
           {salesUtmData && salesUtmData.totalBuyers > 0 && (
-            <div className="space-y-3">
+            <AccordionItem title="Distribuição de Vendas por UTM" defaultOpen>
+            <div className="space-y-3 p-4">
               {/* Bloco 1: última UTM antes da compra */}
               <div className="rounded-lg border bg-card overflow-hidden">
                 <div className="px-4 py-2 border-b bg-muted/40 flex flex-wrap items-center justify-between gap-2">
@@ -1471,21 +1471,18 @@ export default function TabBA25({
                 <CampaignDrilldown drilldown={salesUtmData.drilldown ?? []} />
               )}
             </div>
+            </AccordionItem>
           )}
 
           {/* Pesquisa de boas-vindas × Compradores */}
           {surveyData && (
-            <div className="rounded-lg border bg-card overflow-hidden">
-              <div className="px-4 py-2.5 border-b bg-muted/40 flex flex-wrap items-center justify-between gap-2">
-                <div>
-                  <p className="text-sm font-semibold">Perfil dos Compradores — Pesquisa de Boas-Vindas</p>
-                  <p className="text-xs text-muted-foreground">
-                    {surveyData.surveyMatches > 0
-                      ? `${surveyData.surveyMatches} de ${surveyData.totalBuyers} compradores responderam (${surveyData.totalBuyers > 0 ? Math.round((surveyData.surveyMatches / surveyData.totalBuyers) * 100) : 0}%)`
-                      : `${surveyData.totalBuyers} comprador(es) · nenhum encontrado na pesquisa`}
-                  </p>
-                </div>
-              </div>
+            <AccordionItem
+              title={`Perfil dos Compradores — Pesquisa de Boas-Vindas (${surveyData.surveyMatches > 0
+                ? `${surveyData.surveyMatches} de ${surveyData.totalBuyers} responderam`
+                : `${surveyData.totalBuyers} comprador(es)`})`}
+              defaultOpen={false}
+            >
+              <div>
               {surveyData.surveyMatches === 0 ? (
                 <div className="p-6 text-center text-sm text-muted-foreground">
                   Nenhum comprador encontrado na planilha de pesquisa. Verifique se a planilha está com acesso público e se os e-mails coincidem.
@@ -1506,7 +1503,8 @@ export default function TabBA25({
                   )}
                 </div>
               )}
-            </div>
+              </div>
+            </AccordionItem>
           )}
 
           {/* Receita por UTM + CPV por Fase */}
@@ -1540,7 +1538,11 @@ export default function TabBA25({
             const globalCpv   = profileData.totalBuyers > 0 ? totalSpend / profileData.totalBuyers : null
 
             return (
-              <div className="space-y-3">
+              <AccordionItem
+                title={`Receita por UTM — CPL · ROAS · CPV (${profileData.totalBuyers} compradores · R$ ${brl(profileData.totalRevenue)})`}
+                defaultOpen
+              >
+              <div className="space-y-3 p-4">
                 {/* Header */}
                 <div className="rounded-lg border bg-card overflow-hidden">
                   <div className="px-4 py-2.5 border-b bg-muted/40 flex flex-wrap items-center justify-between gap-2">
@@ -1642,6 +1644,7 @@ export default function TabBA25({
                   </div>
                 )}
               </div>
+              </AccordionItem>
             )
           })()}
 
@@ -1806,28 +1809,6 @@ export default function TabBA25({
           })() : <p className="p-4 text-xs text-muted-foreground">Sem dados no período.</p>}
             </AccordionItem>
 
-            <AccordionItem title={`Campanhas Meta Ads (${data.metaCampaigns?.length ?? 0})`}>
-              {(data.metaCampaigns?.length ?? 0) > 0 ? (
-                <table className="w-full text-xs">
-                  <thead className="bg-muted/60">
-                    <tr>
-                      <th className="px-3 py-1 text-left font-medium">Campanha</th>
-                      <th className="px-3 py-1 text-right font-medium">Gasto</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y">
-                    {data.metaCampaigns!.map(c => (
-                      <tr key={c.name + c.spend} className="hover:bg-muted/40">
-                        <td className="px-3 py-1">{c.name}</td>
-                        <td className="px-3 py-1 text-right tabular-nums">
-                          R$ {c.spend.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              ) : <p className="p-4 text-xs text-muted-foreground">Sem campanhas.</p>}
-            </AccordionItem>
           </div>
         </>
         )
