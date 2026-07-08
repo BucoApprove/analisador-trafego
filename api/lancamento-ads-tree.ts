@@ -47,7 +47,44 @@ interface CampaignTreeRow {
 interface MetaAction { action_type: string; value: string }
 interface AdsetInsightRow { campaign_id: string; campaign_name: string; adset_id: string; adset_name: string; spend?: string; actions?: MetaAction[] }
 interface AdInsightRow { campaign_id: string; campaign_name: string; adset_id: string; ad_id: string; ad_name: string; spend?: string; actions?: MetaAction[] }
-interface AdsetMetaRow { id: string; daily_budget?: string; lifetime_budget?: string; campaign_id?: string; effective_status?: string }
+interface AdsetMetaRow {
+  id: string; daily_budget?: string; lifetime_budget?: string; campaign_id?: string; effective_status?: string
+  optimization_goal?: string
+  promoted_object?: { custom_conversion_id?: string; custom_event_type?: string; custom_event_str?: string }
+}
+interface CampaignMetaRow { id: string; objective?: string }
+interface CustomConversionRow { id: string; name?: string; rule?: string }
+
+// Deriva os action_types que o Meta usa como "Resultado" para um adset —
+// mesma lógica de api/perpetuo-data.ts (getResultTypes), porque lançamentos
+// também podem otimizar por custom conversion (ex: "Lead_BA"), não só pelo
+// evento padrão "lead".
+function getResultTypes(
+  adset: Pick<AdsetMetaRow, 'optimization_goal' | 'promoted_object'>,
+  campaignObjective: string | undefined,
+  customConvByEvent: Map<string, string>,
+): string[] {
+  const po = adset.promoted_object
+  if (po?.custom_conversion_id) {
+    return [`offsite_conversion.custom.${po.custom_conversion_id}`]
+  }
+  const eventStr = po?.custom_event_str ?? ''
+  if (po?.custom_event_type === 'OTHER' && eventStr) {
+    const ccId = customConvByEvent.get(eventStr.toLowerCase())
+    if (ccId) return [`offsite_conversion.custom.${ccId}`, 'offsite_conversion.fb_pixel_custom']
+    return ['offsite_conversion.fb_pixel_custom']
+  }
+  const event = po?.custom_event_type ?? ''
+  if (event === 'LEAD') return ['lead', 'onsite_conversion.lead_grouped']
+  if (event === 'PURCHASE') return ['purchase', 'offsite_conversion.fb_pixel_purchase']
+  if (event === 'COMPLETE_REGISTRATION') return ['complete_registration']
+  const goal = adset.optimization_goal ?? ''
+  if (['LEAD_GENERATION', 'LEAD'].includes(goal)) return ['lead', 'onsite_conversion.lead_grouped']
+  const obj = campaignObjective ?? ''
+  if (['LEAD_GENERATION', 'OUTCOME_LEADS'].includes(obj)) return ['lead', 'onsite_conversion.lead_grouped']
+  if (['OUTCOME_SALES', 'CONVERSIONS'].includes(obj)) return ['purchase', 'offsite_conversion.fb_pixel_purchase']
+  return ['lead', 'onsite_conversion.lead_grouped']
+}
 
 async function metaGetAll<T>(url: URL, maxPages = 10): Promise<T[]> {
   const allData: T[] = []
@@ -121,24 +158,57 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     adUrl.searchParams.set('limit', '500')
 
     const budgetUrl = new URL(`${META_BASE}/${adAccount}/adsets`)
-    budgetUrl.searchParams.set('fields', 'id,daily_budget,lifetime_budget,campaign_id,effective_status')
+    budgetUrl.searchParams.set('fields', 'id,daily_budget,lifetime_budget,campaign_id,effective_status,optimization_goal,promoted_object')
     budgetUrl.searchParams.set('access_token', accessToken)
     budgetUrl.searchParams.set('limit', '500')
 
-    const [adsetInsights, adInsights, adsetsMeta] = await Promise.all([
+    const campaignObjUrl = new URL(`${META_BASE}/${adAccount}/campaigns`)
+    campaignObjUrl.searchParams.set('fields', 'id,objective')
+    campaignObjUrl.searchParams.set('effective_status', JSON.stringify(['ACTIVE', 'PAUSED', 'ARCHIVED']))
+    campaignObjUrl.searchParams.set('access_token', accessToken)
+    campaignObjUrl.searchParams.set('limit', '500')
+
+    const customConvUrl = new URL(`${META_BASE}/${adAccount}/customconversions`)
+    customConvUrl.searchParams.set('fields', 'id,name,rule')
+    customConvUrl.searchParams.set('access_token', accessToken)
+    customConvUrl.searchParams.set('limit', '200')
+
+    const [adsetInsights, adInsights] = await Promise.all([
       metaGetAll<AdsetInsightRow>(adsetUrl, 5),
       metaGetAll<AdInsightRow>(adUrl, 5),
-      metaGetAll<AdsetMetaRow>(budgetUrl),
     ])
+    const [adsetsMeta, campaignsMeta, customConvs] = await Promise.all([
+      metaGetAll<AdsetMetaRow>(budgetUrl),
+      metaGetAll<CampaignMetaRow>(campaignObjUrl),
+      metaGetAll<CustomConversionRow>(customConvUrl),
+    ])
+
+    const customConvByEvent = new Map<string, string>()
+    for (const cc of customConvs) {
+      try {
+        const rule = JSON.parse(cc.rule ?? '{}') as { and?: Array<{ event?: { eq?: string } }> }
+        for (const clause of rule.and ?? []) {
+          const eventName = clause.event?.eq
+          if (eventName && !customConvByEvent.has(eventName.toLowerCase())) {
+            customConvByEvent.set(eventName.toLowerCase(), cc.id)
+          }
+        }
+      } catch { /* rule inválida */ }
+    }
+
+    const campaignObjective = new Map<string, string>()
+    for (const c of campaignsMeta) campaignObjective.set(c.id, c.objective ?? '')
 
     type Budget = { daily: number | null; lifetime: number | null; status: string }
     const budgetMap = new Map<string, Budget>()
+    const resultTypesByAdset = new Map<string, string[]>()
     for (const s of adsetsMeta) {
       budgetMap.set(s.id, {
         daily: s.daily_budget ? Number(s.daily_budget) / 100 : null,
         lifetime: s.lifetime_budget ? Number(s.lifetime_budget) / 100 : null,
         status: s.effective_status ?? 'UNKNOWN',
       })
+      resultTypesByAdset.set(s.id, getResultTypes(s, campaignObjective.get(s.campaign_id ?? ''), customConvByEvent))
     }
 
     const adsByAdset = new Map<string, AdInsightRow[]>()
@@ -156,7 +226,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       const spend = Number(row.spend ?? 0)
       const budget = budgetMap.get(row.adset_id) ?? { daily: null, lifetime: null, status: 'UNKNOWN' }
-      const metaResults = actionVal(row.actions, 'lead', 'onsite_conversion.lead_grouped')
+      const resultTypes = resultTypesByAdset.get(row.adset_id) ?? ['lead', 'onsite_conversion.lead_grouped']
+      const metaResults = actionVal(row.actions, ...resultTypes)
 
       const adsetRow: AdsetTreeRow = {
         adsetId: row.adset_id,
@@ -169,7 +240,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         metaCostPerResult: metaResults > 0 ? spend / metaResults : 0,
         ads: (adsByAdset.get(row.adset_id) ?? []).map((ad): AdTreeRow => {
           const adSpend = Number(ad.spend ?? 0)
-          const adResults = actionVal(ad.actions, 'lead', 'onsite_conversion.lead_grouped')
+          const adResultTypes = resultTypesByAdset.get(ad.adset_id) ?? ['lead', 'onsite_conversion.lead_grouped']
+          const adResults = actionVal(ad.actions, ...adResultTypes)
           return {
             adId: ad.ad_id,
             adName: ad.ad_name,
