@@ -11,7 +11,7 @@ import {
   PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts'
-import { RefreshCw, ChevronDown } from 'lucide-react'
+import { RefreshCw, ChevronDown, Loader2 } from 'lucide-react'
 
 interface Props {
   token: string
@@ -403,15 +403,68 @@ interface TopAdRow {
   spend: number | null
 }
 
+// Cache nível de módulo: thumbnails são buscadas UMA VEZ por sessão por ad ID.
+const _adThumbCache = new Map<string, string | null>()
+const _adThumbInFlight = new Set<string>()
+
+// Nome do anúncio com tooltip de thumbnail (busca sob demanda ao passar o mouse).
+// Usa position:fixed calculado no hover para não ser cortado por overflow-hidden
+// dos containers ancestrais (card + tabela com scroll horizontal).
+function AdNameCell({ name, adId, token }: { name: string; adId: string | undefined; token: string | undefined }) {
+  const [thumb, setThumb] = useState<string | null | undefined>(() => adId ? _adThumbCache.get(adId) : undefined)
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null)
+
+  function loadThumb() {
+    if (!adId || !token || _adThumbCache.has(adId) || _adThumbInFlight.has(adId)) return
+    _adThumbInFlight.add(adId)
+    fetch(`/api/meta-creative-thumbs?adIds=${adId}`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        const url = data?.[adId] ?? null
+        _adThumbCache.set(adId, url)
+        setThumb(url)
+      })
+      .catch(() => {})
+      .finally(() => _adThumbInFlight.delete(adId))
+  }
+
+  return (
+    <span
+      className="truncate block max-w-[160px]"
+      title={adId ? undefined : name}
+      onMouseEnter={e => { setPos({ top: e.currentTarget.getBoundingClientRect().bottom + 4, left: e.currentTarget.getBoundingClientRect().left }); loadThumb() }}
+      onMouseLeave={() => setPos(null)}
+    >
+      {name}
+      {pos && adId && (
+        <div className="fixed z-50 rounded-md border bg-popover shadow-lg p-1.5 w-36" style={{ top: pos.top, left: pos.left }}>
+          {thumb === undefined ? (
+            <div className="flex items-center justify-center h-24 text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /></div>
+          ) : thumb ? (
+            <img src={thumb} alt={name} className="w-full h-auto rounded" />
+          ) : (
+            <p className="text-[10px] text-muted-foreground text-center py-6">Sem thumbnail</p>
+          )}
+          <p className="text-[10px] text-center text-muted-foreground mt-1 truncate">{name}</p>
+        </div>
+      )}
+    </span>
+  )
+}
+
 function TopAdsBlock({
   byLeads,
   salesByContent,
   spendByContent,
+  adIdByContent,
+  token,
   prefix,
 }: {
   byLeads: { name: string; leads: number }[]
   salesByContent: UtmSalesAttribution[] | undefined
   spendByContent: Record<string, number> | undefined
+  adIdByContent: Record<string, string> | undefined
+  token: string | undefined
   prefix: string
 }) {
   const brl = (v: number) =>
@@ -494,7 +547,9 @@ function TopAdsBlock({
                   return (
                     <tr key={r.name + i} className="hover:bg-muted/40">
                       <td className="px-2 py-1.5 text-[11px] font-bold text-muted-foreground">{i + 1}°</td>
-                      <td className="px-2 py-1.5 font-medium truncate max-w-[160px]" title={r.name}>{r.name}</td>
+                      <td className="px-2 py-1.5 font-medium">
+                        <AdNameCell name={r.name} adId={adIdByContent?.[r.name]} token={token} />
+                      </td>
                       <td className="px-2 py-1.5 text-right tabular-nums" style={{ color: CHART_COLORS[1] }}>
                         {r.leads != null ? r.leads.toLocaleString('pt-BR') : '—'}
                       </td>
@@ -1053,6 +1108,8 @@ export default function TabBA25({
               byLeads={captureAdLeads}
               salesByContent={salesUtmData?.byContent}
               spendByContent={data.spendByUtm?.content}
+              adIdByContent={data.adIdByContent}
+              token={token}
               prefix={prefix}
             />
           )}

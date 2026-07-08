@@ -71,6 +71,8 @@ export interface LaunchData {
     content: Record<string, number>
     term: Record<string, number>
   }
+  // ad_name (= utm_content) → ad_id, para buscar a thumbnail do criativo
+  adIdByContent?: Record<string, string>
 }
 
 export interface TagsListData {
