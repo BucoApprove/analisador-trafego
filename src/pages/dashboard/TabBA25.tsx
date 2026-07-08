@@ -29,7 +29,7 @@ interface Props {
   tipo?: 'interno' | 'pago' | 'meteórico'
   slotAfterMetas?: React.ReactNode  // conteúdo extra renderizado após "Metas × Realizado"
   // No pago, o card do topo mostra vendas (do ingresso) em vez de leads.
-  vendasResumo?: { total: number; meta: number; diario: { date: string; vendas: number }[] } | null
+  vendasResumo?: { total: number; meta: number; liquido: number; diario: { date: string; vendas: number }[] } | null
   // Data mínima para busca de vendas (abertura do carrinho). Se ausente, usa since do filtro.
   salesSince?: string
 }
@@ -895,7 +895,13 @@ export default function TabBA25({
         </div>
       )}
 
-      {status === 'idle' && data && (
+      {status === 'idle' && data && (() => {
+        const pfx = prefix.toLowerCase()
+        const gastoCaptura = (data.metaCampaigns ?? [])
+          .filter(c => { const n = c.name.toLowerCase(); return n.includes(pfx) && n.includes('captura') && !n.includes('engajamento') })
+          .reduce((s, c) => s + c.spend, 0)
+
+        return (
         <>
           {/* KPIs + Tags + Gráfico */}
           <div className="rounded-lg border bg-card overflow-hidden">
@@ -907,10 +913,28 @@ export default function TabBA25({
             </div>
 
             <div className="flex flex-wrap gap-px border-b">
-              {(pagoComVendas ? [
-                // Pago: foco em vendas do ingresso. Meteórico: foco em vendas do antecipado.
-                { label: 'Total vendas', value: vendasResumo!.total.toLocaleString('pt-BR'), color: CHART_COLORS[1], sub: tipo === 'meteórico' ? 'antecipado, captação' : 'ingresso, no período' },
-                { label: 'Meta de vendas', value: vendasResumo!.meta > 0 ? vendasResumo!.meta.toLocaleString('pt-BR') : '—', color: CHART_COLORS[0], sub: tipo === 'meteórico' ? 'antecipado' : 'ingresso' },
+              {(tipo === 'meteórico' && vendasResumo ? (() => {
+                const brl2 = (v: number) => v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+                const totalLeads = data.totalUnique
+                const metaLeads = goals ? goals.metaLeadsTrafico + goals.metaLeadsOrganico + goals.metaLeadsManychat : 0
+                const investimento = gastoCaptura
+                const receitaAntecipado = vendasResumo.liquido
+                const cpl = totalLeads > 0 && investimento > 0 ? investimento / totalLeads : null
+                const investLiquido = investimento - receitaAntecipado
+                const cplReal = totalLeads > 0 && investimento > 0 ? investLiquido / totalLeads : null
+                const pctMetaLeads = metaLeads > 0 ? Math.round((totalLeads / metaLeads) * 100) : null
+                return [
+                  { label: 'Investimento total', value: `R$ ${brl2(investimento)}`, color: CHART_COLORS[3], sub: 'gasto captura (Meta Ads)' },
+                  { label: 'Leads totais', value: totalLeads.toLocaleString('pt-BR'), color: CHART_COLORS[1], sub: metaLeads > 0 ? `meta: ${metaLeads.toLocaleString('pt-BR')}` : 'tags + UTM' },
+                  { label: 'Custo por lead', value: cpl != null ? `R$ ${brl2(cpl)}` : '—', color: CHART_COLORS[4], sub: 'invest ÷ leads' },
+                  { label: 'Vendas antecipadas', value: `R$ ${brl2(receitaAntecipado)}`, color: CHART_COLORS[0], sub: `${vendasResumo.total.toLocaleString('pt-BR')} venda(s)` },
+                  { label: 'Custo por lead real', value: cplReal != null ? `R$ ${brl2(cplReal)}` : '—', color: cplReal != null && cplReal <= 0 ? '#7c9885' : CHART_COLORS[2], sub: 'invest líquido ÷ leads' },
+                  { label: '% da meta de leads', value: pctMetaLeads != null ? `${pctMetaLeads}%` : '—', color: '#7c9885', sub: 'leads ÷ meta' },
+                ]
+              })() : pagoComVendas ? [
+                // Pago: foco em vendas do ingresso.
+                { label: 'Total vendas', value: vendasResumo!.total.toLocaleString('pt-BR'), color: CHART_COLORS[1], sub: 'ingresso, no período' },
+                { label: 'Meta de vendas', value: vendasResumo!.meta > 0 ? vendasResumo!.meta.toLocaleString('pt-BR') : '—', color: CHART_COLORS[0], sub: 'ingresso' },
                 { label: '% da meta', value: vendasResumo!.meta > 0 ? `${Math.round((vendasResumo!.total / vendasResumo!.meta) * 100)}%` : '—', color: '#7c9885', sub: 'realizado ÷ meta' },
                 { label: 'Leads no período', value: data.totalUnique.toLocaleString('pt-BR'), color: '#888', sub: 'tags + UTM' },
               ] : [
@@ -1000,16 +1024,10 @@ export default function TabBA25({
             </div>
           </div>
 
-          {/* Meta Ads spend */}
-          {data.metaSpend !== undefined && (() => {
+          {/* Meta Ads spend (absorvido pelo card de KPIs no topo quando meteórico) */}
+          {tipo !== 'meteórico' && data.metaSpend !== undefined && (() => {
             const brl2 = (v: number) => v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
             const campaigns = data.metaCampaigns ?? []
-
-            // Gasto Captura: campanhas com o prefixo E captura, sem engajamento
-            const pfx = prefix.toLowerCase()
-            const gastoCaptura = campaigns
-              .filter(c => { const n = c.name.toLowerCase(); return n.includes(pfx) && n.includes('captura') && !n.includes('engajamento') })
-              .reduce((s, c) => s + c.spend, 0)
 
             const leadsCaptura = data.byTag.find(t => t.tag === `${prefix}-Captura-Tráfego`)?.countPeriod ?? 0
             const totalLeads = data.totalUnique
@@ -1683,8 +1701,8 @@ export default function TabBA25({
             </AccordionItem>
           </div>
         </>
-
-      )}
+        )
+      })()}
 
       {/* Tabela diagnóstico de emails de compradores */}
       {salesUtmData?.buyerSaleCounts && salesUtmData.buyerSaleCounts.length > 0 && (

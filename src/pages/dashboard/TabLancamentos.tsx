@@ -59,6 +59,7 @@ const PRODUTOS: Array<{ label: string; id: number }> = [
   { label: 'Imersão ENARE', id: 7737553 },
   { label: 'Segurança Clínica por Casos', id: 7812483 },
   { label: 'Low ticket', id: 6766383 },
+  { label: 'Cupom Antecipado BA', id: 6993137 },
 ]
 
 const emptyForm = {
@@ -488,7 +489,7 @@ function VendasProdutoBlock({ token, l }: { token: string; l: Lancamento }) {
 // ─── Detalhe do lançamento (busca resumo de vendas do ingresso p/ o card) ────
 
 function DetalheLancamento({ token, l }: { token: string; l: Lancamento }) {
-  const [vendasResumo, setVendasResumo] = useState<{ total: number; meta: number; diario: { date: string; vendas: number }[] } | null>(null)
+  const [vendasResumo, setVendasResumo] = useState<{ total: number; meta: number; liquido: number; diario: { date: string; vendas: number }[] } | null>(null)
 
   const ingSince = l.captura_inicio ?? l.data_inicio ?? ''
   const ingUntil = l.carrinho_fim ?? ''
@@ -504,26 +505,25 @@ function DetalheLancamento({ token, l }: { token: string; l: Lancamento }) {
         .then(r => r.ok ? r.json() : Promise.reject(new Error(String(r.status))))
         .then(j => {
           const total = j.vendasPorProduto?.[nome]?.vendas ?? 0
+          const liquido = j.vendasPorProduto?.[nome]?.liquido ?? 0
           const diarioObj: Record<string, number> = j.diarioPorProduto?.[nome] ?? {}
           const diario = Object.entries(diarioObj).map(([date, vendas]) => ({ date, vendas: vendas as number })).sort((a, b) => a.date.localeCompare(b.date))
-          setVendasResumo({ total, meta: l.meta_vendas_ingresso, diario })
+          setVendasResumo({ total, meta: l.meta_vendas_ingresso, liquido, diario })
         })
         .catch(() => setVendasResumo(null))
       return
     }
     // Meteórico: mostra vendas do antecipado durante a captação
     if (l.tipo === 'meteórico' && l.produto_antecipado_id != null && antSince && antUntil) {
+      const nome = ID_TO_NOME[l.produto_antecipado_id] ?? String(l.produto_antecipado_id)
       fetch(`/api/lancamento-vendas?since=${antSince}&until=${antUntil}`, { headers: { Authorization: `Bearer ${token}` } })
         .then(r => r.ok ? r.json() : Promise.reject(new Error(String(r.status))))
         .then(j => {
-          // Busca por product_id direto (antecipado pode não ter nome canônico)
-          const allVendas: Record<string, { vendas: number }> = j.vendasPorProduto ?? {}
-          const total = allVendas[String(l.produto_antecipado_id)]?.vendas
-            ?? Object.values(allVendas).reduce((s, v) => s + v.vendas, 0)
-          const diarioAll: Record<string, Record<string, number>> = j.diarioPorProduto ?? {}
-          const diarioObj = diarioAll[String(l.produto_antecipado_id)] ?? {}
+          const total = j.vendasPorProduto?.[nome]?.vendas ?? 0
+          const liquido = j.vendasPorProduto?.[nome]?.liquido ?? 0
+          const diarioObj: Record<string, number> = j.diarioPorProduto?.[nome] ?? {}
           const diario = Object.entries(diarioObj).map(([date, vendas]) => ({ date, vendas: vendas as number })).sort((a, b) => a.date.localeCompare(b.date))
-          setVendasResumo({ total, meta: l.meta_vendas_antecipado, diario })
+          setVendasResumo({ total, meta: l.meta_vendas_antecipado, liquido, diario })
         })
         .catch(() => setVendasResumo(null))
       return
