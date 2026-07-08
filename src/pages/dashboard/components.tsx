@@ -197,13 +197,23 @@ export function CampaignTree({
   const totMetaCpr = totMetaResults > 0 ? totSpend / totMetaResults : 0
   const hasActive = campaign.adsets.some(a => a.adsetStatus === 'ACTIVE')
 
-  const leadsFor = (adsetName: string, adName?: string) => {
+  // leadsByContent é chaveado por linha granular "campanha|||conjunto|||anúncio"
+  // (a query BQ exige utm_content preenchido) — os totais de campanha/conjunto
+  // são a SOMA de todas as chaves com esse prefixo, não uma chave exata vazia.
+  const leadsForAdset = (adsetName: string) => {
     if (!leadsByContent) return null
-    const key = `${campaign.campaignName.toLowerCase().trim()}|||${adsetName.toLowerCase().trim()}|||${(adName ?? '').toLowerCase().trim()}`
+    const prefixKey = `${campaign.campaignName.toLowerCase().trim()}|||${adsetName.toLowerCase().trim()}|||`
+    return Object.entries(leadsByContent)
+      .filter(([k]) => k.startsWith(prefixKey))
+      .reduce((s, [, v]) => s + v, 0)
+  }
+  const leadsForAd = (adsetName: string, adName: string) => {
+    if (!leadsByContent) return null
+    const key = `${campaign.campaignName.toLowerCase().trim()}|||${adsetName.toLowerCase().trim()}|||${adName.toLowerCase().trim()}`
     return leadsByContent[key] ?? 0
   }
   const totLeadsBQ = leadsByContent
-    ? campaign.adsets.reduce((s, a) => s + (leadsFor(a.adsetName) ?? 0), 0)
+    ? campaign.adsets.reduce((s, a) => s + (leadsForAdset(a.adsetName) ?? 0), 0)
     : null
 
   return (
@@ -251,7 +261,7 @@ export function CampaignTree({
             const isPaused = adset.adsetStatus !== 'ACTIVE'
             const adsetOpen = openAdsets.has(adset.adsetId)
             const hasAds = adset.ads.length > 0
-            const adsetLeadsBQ = leadsFor(adset.adsetName)
+            const adsetLeadsBQ = leadsForAdset(adset.adsetName)
 
             return (
               <div key={adset.adsetId} className={isPaused ? 'opacity-40' : ''}>
@@ -307,7 +317,7 @@ export function CampaignTree({
                       const isTop = i === 0 && ad.metaResults > 0
                       const maxRes = adset.ads[0]?.metaResults ?? 1
                       const barPct = maxRes > 0 ? (ad.metaResults / maxRes) * 100 : 0
-                      const adLeadsBQ = leadsFor(adset.adsetName, ad.adName)
+                      const adLeadsBQ = leadsForAd(adset.adsetName, ad.adName)
                       return (
                         <div key={ad.adId} className={`flex items-center gap-3 px-7 py-2.5 ${ad.metaResults === 0 && (adLeadsBQ ?? 0) === 0 ? 'opacity-40' : ''}`}>
                           <span className="w-5 shrink-0 text-sm">
