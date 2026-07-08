@@ -59,7 +59,7 @@ const PRODUTOS: Array<{ label: string; id: number }> = [
   { label: 'Imersão ENARE', id: 7737553 },
   { label: 'Segurança Clínica por Casos', id: 7812483 },
   { label: 'Low ticket', id: 6766383 },
-  { label: 'Cupom Antecipado BA', id: 6993137 },
+  { label: 'Cupom Antecipado BA26', id: 6993137 },
 ]
 
 const emptyForm = {
