@@ -358,7 +358,7 @@ function LancamentoModal({ initial, onClose, onSaved }: {
 
 const ID_TO_NOME: Record<number, string> = Object.fromEntries(PRODUTOS.map(p => [p.id, p.label]))
 
-type VendasMap = Record<string, { vendas: number; liquido: number }>
+type VendasMap = Record<number, { vendas: number; liquido: number }>
 
 function VendasProdutoBlock({ token, l }: { token: string; l: Lancamento }) {
   // Três janelas:
@@ -384,7 +384,7 @@ function VendasProdutoBlock({ token, l }: { token: string; l: Lancamento }) {
       (!since || !until) ? Promise.resolve({})
         : fetch(`/api/lancamento-vendas?since=${since}&until=${until}`, { headers: { Authorization: `Bearer ${token}` } })
             .then(r => r.ok ? r.json() : Promise.reject(new Error(String(r.status))))
-            .then(j => j.vendasPorProduto ?? {})
+            .then(j => j.vendasPorProdutoId ?? {})
             .catch(() => ({}))
     const getGasto = (): Promise<number> =>
       (!ingSince || !ingUntil) ? Promise.resolve(0)
@@ -448,7 +448,7 @@ function VendasProdutoBlock({ token, l }: { token: string; l: Lancamento }) {
           <tbody>
             {linhas.map(r => {
               const nome = ID_TO_NOME[r.id!] ?? `id ${r.id}`
-              const v = r.vendas?.[nome]
+              const v = r.vendas?.[r.id!]
               const qtd = v?.vendas ?? 0
               const pct = r.metaQtd > 0 ? (qtd / r.metaQtd) * 100 : null
               const cpvTotal = r.cpvAplicavel && gastoTotal != null && gastoTotal > 0 && qtd > 0 ? gastoTotal / qtd : null
@@ -500,13 +500,13 @@ function DetalheLancamento({ token, l }: { token: string; l: Lancamento }) {
     // Pago: mostra vendas do ingresso no card do topo
     if (l.tipo === 'pago') {
       if (!ingSince || !ingUntil || l.produto_ingresso_id == null) { setVendasResumo(null); return }
-      const nome = ID_TO_NOME[l.produto_ingresso_id] ?? ''
+      const pid = l.produto_ingresso_id
       fetch(`/api/lancamento-vendas?since=${ingSince}&until=${ingUntil}`, { headers: { Authorization: `Bearer ${token}` } })
         .then(r => r.ok ? r.json() : Promise.reject(new Error(String(r.status))))
         .then(j => {
-          const total = j.vendasPorProduto?.[nome]?.vendas ?? 0
-          const liquido = j.vendasPorProduto?.[nome]?.liquido ?? 0
-          const diarioObj: Record<string, number> = j.diarioPorProduto?.[nome] ?? {}
+          const total = j.vendasPorProdutoId?.[pid]?.vendas ?? 0
+          const liquido = j.vendasPorProdutoId?.[pid]?.liquido ?? 0
+          const diarioObj: Record<string, number> = j.diarioPorProdutoId?.[pid] ?? {}
           const diario = Object.entries(diarioObj).map(([date, vendas]) => ({ date, vendas: vendas as number })).sort((a, b) => a.date.localeCompare(b.date))
           setVendasResumo({ total, meta: l.meta_vendas_ingresso, liquido, diario })
         })
@@ -515,13 +515,13 @@ function DetalheLancamento({ token, l }: { token: string; l: Lancamento }) {
     }
     // Meteórico: mostra vendas do antecipado durante a captação
     if (l.tipo === 'meteórico' && l.produto_antecipado_id != null && antSince && antUntil) {
-      const nome = ID_TO_NOME[l.produto_antecipado_id] ?? String(l.produto_antecipado_id)
+      const pid = l.produto_antecipado_id
       fetch(`/api/lancamento-vendas?since=${antSince}&until=${antUntil}`, { headers: { Authorization: `Bearer ${token}` } })
         .then(r => r.ok ? r.json() : Promise.reject(new Error(String(r.status))))
         .then(j => {
-          const total = j.vendasPorProduto?.[nome]?.vendas ?? 0
-          const liquido = j.vendasPorProduto?.[nome]?.liquido ?? 0
-          const diarioObj: Record<string, number> = j.diarioPorProduto?.[nome] ?? {}
+          const total = j.vendasPorProdutoId?.[pid]?.vendas ?? 0
+          const liquido = j.vendasPorProdutoId?.[pid]?.liquido ?? 0
+          const diarioObj: Record<string, number> = j.diarioPorProdutoId?.[pid] ?? {}
           const diario = Object.entries(diarioObj).map(([date, vendas]) => ({ date, vendas: vendas as number })).sort((a, b) => a.date.localeCompare(b.date))
           setVendasResumo({ total, meta: l.meta_vendas_antecipado, liquido, diario })
         })

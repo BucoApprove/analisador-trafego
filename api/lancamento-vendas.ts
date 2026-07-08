@@ -23,9 +23,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    const { totais, diario } = await fetchVendasPorProdutoRange(since, until)
+    const { totais, totaisPorId, diario, diarioPorId } = await fetchVendasPorProdutoRange(since, until)
     // mantém a chave vendasPorProduto (totais) p/ retrocompat + diário por produto
-    res.json({ since, until, vendasPorProduto: totais, diarioPorProduto: diario })
+    res.json({
+      since, until,
+      vendasPorProduto: totais, diarioPorProduto: diario,
+      vendasPorProdutoId: totaisPorId, diarioPorProdutoId: diarioPorId,
+    })
   } catch (err) {
     console.error('lancamento-vendas error:', err)
     res.status(500).json({ error: 'Erro interno', detail: (err as Error).message })

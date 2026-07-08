@@ -163,14 +163,19 @@ export async function fetchHotmartLiquido(month: string, range?: { since: string
  * "YYYY-MM-DD"). Conta TODAS as vendas por product_id — independente de lead.
  * Usado pelo detalhe do lançamento (vendas reais vs meta, incl. compra direta).
  *
- * Retorna mapa { nomeCanonico → { vendas, liquido } }.
+ * Retorna mapa { nomeCanonico → { vendas, liquido } } e, em paralelo, o mesmo
+ * agregado por product_id bruto (totaisPorId) — usar por id evita qualquer
+ * mismatch de string entre o nome canônico cadastrado e o nome usado no
+ * frontend para buscar no mapa.
  */
 export async function fetchVendasPorProdutoRange(
   since: string,
   until: string,
 ): Promise<{
   totais: Record<string, { vendas: number; liquido: number }>
+  totaisPorId: Record<number, { vendas: number; liquido: number }>
   diario: Record<string, Record<string, number>>  // nome → { 'YYYY-MM-DD': vendas }
+  diarioPorId: Record<number, Record<string, number>>  // product_id → { 'YYYY-MM-DD': vendas }
 }> {
   const startMs = new Date(`${since}T00:00:00`).getTime()
   const endMs = new Date(`${until}T23:59:59`).getTime()
@@ -193,23 +198,32 @@ export async function fetchVendasPorProdutoRange(
   ])
   const seen = new Set<string>()
   const totais: Record<string, { vendas: number; liquido: number }> = {}
+  const totaisPorId: Record<number, { vendas: number; liquido: number }> = {}
   const diario: Record<string, Record<string, number>> = {}
+  const diarioPorId: Record<number, Record<string, number>> = {}
   for (const it of [...appr, ...compl]) {
     const tx = it.purchase?.transaction ?? it.transaction ?? ''
     if (tx && seen.has(tx)) continue
     if (tx) seen.add(tx)
     if ((it.purchase?.price?.currency_code ?? 'BRL') !== 'BRL') continue
-    const canon = await classifyProduto(it.product?.id ?? 0, it.purchase?.offer?.code)
+    const pid = it.product?.id ?? 0
+    const liquidoVenda = producerByTx.get(tx) ?? 0
+    const canon = await classifyProduto(pid, it.purchase?.offer?.code)
     const row = totais[canon.nome] ?? { vendas: 0, liquido: 0 }
-    row.vendas++; row.liquido += producerByTx.get(tx) ?? 0
+    row.vendas++; row.liquido += liquidoVenda
     totais[canon.nome] = row
+    const rowId = totaisPorId[pid] ?? { vendas: 0, liquido: 0 }
+    rowId.vendas++; rowId.liquido += liquidoVenda
+    totaisPorId[pid] = rowId
     // quebra diária pela data da compra (order_date; fallback approved_date)
     const ts = it.purchase?.order_date ?? it.purchase?.approved_date
     if (ts) {
       const dia = new Date(ts).toISOString().slice(0, 10)
       ;(diario[canon.nome] ??= {})[dia] = (diario[canon.nome][dia] ?? 0) + 1
+      ;(diarioPorId[pid] ??= {})[dia] = (diarioPorId[pid][dia] ?? 0) + 1
     }
   }
   for (const k of Object.keys(totais)) totais[k].liquido = round(totais[k].liquido)
-  return { totais, diario }
+  for (const k of Object.keys(totaisPorId)) totaisPorId[Number(k)].liquido = round(totaisPorId[Number(k)].liquido)
+  return { totais, totaisPorId, diario, diarioPorId }
 }
