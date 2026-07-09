@@ -189,81 +189,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     out.buco_por_funil = { total_deals: allDeals.filter(d => origins.get(d.origin_id)?.group.name === 'Buco Approve').length, por_funil: porFunil }
   } catch (e) { out.buco_por_funil_error = (e as Error).message }
 
-  // 10. Probe de endpoints de "atividades" (follow-ups) — nunca usado no projeto.
-  // Testa variações plausíveis de path + filtros de data, e também expand/nested
-  // em /v1/deals, já que algumas APIs de CRM só expõem atividades aninhadas no deal.
-  const activityEndpoints = [
-    '/v1/activities',
-    '/v1/tasks',
-    '/v1/deals/activities',
-    '/v1/activity',
-    '/v1/timeline',
-    '/v1/events',
-  ]
-  out.activities_probe = {}
-  for (const path of activityEndpoints) {
-    try {
-      const u = new URL(`${BASE}${path}`)
-      u.searchParams.set('limit', '5')
-      u.searchParams.set('page', '1')
-      const r = await fetch(u.toString(), { headers })
-      ;(out.activities_probe as Record<string, unknown>)[path] = {
-        status: r.status,
-        body: r.status < 400 ? await r.json() : (await r.text()).slice(0, 200),
-      }
-    } catch (e) {
-      ;(out.activities_probe as Record<string, unknown>)[path] = { error: (e as Error).message }
-    }
-  }
-
-  // 11. Testa se /v1/deals aceita expand=activities (atividades aninhadas no deal)
+  // 10. Endpoint real (documentado): GET /v2/activities — não /v1. Testa sem
+  // filtro (ver shape bruto) e com filtro text=follow + date_type=due no dia.
   try {
-    const u = new URL(`${BASE}/v1/deals`)
-    u.searchParams.set('limit', '3')
+    const u = new URL(`${BASE}/v2/activities`)
+    u.searchParams.set('limit', '10')
     u.searchParams.set('page', '1')
-    u.searchParams.set('created_at_start', date)
-    u.searchParams.set('created_at_end', `${date}T23:59:59`)
-    u.searchParams.set('expand', 'activities')
     const r = await fetch(u.toString(), { headers })
-    out.deals_expand_activities = r.ok ? await r.json() : { status: r.status, body: (await r.text()).slice(0, 200) }
-  } catch (e) { out.deals_expand_activities_error = (e as Error).message }
+    out.v2_activities_raw = { status: r.status, body: r.status < 400 ? await r.json() : (await r.text()).slice(0, 400) }
+  } catch (e) { out.v2_activities_raw_error = (e as Error).message }
 
-  // 12. Se algum deal tiver um id, tenta buscar atividades filtrando por deal_id
   try {
-    const dealsOut = out.deals_raw_sample as { data?: Array<{ id: string }> } | undefined
-    const firstDealId = dealsOut?.data?.[0]?.id
-    if (firstDealId) {
-      const results: Record<string, unknown> = {}
-      for (const path of ['/v1/activities', '/v1/tasks']) {
-        const u = new URL(`${BASE}${path}`)
-        u.searchParams.set('deal_id', firstDealId)
-        u.searchParams.set('limit', '5')
-        const r = await fetch(u.toString(), { headers })
-        results[path] = { status: r.status, body: r.status < 400 ? await r.json() : (await r.text()).slice(0, 200) }
-      }
-      out.activities_by_deal_id_probe = { deal_id: firstDealId, results }
-    }
-  } catch (e) { out.activities_by_deal_id_error = (e as Error).message }
-
-  // 13. /v1/deals/activities deu 400 "Param ID must be a valid UUID" — sugere
-  // rota aninhada /v1/deals/{id}/activities. Testa essa e variações (tasks,
-  // timeline, notes, history) usando o primeiro deal_id real.
-  try {
-    const dealsOut = out.deals_raw_sample as { data?: Array<{ id: string }> } | undefined
-    const firstDealId = dealsOut?.data?.[0]?.id
-    if (firstDealId) {
-      const nestedPaths = ['activities', 'tasks', 'timeline', 'notes', 'history', 'events']
-      const results: Record<string, unknown> = {}
-      for (const sub of nestedPaths) {
-        const u = new URL(`${BASE}/v1/deals/${firstDealId}/${sub}`)
-        u.searchParams.set('limit', '20')
-        u.searchParams.set('page', '1')
-        const r = await fetch(u.toString(), { headers })
-        results[sub] = { status: r.status, body: r.status < 400 ? await r.json() : (await r.text()).slice(0, 300) }
-      }
-      out.deals_nested_probe = { deal_id: firstDealId, results }
-    }
-  } catch (e) { out.deals_nested_probe_error = (e as Error).message }
+    const u = new URL(`${BASE}/v2/activities`)
+    u.searchParams.set('text', 'follow')
+    u.searchParams.set('date_type', 'due')
+    u.searchParams.set('date_start', `${date}T00:00:00`)
+    u.searchParams.set('date_end', `${date}T23:59:59`)
+    u.searchParams.set('limit', '20')
+    u.searchParams.set('page', '1')
+    const r = await fetch(u.toString(), { headers })
+    out.v2_activities_follow_filtered = { status: r.status, body: r.status < 400 ? await r.json() : (await r.text()).slice(0, 400) }
+  } catch (e) { out.v2_activities_follow_filtered_error = (e as Error).message }
 
   return res.json(out)
 }
