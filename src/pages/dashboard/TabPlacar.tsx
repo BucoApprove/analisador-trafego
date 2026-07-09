@@ -579,13 +579,38 @@ function AcoesModal({ acoes, produtos, onClose }: {
   produtos: string[]
   onClose: () => void
 }) {
-  const hoje = new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' })
-  const com = produtos.filter(p => acoes[p]?.trim())
+  const hojeIso = todayIso()
+  const [selectedDate, setSelectedDate] = useState(hojeIso)
+  const [historicoAcoes, setHistoricoAcoes] = useState<Record<string, string> | null>(null)
+  const [loading, setLoading] = useState(false)
+
+  // Data selecionada = hoje → usa o mapa já carregado (evita query redundante).
+  // Outra data → busca sob demanda, só leitura (não edita dias passados aqui).
+  useEffect(() => {
+    function load() {
+      if (selectedDate === hojeIso) { setHistoricoAcoes(null); return }
+      setLoading(true)
+      Promise.resolve(
+        supabase.from('placar_acoes').select('produto, acao').eq('data', selectedDate)
+      )
+        .then(({ data: rows }) => {
+          const map: Record<string, string> = {}
+          for (const r of rows ?? []) map[r.produto] = r.acao
+          setHistoricoAcoes(map)
+        })
+        .finally(() => setLoading(false))
+    }
+    load()
+  }, [selectedDate, hojeIso])
+
+  const acoesExibidas = selectedDate === hojeIso ? acoes : (historicoAcoes ?? {})
+  const dataLabel = new Date(selectedDate + 'T12:00:00').toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' })
+  const com = produtos.filter(p => acoesExibidas[p]?.trim())
 
   function copiar() {
-    const linhas = [`📋 Ações do Placar — ${hoje}`, '']
+    const linhas = [`📋 Ações do Placar — ${dataLabel}`, '']
     for (const p of com) {
-      linhas.push(`• *${p}*: ${acoes[p].trim()}`)
+      linhas.push(`• *${p}*: ${acoesExibidas[p].trim()}`)
     }
     navigator.clipboard.writeText(linhas.join('\n'))
   }
@@ -594,12 +619,20 @@ function AcoesModal({ acoes, produtos, onClose }: {
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={onClose}>
       <div className="absolute inset-0 bg-black/40" />
       <div className="relative z-10 bg-white dark:bg-zinc-900 rounded-xl shadow-2xl w-full max-w-lg border flex flex-col max-h-[85vh]" onClick={e => e.stopPropagation()}>
-        <div className="flex items-center justify-between px-5 py-4 border-b">
-          <div>
+        <div className="flex items-center justify-between px-5 py-4 border-b gap-3">
+          <div className="min-w-0">
             <h3 className="font-semibold">Ações do dia</h3>
-            <p className="text-xs text-muted-foreground capitalize">{hoje}</p>
+            <p className="text-xs text-muted-foreground capitalize truncate">{dataLabel}</p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <input
+              type="date"
+              value={selectedDate}
+              max={hojeIso}
+              onChange={e => setSelectedDate(e.target.value)}
+              className="text-xs border rounded px-2 py-1.5 bg-background"
+              title="Ver ações de outro dia (somente consulta)"
+            />
             <button onClick={copiar} className="text-xs px-3 py-1.5 rounded border hover:bg-muted transition-colors">
               Copiar texto
             </button>
@@ -607,12 +640,16 @@ function AcoesModal({ acoes, produtos, onClose }: {
           </div>
         </div>
         <div className="overflow-y-auto flex-1 p-4 space-y-3">
-          {com.length === 0 ? (
-            <p className="text-sm text-muted-foreground text-center py-6">Nenhuma ação registrada hoje.</p>
+          {loading ? (
+            <div className="flex justify-center py-8 text-muted-foreground"><Loader2 className="h-5 w-5 animate-spin" /></div>
+          ) : com.length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-6">
+              {selectedDate === hojeIso ? 'Nenhuma ação registrada hoje.' : 'Nenhuma ação registrada nesse dia.'}
+            </p>
           ) : com.map(p => (
             <div key={p} className="rounded-lg border p-3">
               <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1">{p}</p>
-              <p className="text-sm whitespace-pre-wrap">{acoes[p].trim()}</p>
+              <p className="text-sm whitespace-pre-wrap">{acoesExibidas[p].trim()}</p>
             </div>
           ))}
         </div>
