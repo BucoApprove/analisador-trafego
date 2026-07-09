@@ -574,43 +574,102 @@ function AcaoCell({ produto, acoes, onChange }: {
   )
 }
 
-function AcoesModal({ acoes, produtos, onClose }: {
-  acoes: Record<string, string>
+interface AcaoDetalhe { acao: string; feita: boolean; retorno: string }
+
+function RetornoCell({ produto, data, retorno, onSaved }: {
+  produto: string
+  data: string
+  retorno: string
+  onSaved: (produto: string, retorno: string) => void
+}) {
+  const [draft, setDraft] = useState(retorno)
+  const [saving, setSaving] = useState(false)
+  const debounce = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => { setDraft(retorno) }, [retorno])
+
+  async function persist(text: string) {
+    setSaving(true)
+    await supabase.from('placar_acoes').upsert(
+      { data, produto, retorno: text, updated_at: new Date().toISOString() },
+      { onConflict: 'data,produto' }
+    )
+    setSaving(false)
+    onSaved(produto, text)
+  }
+
+  function handleChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
+    const text = e.target.value
+    setDraft(text)
+    if (debounce.current) clearTimeout(debounce.current)
+    debounce.current = setTimeout(() => persist(text), 800)
+  }
+
+  return (
+    <div className="relative mt-2">
+      <textarea
+        rows={2}
+        value={draft}
+        onChange={handleChange}
+        placeholder="comentário / retorno da revisão…"
+        className="w-full resize-none rounded border px-2 py-1.5 text-xs bg-background leading-snug placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-primary/40"
+      />
+      {saving && <Loader2 className="absolute right-1.5 top-1.5 h-3 w-3 animate-spin text-muted-foreground/60" />}
+    </div>
+  )
+}
+
+function AcoesModal({ produtos, onClose }: {
   produtos: string[]
   onClose: () => void
 }) {
   const hojeIso = todayIso()
   const [selectedDate, setSelectedDate] = useState(hojeIso)
-  const [historicoAcoes, setHistoricoAcoes] = useState<Record<string, string> | null>(null)
+  const [detalhes, setDetalhes] = useState<Record<string, AcaoDetalhe>>({})
   const [loading, setLoading] = useState(false)
 
-  // Data selecionada = hoje → usa o mapa já carregado (evita query redundante).
-  // Outra data → busca sob demanda, só leitura (não edita dias passados aqui).
   useEffect(() => {
     function load() {
-      if (selectedDate === hojeIso) { setHistoricoAcoes(null); return }
       setLoading(true)
       Promise.resolve(
-        supabase.from('placar_acoes').select('produto, acao').eq('data', selectedDate)
+        supabase.from('placar_acoes').select('produto, acao, feita, retorno').eq('data', selectedDate)
       )
         .then(({ data: rows }) => {
-          const map: Record<string, string> = {}
-          for (const r of rows ?? []) map[r.produto] = r.acao
-          setHistoricoAcoes(map)
+          const map: Record<string, AcaoDetalhe> = {}
+          for (const r of (rows ?? []) as Array<{ produto: string; acao: string; feita: boolean; retorno: string }>) {
+            map[r.produto] = { acao: r.acao, feita: r.feita, retorno: r.retorno }
+          }
+          setDetalhes(map)
         })
         .finally(() => setLoading(false))
     }
     load()
-  }, [selectedDate, hojeIso])
+  }, [selectedDate])
 
-  const acoesExibidas = selectedDate === hojeIso ? acoes : (historicoAcoes ?? {})
   const dataLabel = new Date(selectedDate + 'T12:00:00').toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' })
-  const com = produtos.filter(p => acoesExibidas[p]?.trim())
+  const com = produtos.filter(p => detalhes[p]?.acao?.trim())
+
+  function toggleFeita(produto: string) {
+    const atual = detalhes[produto]
+    if (!atual) return
+    const novoValor = !atual.feita
+    setDetalhes(prev => ({ ...prev, [produto]: { ...prev[produto], feita: novoValor } }))
+    supabase.from('placar_acoes').upsert(
+      { data: selectedDate, produto, feita: novoValor, updated_at: new Date().toISOString() },
+      { onConflict: 'data,produto' }
+    )
+  }
+
+  function onRetornoSaved(produto: string, retorno: string) {
+    setDetalhes(prev => ({ ...prev, [produto]: { ...prev[produto], retorno } }))
+  }
 
   function copiar() {
     const linhas = [`📋 Ações do Placar — ${dataLabel}`, '']
     for (const p of com) {
-      linhas.push(`• *${p}*: ${acoesExibidas[p].trim()}`)
+      const d = detalhes[p]
+      linhas.push(`• *${p}* ${d.feita ? '✅' : '⬜'}: ${d.acao.trim()}`)
+      if (d.retorno?.trim()) linhas.push(`   ↳ ${d.retorno.trim()}`)
     }
     navigator.clipboard.writeText(linhas.join('\n'))
   }
@@ -631,7 +690,7 @@ function AcoesModal({ acoes, produtos, onClose }: {
               max={hojeIso}
               onChange={e => setSelectedDate(e.target.value)}
               className="text-xs border rounded px-2 py-1.5 bg-background"
-              title="Ver ações de outro dia (somente consulta)"
+              title="Ver ações de outro dia"
             />
             <button onClick={copiar} className="text-xs px-3 py-1.5 rounded border hover:bg-muted transition-colors">
               Copiar texto
@@ -646,12 +705,28 @@ function AcoesModal({ acoes, produtos, onClose }: {
             <p className="text-sm text-muted-foreground text-center py-6">
               {selectedDate === hojeIso ? 'Nenhuma ação registrada hoje.' : 'Nenhuma ação registrada nesse dia.'}
             </p>
-          ) : com.map(p => (
-            <div key={p} className="rounded-lg border p-3">
-              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1">{p}</p>
-              <p className="text-sm whitespace-pre-wrap">{acoesExibidas[p].trim()}</p>
-            </div>
-          ))}
+          ) : com.map(p => {
+            const d = detalhes[p]
+            return (
+              <div key={p} className={`rounded-lg border p-3 ${d.feita ? 'bg-green-50/50 dark:bg-green-950/10 border-green-200 dark:border-green-900' : ''}`}>
+                <div className="flex items-start justify-between gap-2">
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1">{p}</p>
+                  <button
+                    onClick={() => toggleFeita(p)}
+                    className={`flex-shrink-0 flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full border transition-colors ${
+                      d.feita
+                        ? 'bg-green-100 text-green-700 border-green-300 dark:bg-green-900/30 dark:text-green-400 dark:border-green-800'
+                        : 'bg-muted text-muted-foreground border-border hover:bg-muted/70'
+                    }`}
+                  >
+                    {d.feita ? '✓ Feita' : 'Não feita'}
+                  </button>
+                </div>
+                <p className="text-sm whitespace-pre-wrap">{d.acao.trim()}</p>
+                <RetornoCell produto={p} data={selectedDate} retorno={d.retorno} onSaved={onRetornoSaved} />
+              </div>
+            )
+          })}
         </div>
       </div>
     </div>
@@ -1325,7 +1400,7 @@ export default function TabPlacar({ token, enabled }: Props) {
 
       {showMap && <CampanhaMapModal token={token} onClose={() => setShowMap(false)} onChanged={() => load(month, rangeSince, rangeUntil)} />}
       {showClint && <ClintTagsModal token={token} onClose={() => setShowClint(false)} onChanged={() => loadLeads(month, rangeSince, rangeUntil)} />}
-      {showAcoes && <AcoesModal acoes={acoes} produtos={produtos.map(p => p.nome)} onClose={() => setShowAcoes(false)} />}
+      {showAcoes && <AcoesModal produtos={produtos.map(p => p.nome)} onClose={() => setShowAcoes(false)} />}
 
       <div className="rounded-md bg-blue-50 border border-blue-200 px-4 py-2 text-xs text-blue-800">
         ⚙️ Aba em construção. O gasto de cada campanha é atribuído ao produto pela aba <strong>Produtos/Campanhas</strong> (prefixo → produto). Campanha sem regra cai em <strong>Buco Approve</strong>.

@@ -170,6 +170,11 @@ create table if not exists placar_acoes (
 );
 alter table placar_acoes disable row level security;
 
+-- Revisão da ação: feita/não feita + comentário de retorno, preenchidos
+-- posteriormente (ex: no dia seguinte, revisando o que foi feito no dia anterior).
+alter table placar_acoes add column if not exists feita boolean not null default false;
+alter table placar_acoes add column if not exists retorno text not null default '';
+
 -- ─────────────────────────────────────────────────────────────────────────────
 
 -- Agrupamento manual de produtos Hotmart → produto-meta (definido pela UI).
