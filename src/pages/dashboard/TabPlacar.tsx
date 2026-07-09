@@ -1375,6 +1375,19 @@ export default function TabPlacar({ token, enabled }: Props) {
             <input type="date" value={rangeSince} onChange={e => setRangeSince(e.target.value)} className="text-sm border rounded px-2 py-1.5 bg-background" />
             <span>até</span>
             <input type="date" value={rangeUntil} onChange={e => setRangeUntil(e.target.value)} className="text-sm border rounded px-2 py-1.5 bg-background" />
+            <button
+              onClick={() => {
+                const ontem = new Date()
+                ontem.setDate(ontem.getDate() - 1)
+                const iso = ontem.toISOString().slice(0, 10)
+                setRangeSince(iso)
+                setRangeUntil(iso)
+                setMonth(iso.slice(0, 7))
+              }}
+              className="rounded border px-2 py-1.5 bg-background hover:bg-muted transition-colors"
+            >
+              Ontem
+            </button>
             {(rangeSince || rangeUntil) && (
               <button onClick={() => { setRangeSince(''); setRangeUntil('') }} className="underline hover:no-underline">limpar</button>
             )}
