@@ -245,5 +245,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
   } catch (e) { out.activities_by_deal_id_error = (e as Error).message }
 
+  // 13. /v1/deals/activities deu 400 "Param ID must be a valid UUID" — sugere
+  // rota aninhada /v1/deals/{id}/activities. Testa essa e variações (tasks,
+  // timeline, notes, history) usando o primeiro deal_id real.
+  try {
+    const dealsOut = out.deals_raw_sample as { data?: Array<{ id: string }> } | undefined
+    const firstDealId = dealsOut?.data?.[0]?.id
+    if (firstDealId) {
+      const nestedPaths = ['activities', 'tasks', 'timeline', 'notes', 'history', 'events']
+      const results: Record<string, unknown> = {}
+      for (const sub of nestedPaths) {
+        const u = new URL(`${BASE}/v1/deals/${firstDealId}/${sub}`)
+        u.searchParams.set('limit', '20')
+        u.searchParams.set('page', '1')
+        const r = await fetch(u.toString(), { headers })
+        results[sub] = { status: r.status, body: r.status < 400 ? await r.json() : (await r.text()).slice(0, 300) }
+      }
+      out.deals_nested_probe = { deal_id: firstDealId, results }
+    }
+  } catch (e) { out.deals_nested_probe_error = (e as Error).message }
+
   return res.json(out)
 }
