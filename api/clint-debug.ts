@@ -189,27 +189,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     out.buco_por_funil = { total_deals: allDeals.filter(d => origins.get(d.origin_id)?.group.name === 'Buco Approve').length, por_funil: porFunil }
   } catch (e) { out.buco_por_funil_error = (e as Error).message }
 
-  // 10. Endpoint real (documentado): GET /v2/activities — não /v1. Testa sem
-  // filtro (ver shape bruto) e com filtro text=follow + date_type=due no dia.
-  try {
-    const u = new URL(`${BASE}/v2/activities`)
-    u.searchParams.set('limit', '10')
-    u.searchParams.set('page', '1')
-    const r = await fetch(u.toString(), { headers })
-    out.v2_activities_raw = { status: r.status, body: r.status < 400 ? await r.json() : (await r.text()).slice(0, 400) }
-  } catch (e) { out.v2_activities_raw_error = (e as Error).message }
-
-  try {
-    const u = new URL(`${BASE}/v2/activities`)
-    u.searchParams.set('text', 'follow')
-    u.searchParams.set('date_type', 'due')
-    u.searchParams.set('date_start', `${date}T00:00:00`)
-    u.searchParams.set('date_end', `${date}T23:59:59`)
-    u.searchParams.set('limit', '20')
-    u.searchParams.set('page', '1')
-    const r = await fetch(u.toString(), { headers })
-    out.v2_activities_follow_filtered = { status: r.status, body: r.status < 400 ? await r.json() : (await r.text()).slice(0, 400) }
-  } catch (e) { out.v2_activities_follow_filtered_error = (e as Error).message }
+  // Nota: GET /v2/activities existe e está documentado (clint-api.readme.io),
+  // mas retorna 403 "This feature is not available for your account" — a API
+  // pública de atividades da Clint é exclusiva do plano Elite. Sem upgrade de
+  // plano, não dá pra buscar follow-ups via API.
 
   return res.json(out)
 }
