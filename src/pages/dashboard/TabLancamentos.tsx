@@ -32,6 +32,9 @@ function goalsFromLancamento(l: Lancamento): GoalsData {
       lembrete: 'Lembrete',
       remarketing: 'Remarketing',
     },
+    // Mesma regra de "produto que o orçamento compra" usada em VendasProdutoBlock:
+    // pago → ingresso; interno/meteórico → produto principal.
+    metaVendasPrincipal: l.tipo === 'pago' ? l.meta_vendas_ingresso : l.meta_vendas_principal,
   }
 }
 

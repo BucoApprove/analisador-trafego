@@ -1260,12 +1260,94 @@ export default function TabBA25({
             const finalDate = parseFinalDate(goals.finalCaptacao)
             const diasRestantes = Math.max(1, Math.ceil((finalDate.getTime() - today.getTime()) / 86400000) + 1)
 
+            // Projeção: só faz sentido durante a captação (ainda restam dias e a meta não foi decidida)
+            const inicioDate = parseFinalDate(goals.inicioCaptacao)
+            const diasDecorridos = Math.max(1, Math.round((today.getTime() - inicioDate.getTime()) / 86400000) + 1)
+
+            const gastoAtual = data!.metaSpend ?? 0
+            const orcamentoRestante = Math.max(goals.orcamentoTotal - gastoAtual, 0)
+            const cplAtual = data!.cpl ?? (leadsTrafico > 0 && gastoAtual > 0 ? gastoAtual / leadsTrafico : null)
+            const gastoNecessarioDia = orcamentoRestante / diasRestantes
+
+            // Pago: leads que o ritmo de gasto atual (orçamento restante ÷ dias) deve gerar, ao CPL atual
+            const leadsPagoFaltam = Math.max(goals.metaLeadsTrafico - leadsTrafico, 0)
+            const leadsPagoProjetado = cplAtual ? leadsTrafico + (orcamentoRestante / cplAtual) : null
+            const cplNecessario = leadsPagoFaltam > 0 ? orcamentoRestante / leadsPagoFaltam : null
+
+            // Orgânico: sem orçamento associado — projeta pelo ritmo médio observado desde o início
+            const ritmoOrganicoDia = leadsOrganico / diasDecorridos
+            const leadsOrganicoProjetado = leadsOrganico + ritmoOrganicoDia * (diasRestantes - 1)
+
+            // Vendas: aplica a proporção meta_vendas / meta_leads_trafico do próprio lançamento
+            // sobre o total de leads projetado (pago + orgânico ao ritmo atual).
+            const metaVendas = goals.metaVendasPrincipal ?? 0
+            const taxaConversaoMeta = goals.metaLeadsTrafico > 0 ? metaVendas / goals.metaLeadsTrafico : 0
+            const leadsTotalProjetado = (leadsPagoProjetado ?? leadsTrafico) + leadsOrganicoProjetado
+            const vendasProjetadas = leadsTotalProjetado * taxaConversaoMeta
+
             return (
               <AccordionItem title="Metas × Realizado" defaultOpen>
               <div className="space-y-4 p-4">
                 <p className="text-xs text-muted-foreground">
                   Planilha de metas: {goals.inicioCaptacao} → {goals.finalCaptacao} · {diasRestantes} dia(s) restante(s)
                 </p>
+
+                {/* Projeção: quanto falta gastar/captar por dia para bater a meta, e onde isso deve chegar */}
+                <div className="rounded-lg border bg-card overflow-hidden">
+                  <div className="px-4 py-2 border-b bg-muted/40">
+                    <p className="text-xs font-semibold">Projeção até o fim da captação</p>
+                  </div>
+                  <div className="p-4 grid grid-cols-2 lg:grid-cols-4 gap-4">
+                    <div>
+                      <p className="text-[11px] text-muted-foreground">Orçamento restante</p>
+                      <p className="text-lg font-bold tabular-nums">R$ {brl(orcamentoRestante)}</p>
+                      <p className="text-[10px] text-muted-foreground">R$ {brl(gastoNecessarioDia)}/dia por {diasRestantes} dia(s)</p>
+                    </div>
+                    <div>
+                      <p className="text-[11px] text-muted-foreground">CPL atual (pago)</p>
+                      <p className="text-lg font-bold tabular-nums">{cplAtual != null ? `R$ ${brl(cplAtual)}` : '—'}</p>
+                      <p className="text-[10px] text-muted-foreground">
+                        {cplNecessario != null ? `precisa de R$ ${brl(cplNecessario)} p/ bater a meta` : 'meta de leads pago já atingida'}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-[11px] text-muted-foreground">Leads pago projetado</p>
+                      <p className="text-lg font-bold tabular-nums" style={{ color: CHART_COLORS[1] }}>
+                        {leadsPagoProjetado != null ? Math.round(leadsPagoProjetado).toLocaleString('pt-BR') : '—'}
+                      </p>
+                      <p className="text-[10px] flex items-center gap-1">
+                        <span className="text-muted-foreground">meta {goals.metaLeadsTrafico.toLocaleString('pt-BR')}</span>
+                        {leadsPagoProjetado != null && (
+                          <StatusBadge value={leadsPagoProjetado} max={goals.metaLeadsTrafico} />
+                        )}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-[11px] text-muted-foreground">Leads orgânico projetado</p>
+                      <p className="text-lg font-bold tabular-nums" style={{ color: CHART_COLORS[2] }}>
+                        {Math.round(leadsOrganicoProjetado).toLocaleString('pt-BR')}
+                      </p>
+                      <p className="text-[10px] flex items-center gap-1">
+                        <span className="text-muted-foreground">meta {goals.metaLeadsOrganico.toLocaleString('pt-BR')} · ritmo {ritmoOrganicoDia.toFixed(1)}/dia</span>
+                        <StatusBadge value={leadsOrganicoProjetado} max={goals.metaLeadsOrganico} />
+                      </p>
+                    </div>
+                    {metaVendas > 0 && (
+                      <div className="col-span-2 lg:col-span-4 pt-3 border-t">
+                        <p className="text-[11px] text-muted-foreground">Vendas esperadas (proporcional aos leads projetados, na conversão da meta)</p>
+                        <p className="flex items-center gap-2">
+                          <span className="text-lg font-bold tabular-nums" style={{ color: CHART_COLORS[0] }}>
+                            {vendasProjetadas.toFixed(1)}
+                          </span>
+                          <span className="text-xs text-muted-foreground">
+                            de {metaVendas.toLocaleString('pt-BR')} vendas-meta · conversão-alvo {(taxaConversaoMeta * 100).toFixed(1)}% · {leadsTotalProjetado.toFixed(0)} leads projetados
+                          </span>
+                          <StatusBadge value={vendasProjetadas} max={metaVendas} />
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </div>
 
                 {/* Leads: metas gerais — ocultas no lançamento pago */}
                 {tipo !== 'pago' && tipo !== 'meteórico' && (

@@ -224,6 +224,9 @@ export interface GoalsData {
     lembrete: string
     remarketing: string
   }
+  // Meta de vendas do produto "principal" comprado com o orçamento do lançamento
+  // (ingresso no tipo pago; produto principal no interno/meteórico). Usada na projeção.
+  metaVendasPrincipal?: number
 }
 
 // ─── Atribuição de UTMs por vendas ───────────────────────────────────────────
