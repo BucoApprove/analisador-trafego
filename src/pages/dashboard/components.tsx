@@ -172,33 +172,35 @@ export function AdThumbTooltip({
   const canPreview = !!(resolvedAdId && token)
 
   return (
-    <span
-      className={className ?? 'truncate block max-w-[160px]'}
-      title={cacheKey ? undefined : label}
-      onMouseEnter={e => { setPos({ top: e.currentTarget.getBoundingClientRect().bottom + 4, left: e.currentTarget.getBoundingClientRect().left }); loadThumb() }}
-      onMouseLeave={() => setPos(null)}
-    >
-      {label}
-      {pos && cacheKey && (
-        <div className="fixed z-50 rounded-md border bg-popover shadow-lg p-2 w-64" style={{ top: pos.top, left: pos.left }}>
-          {thumb === undefined ? (
-            <div className="flex items-center justify-center h-40 text-muted-foreground"><Loader2 className="h-5 w-5 animate-spin" /></div>
-          ) : thumb ? (
-            <img src={thumb} alt={label} className="w-full h-auto rounded" />
-          ) : (
-            <p className="text-xs text-muted-foreground text-center py-10">Sem thumbnail</p>
-          )}
-          <p className="text-xs text-center text-muted-foreground mt-1.5 truncate">{label}</p>
-          {canPreview && (
-            <button
-              className="mt-1.5 w-full flex items-center justify-center gap-1.5 rounded-md border bg-background hover:bg-muted transition-colors py-1.5 text-xs font-medium"
-              onMouseDown={e => { e.preventDefault(); e.stopPropagation(); setPreviewOpen(true) }}
-            >
-              <ExternalLink className="h-3 w-3" />
-              Ver prévia do anúncio
-            </button>
-          )}
-        </div>
+    <span className="inline-flex items-center gap-1 max-w-full">
+      <span
+        className={className ?? 'truncate block max-w-[160px]'}
+        title={cacheKey ? undefined : label}
+        onMouseEnter={e => { setPos({ top: e.currentTarget.getBoundingClientRect().bottom + 4, left: e.currentTarget.getBoundingClientRect().left }); loadThumb() }}
+        onMouseLeave={() => setPos(null)}
+      >
+        {label}
+        {pos && cacheKey && (
+          <div className="fixed z-50 rounded-md border bg-popover shadow-lg p-2 w-64" style={{ top: pos.top, left: pos.left }}>
+            {thumb === undefined ? (
+              <div className="flex items-center justify-center h-40 text-muted-foreground"><Loader2 className="h-5 w-5 animate-spin" /></div>
+            ) : thumb ? (
+              <img src={thumb} alt={label} className="w-full h-auto rounded" />
+            ) : (
+              <p className="text-xs text-muted-foreground text-center py-10">Sem thumbnail</p>
+            )}
+            <p className="text-xs text-center text-muted-foreground mt-1.5 truncate">{label}</p>
+          </div>
+        )}
+      </span>
+      {canPreview && (
+        <button
+          className="shrink-0 rounded p-0.5 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+          title="Ver prévia do anúncio"
+          onClick={() => setPreviewOpen(true)}
+        >
+          <ExternalLink className="h-3 w-3" />
+        </button>
       )}
       {previewOpen && resolvedAdId && token && (
         <AdPreviewModal adId={resolvedAdId} adName={label} token={token} onClose={() => setPreviewOpen(false)} />
