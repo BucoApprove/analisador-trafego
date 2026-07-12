@@ -6,6 +6,12 @@
  * mas acessível fora dele (não exige login/permissão na conta de anúncios).
  * Retorna um <iframe> pronto (campo `body` da resposta da Graph API).
  *
+ * Também resolve o link real do post (o mesmo que "Ver post" > "Post do
+ * Instagram/Facebook com comentários" no Business Manager): todo anúncio
+ * veiculado tem um post por trás (effective_object_story_id), gerado
+ * automaticamente pelo Meta mesmo quando não é um post orgânico publicado
+ * manualmente — por isso o link existe pra praticamente qualquer anúncio.
+ *
  * Cache de 1h — criativos raramente mudam.
  */
 import type { VercelRequest, VercelResponse } from '@vercel/node'
@@ -36,22 +42,41 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Cache-Control', 's-maxage=3600, stale-while-revalidate=600')
 
   try {
-    const url = new URL(`${META_BASE}/${adId}/previews`)
-    url.searchParams.set('ad_format',    format)
-    url.searchParams.set('access_token', accessToken)
+    const previewUrl = new URL(`${META_BASE}/${adId}/previews`)
+    previewUrl.searchParams.set('ad_format',    format)
+    previewUrl.searchParams.set('access_token', accessToken)
 
-    const metaRes = await fetch(url.toString())
-    const data    = await metaRes.json()
+    const storyIdUrl = new URL(`${META_BASE}/${adId}`)
+    storyIdUrl.searchParams.set('fields',       'creative{effective_object_story_id}')
+    storyIdUrl.searchParams.set('access_token', accessToken)
 
-    if (data.error) {
-      console.error('meta-ad-preview Meta error:', data.error)
-      return res.status(400).json({ error: data.error.message })
+    const [previewRes, storyIdRes] = await Promise.all([
+      fetch(previewUrl.toString()),
+      fetch(storyIdUrl.toString()),
+    ])
+    const previewData = await previewRes.json()
+    const storyIdData = await storyIdRes.json()
+
+    if (previewData.error) {
+      console.error('meta-ad-preview Meta error:', previewData.error)
+      return res.status(400).json({ error: previewData.error.message })
     }
 
-    const html = data.data?.[0]?.body ?? null
+    const html = previewData.data?.[0]?.body ?? null
     if (!html) return res.status(404).json({ error: 'Prévia não disponível para este anúncio' })
 
-    res.json({ html })
+    let postUrl: string | null = null
+    const storyId = storyIdData?.creative?.effective_object_story_id
+    if (storyId) {
+      const postUrlReq = new URL(`${META_BASE}/${storyId}`)
+      postUrlReq.searchParams.set('fields',       'permalink_url')
+      postUrlReq.searchParams.set('access_token', accessToken)
+      const postRes = await fetch(postUrlReq.toString())
+      const postData = await postRes.json()
+      postUrl = postData?.permalink_url ?? null
+    }
+
+    res.json({ html, postUrl })
   } catch (err) {
     console.error('meta-ad-preview error:', err)
     res.status(500).json({ error: 'Erro interno' })

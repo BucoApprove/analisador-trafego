@@ -87,6 +87,7 @@ export function AdPreviewModal({
   onClose: () => void
 }) {
   const [html, setHtml] = useState<string | null | undefined>(undefined)
+  const [postUrl, setPostUrl] = useState<string | null>(null)
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
@@ -96,9 +97,10 @@ export function AdPreviewModal({
 
   useEffect(() => {
     setHtml(undefined)
+    setPostUrl(null)
     fetch(`/api/meta-ad-preview?adId=${adId}`, { headers: { Authorization: `Bearer ${token}` } })
       .then(r => r.ok ? r.json() : null)
-      .then(data => setHtml(data?.html ?? null))
+      .then(data => { setHtml(data?.html ?? null); setPostUrl(data?.postUrl ?? null) })
       .catch(() => setHtml(null))
   }, [adId, token])
 
@@ -120,6 +122,17 @@ export function AdPreviewModal({
             <p className="text-sm text-muted-foreground text-center py-12 px-6">Prévia não disponível para este anúncio.</p>
           )}
         </div>
+        {postUrl && (
+          <a
+            href={postUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center justify-center gap-1.5 border-t px-4 py-2.5 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+          >
+            <ExternalLink className="h-3.5 w-3.5" />
+            Abrir post original
+          </a>
+        )}
       </div>
     </div>
   )
