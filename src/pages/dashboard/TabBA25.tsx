@@ -509,6 +509,8 @@ function TopAdsBlock({
                               .then(res => res.ok ? res.json() : null)
                               .then(data => data?.[adId] ?? null)
                           }}
+                          adId={adIdByContent?.[r.name]}
+                          token={token}
                         />
                       </td>
                       <td className="px-2 py-1.5 text-right tabular-nums" style={{ color: CHART_COLORS[1] }}>

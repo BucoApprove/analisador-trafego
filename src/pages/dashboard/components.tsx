@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { Loader2, AlertTriangle, RefreshCw, ChevronDown, Trophy } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { Loader2, AlertTriangle, RefreshCw, ChevronDown, Trophy, X, ExternalLink } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import type { UtmSalesAttribution, BA25ProfileEntry } from './types'
@@ -71,11 +71,67 @@ export function LancamentoLeadsKpis({ totalLeads, metaLeads, investimento, recei
   )
 }
 
+// ─── Modal de prévia do anúncio (Ad Preview API) ──────────────────────────────
+// Renderiza o iframe oficial que o Meta gera pra mostrar como o anúncio aparece
+// no feed/Instagram — o mesmo preview que se vê dentro do Business Manager, mas
+// sem precisar estar logado/ter permissão na conta de anúncios.
+export function AdPreviewModal({
+  adId,
+  adName,
+  token,
+  onClose,
+}: {
+  adId: string
+  adName: string
+  token: string
+  onClose: () => void
+}) {
+  const [html, setHtml] = useState<string | null | undefined>(undefined)
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [onClose])
+
+  useEffect(() => {
+    setHtml(undefined)
+    fetch(`/api/meta-ad-preview?adId=${adId}`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => setHtml(data?.html ?? null))
+      .catch(() => setHtml(null))
+  }, [adId, token])
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4" onClick={onClose}>
+      <div className="relative rounded-xl overflow-hidden shadow-2xl bg-card max-w-md w-full" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-4 py-2.5 border-b">
+          <p className="text-sm font-medium truncate pr-4">{adName}</p>
+          <button onClick={onClose} className="shrink-0 rounded-full p-1 hover:bg-muted transition-colors">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="flex items-center justify-center min-h-[300px] max-h-[80vh] overflow-auto">
+          {html === undefined ? (
+            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+          ) : html ? (
+            <div className="w-full [&_iframe]:w-full [&_iframe]:min-h-[500px] [&_iframe]:border-0" dangerouslySetInnerHTML={{ __html: html }} />
+          ) : (
+            <p className="text-sm text-muted-foreground text-center py-12 px-6">Prévia não disponível para este anúncio.</p>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ─── Tooltip de thumbnail de anúncio (hover) ──────────────────────────────────
 // Componente genérico: recebe uma chave de cache e uma função de busca, para
 // funcionar tanto com ad_id direto (BA25) quanto resolução por nome (Placar).
 // Usa position:fixed calculado no hover para não ser cortado por overflow-hidden
 // dos containers ancestrais (cards e tabelas com scroll).
+// resolveAdId (opcional) permite mostrar o botão "Ver prévia" mesmo quando o
+// cacheKey não é o próprio ad_id (ex.: Placar, que resolve por nome).
 const _adThumbCache = new Map<string, string | null>()
 const _adThumbInFlight = new Set<string>()
 
@@ -84,14 +140,22 @@ export function AdThumbTooltip({
   cacheKey,
   fetchThumb,
   className,
+  adId,
+  resolveAdId,
+  token,
 }: {
   label: string
   cacheKey: string | undefined
   fetchThumb: () => Promise<string | null>
   className?: string
+  adId?: string
+  resolveAdId?: () => Promise<string | null>
+  token?: string
 }) {
   const [thumb, setThumb] = useState<string | null | undefined>(() => cacheKey ? _adThumbCache.get(cacheKey) : undefined)
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null)
+  const [resolvedAdId, setResolvedAdId] = useState<string | null | undefined>(adId)
+  const [previewOpen, setPreviewOpen] = useState(false)
 
   function loadThumb() {
     if (!cacheKey || _adThumbCache.has(cacheKey) || _adThumbInFlight.has(cacheKey)) return
@@ -100,7 +164,12 @@ export function AdThumbTooltip({
       .then(url => { _adThumbCache.set(cacheKey, url); setThumb(url) })
       .catch(() => {})
       .finally(() => _adThumbInFlight.delete(cacheKey))
+    if (resolveAdId && resolvedAdId === undefined) {
+      resolveAdId().then(setResolvedAdId).catch(() => setResolvedAdId(null))
+    }
   }
+
+  const canPreview = !!(resolvedAdId && token)
 
   return (
     <span
@@ -111,16 +180,28 @@ export function AdThumbTooltip({
     >
       {label}
       {pos && cacheKey && (
-        <div className="fixed z-50 rounded-md border bg-popover shadow-lg p-1.5 w-36" style={{ top: pos.top, left: pos.left }}>
+        <div className="fixed z-50 rounded-md border bg-popover shadow-lg p-2 w-64" style={{ top: pos.top, left: pos.left }}>
           {thumb === undefined ? (
-            <div className="flex items-center justify-center h-24 text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /></div>
+            <div className="flex items-center justify-center h-40 text-muted-foreground"><Loader2 className="h-5 w-5 animate-spin" /></div>
           ) : thumb ? (
             <img src={thumb} alt={label} className="w-full h-auto rounded" />
           ) : (
-            <p className="text-[10px] text-muted-foreground text-center py-6">Sem thumbnail</p>
+            <p className="text-xs text-muted-foreground text-center py-10">Sem thumbnail</p>
           )}
-          <p className="text-[10px] text-center text-muted-foreground mt-1 truncate">{label}</p>
+          <p className="text-xs text-center text-muted-foreground mt-1.5 truncate">{label}</p>
+          {canPreview && (
+            <button
+              className="mt-1.5 w-full flex items-center justify-center gap-1.5 rounded-md border bg-background hover:bg-muted transition-colors py-1.5 text-xs font-medium"
+              onMouseDown={e => { e.preventDefault(); e.stopPropagation(); setPreviewOpen(true) }}
+            >
+              <ExternalLink className="h-3 w-3" />
+              Ver prévia do anúncio
+            </button>
+          )}
         </div>
+      )}
+      {previewOpen && resolvedAdId && token && (
+        <AdPreviewModal adId={resolvedAdId} adName={label} token={token} onClose={() => setPreviewOpen(false)} />
       )}
     </span>
   )
@@ -333,6 +414,8 @@ export function CampaignTree({
                                   .then(r => r.ok ? r.json() : null)
                                   .then(data => data?.[ad.adId] ?? null)
                               }
+                              adId={ad.adId}
+                              token={token}
                             />
                           </span>
                           <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden max-w-40">

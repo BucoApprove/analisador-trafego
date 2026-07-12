@@ -410,6 +410,12 @@ function LeadsDistModal({ produto, rows, token, onClose }: {
                                 .then(res => res.ok ? res.json() : null)
                                 .then(data => data?.thumbnail ?? null)
                             }
+                            resolveAdId={() =>
+                              fetch(`/api/meta-thumb-by-name?name=${encodeURIComponent(c.content!)}`, { headers: { Authorization: `Bearer ${token}` } })
+                                .then(res => res.ok ? res.json() : null)
+                                .then(data => data?.adId ?? null)
+                            }
+                            token={token}
                           />
                         ) : (
                           <span className="text-xs text-muted-foreground truncate block italic opacity-60">sem utm_content</span>

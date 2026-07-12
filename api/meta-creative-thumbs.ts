@@ -1,7 +1,10 @@
 /**
  * GET /api/meta-creative-thumbs?adIds=id1,id2,...
  *
- * Retorna thumbnail_url (ou image_url) de cada criativo Meta Ads.
+ * Retorna image_url (fallback thumbnail_url) de cada criativo Meta Ads.
+ * image_url é a imagem em resolução real do criativo — thumbnail_url é um
+ * ícone pequeno pensado só pra listagens densas, por isso não é mais o
+ * campo preferido aqui.
  * Máximo 50 ad IDs por chamada.
  * Cache de 1 hora — criativos raramente mudam.
  */
@@ -27,7 +30,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     const url = new URL(META_BASE + '/')
     url.searchParams.set('ids',          adIds.join(','))
-    url.searchParams.set('fields',       'creative{thumbnail_url,image_url}')
+    url.searchParams.set('fields',       'creative{image_url,thumbnail_url}')
     url.searchParams.set('access_token', accessToken)
 
     const metaRes = await fetch(url.toString())
@@ -41,7 +44,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const result: Record<string, string | null> = {}
     for (const adId of adIds) {
       const ad = data[adId]
-      result[adId] = ad?.creative?.thumbnail_url ?? ad?.creative?.image_url ?? null
+      result[adId] = ad?.creative?.image_url ?? ad?.creative?.thumbnail_url ?? null
     }
 
     res.json(result)

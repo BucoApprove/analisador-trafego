@@ -38,20 +38,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     for (const aid of accounts) {
       const url = new URL(`${META_BASE}/act_${aid}/ads`)
-      url.searchParams.set('fields', 'name,creative{thumbnail_url,image_url}')
+      url.searchParams.set('fields', 'id,name,creative{image_url,thumbnail_url}')
       url.searchParams.set('filtering', JSON.stringify([{ field: 'ad.name', operator: 'EQUAL', value: name }]))
       url.searchParams.set('limit', '5')
       url.searchParams.set('access_token', accessToken)
 
       const r = await fetch(url.toString())
       if (!r.ok) continue
-      const data = await r.json() as { data?: Array<{ name?: string; creative?: { thumbnail_url?: string; image_url?: string } }> }
+      const data = await r.json() as { data?: Array<{ id?: string; name?: string; creative?: { thumbnail_url?: string; image_url?: string } }> }
       const ad = data.data?.find(a => a.name === name) ?? data.data?.[0]
       if (ad?.creative) {
-        return res.json({ thumbnail: ad.creative.thumbnail_url ?? ad.creative.image_url ?? null })
+        return res.json({ thumbnail: ad.creative.image_url ?? ad.creative.thumbnail_url ?? null, adId: ad.id ?? null })
       }
     }
-    res.json({ thumbnail: null })
+    res.json({ thumbnail: null, adId: null })
   } catch (err) {
     console.error('meta-thumb-by-name error:', err)
     res.status(500).json({ error: 'Erro interno' })
