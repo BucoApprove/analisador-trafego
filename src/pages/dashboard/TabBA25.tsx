@@ -1175,8 +1175,15 @@ export default function TabBA25({
               return data!.byTag.find(t => t.tag === tag)?.countPeriod ?? 0
             }
             const leadsTrafico  = leadsForTag(`${prefix}-Captura-Tráfego`)
-            const leadsOrganico = leadsForTag(`${prefix}-Captura-Orgânico`)
             const leadsManychat = leadsForTag(`${prefix}-Captura-Manychat`)
+            // Orgânico: tag exata como fonte primária; se não existir tag pra esse
+            // lançamento, cai pro fallback de somar leads de campanhas (utm_campaign)
+            // sem "captura" no nome — é a forma mais simples de aproximar "não veio
+            // de tráfego pago" até termos uma classificação melhor por UTM.
+            const leadsOrganicoTag = data!.byTag.find(t => t.tag === `${prefix}-Captura-Orgânico`)?.countPeriod
+            const leadsOrganico = leadsOrganicoTag ?? data!.byCampaign
+              .filter(c => !c.name.toLowerCase().includes('captura'))
+              .reduce((s, c) => s + c.value, 0)
             const totalLeadsRealizados = leadsTrafico + leadsOrganico + leadsManychat
             const totalMetaLeads = goals.metaLeadsTrafico + goals.metaLeadsOrganico + goals.metaLeadsManychat
 
@@ -1254,8 +1261,11 @@ export default function TabBA25({
             }
 
             // Dias restantes até fim da captação (inclusive hoje)
+            // Aceita DD/MM/YYYY (planilha legada do BA25) e YYYY-MM-DD (campo
+            // date do Supabase, usado pelos lançamentos cadastrados em TabLancamentos).
             const parseFinalDate = (s: string) => {
-              const [d, m, y] = s.split('/').map(Number)
+              const parts = s.includes('/') ? s.split('/').map(Number) : s.split('-').map(Number).reverse()
+              const [d, m, y] = parts
               return new Date(y, m - 1, d)
             }
             const today = new Date(); today.setHours(0,0,0,0)
