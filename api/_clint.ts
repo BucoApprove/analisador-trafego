@@ -10,30 +10,33 @@
  * A distinção é feita via tag da Clint (cadastrada em clint_tags no Supabase).
  *
  * Regras de atribuição (em ordem de prioridade):
- *   1. Produtos com tag cadastrada (ex: Intensivo ENARE) → conta deals que têm
- *      aquela tag, independente do grupo. Conta TODOS os deals (não só com fields.tipo).
- *   2. Produtos sem tag (ex: Buco Approve via group "Buco Approve") → conta deals
- *      do grupo correspondente que NÃO têm nenhuma tag de subproduto cadastrada.
- *   3. Outros grupos simples (Pós Anatomia, Mentoria, etc.) → todos os deals do grupo.
+ *   1. Produtos com origem cadastrada (ex: Intensivo Enare como origem própria) →
+ *      conta deals cujo origin_id bate, independente do grupo.
+ *   2. Produtos com tag cadastrada (ex: Intensivo ENARE via tag legada) → conta deals
+ *      que têm aquela tag, independente do grupo. Conta TODOS os deals (não só com fields.tipo).
+ *   3. Produtos sem tag/origem (ex: Buco Approve via group "Buco Approve") → conta deals
+ *      do grupo correspondente que NÃO têm nenhuma tag/origem de subproduto cadastrada.
+ *   4. Outros grupos simples (Pós Anatomia, Mentoria, etc.) → todos os deals do grupo.
  *
  * Configuração em clint_tags (Supabase):
  *   - product_name = nome canônico do produto no Placar
- *   - tag_id       = UUID da tag na Clint (para subprodutos com tag)
- *                    OU nome do grupo (para produtos mapeados por grupo)
- *   - label        = nome legível (usado para identificar se é grupo ou tag)
- *   - is_group     = se true, é mapeamento por group.name; se false/null, é tag UUID
- *
- * Como não há campo is_group ainda, diferenciamos pelo formato do tag_id:
- *   - UUID (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx) → tag real da Clint
- *   - qualquer outra string → nome de grupo
+ *   - tag_id       = um dos três formatos abaixo (diferenciados pelo próprio valor,
+ *                    não há coluna de tipo separada):
+ *                      - "origin:<uuid>"               → origem exclusiva da Clint
+ *                      - UUID puro (xxxxxxxx-xxxx-...)  → tag real da Clint
+ *                      - qualquer outra string           → nome do grupo
+ *   - label        = nome legível, só para exibição
  */
 import { createClient } from '@supabase/supabase-js'
 
 const BASE = 'https://api.clint.digital'
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+const ORIGIN_PREFIX = 'origin:'
 
 function isUuid(s: string) { return UUID_RE.test(s) }
+function isOriginRef(s: string) { return s.startsWith(ORIGIN_PREFIX) && isUuid(s.slice(ORIGIN_PREFIX.length)) }
+function originIdOf(s: string) { return s.slice(ORIGIN_PREFIX.length) }
 
 function body2json(body: string): unknown {
   try { return body ? JSON.parse(body) : {} } catch { return {} }
@@ -183,16 +186,32 @@ export async function fetchClintLeads(since: string, until: string): Promise<Rec
       fetchAllDeals(token, since, until),
     ])
 
-    // Separa config em: tag-based (UUID) vs group-based (string livre)
-    const tagRows = config.filter(r => isUuid(r.tag_id))
-    const groupRows = config.filter(r => !isUuid(r.tag_id))
+    // Separa config em: origin-based ("origin:<uuid>") vs tag-based (UUID) vs group-based (string livre)
+    const originRows = config.filter(r => isOriginRef(r.tag_id))
+    const tagRows = config.filter(r => !isOriginRef(r.tag_id) && isUuid(r.tag_id))
+    const groupRows = config.filter(r => !isOriginRef(r.tag_id) && !isUuid(r.tag_id))
+
+    // 0. Para cada produto com origem exclusiva: conta deals daquele origin_id
+    //    Também entra no set "excluído dos grupos", igual às tags.
+    const tagDealIds = new Set<string>() // todos os IDs já atribuídos por origem ou tag de subproduto
+    const out: Record<string, ClintLeads> = {}
+
+    for (const row of originRows) {
+      const originId = originIdOf(row.tag_id)
+      const dealsDestaOrigem = allDeals.filter(d => d.origin_id === originId)
+      const prev = out[row.product_name] ?? { total: 0, interessado: 0, abordado: 0 }
+      const counts = countTipo(dealsDestaOrigem)
+      out[row.product_name] = {
+        total: prev.total + counts.total,
+        interessado: prev.interessado + counts.interessado,
+        abordado: prev.abordado + counts.abordado,
+      }
+      for (const d of dealsDestaOrigem) tagDealIds.add(d.id)
+    }
 
     // 1. Para cada produto com tag: busca deals pela tag
     //    Coleta também o set de deal IDs que pertencem a alguma tag
     //    (para excluir do produto "pai" de grupo)
-    const tagDealIds = new Set<string>() // todos os IDs que têm qualquer tag de subproduto
-    const out: Record<string, ClintLeads> = {}
-
     // Busca por tag em paralelo
     const tagResults = await Promise.all(
       tagRows.map(async row => {
@@ -204,8 +223,9 @@ export async function fetchClintLeads(since: string, until: string): Promise<Rec
     for (const { row, ids } of tagResults) {
       // Acumula por produto (pode haver múltiplas tags para o mesmo produto)
       const prev = out[row.product_name] ?? { total: 0, interessado: 0, abordado: 0 }
-      // Pega os deals completos para contar tipo
-      const dealsDestaTag = allDeals.filter(d => ids.has(d.id))
+      // Exclui deals já contados por origem exclusiva (evita duplicar quando o
+      // mesmo deal tem tag legada E pertence à origem nova do mesmo produto)
+      const dealsDestaTag = allDeals.filter(d => ids.has(d.id) && !tagDealIds.has(d.id))
       const counts = countTipo(dealsDestaTag)
       out[row.product_name] = {
         total: prev.total + counts.total,
@@ -223,7 +243,7 @@ export async function fetchClintLeads(since: string, until: string): Promise<Rec
     }
 
     // 2. Para produtos mapeados por group.name: conta deals do grupo
-    //    excluindo os que já têm tag de subproduto e funis operacionais
+    //    excluindo os que já têm origem/tag de subproduto e funis operacionais
     for (const row of groupRows) {
       const groupName = row.tag_id // aqui tag_id é o nome do grupo
       const dealsDoGrupo = allDeals.filter(d => {
@@ -251,7 +271,8 @@ export async function fetchClintLeads(since: string, until: string): Promise<Rec
 }
 
 // ─── Lista disponível para o dropdown da UI ───────────────────────────────────
-// Retorna tanto as tags reais (UUID) quanto os grupos como opções configuráveis
+// Retorna tags reais (UUID), origens exclusivas ("origin:<uuid>") e grupos como
+// opções configuráveis
 
 export async function fetchClintTagsList(): Promise<Array<{ id: string; name: string }>> {
   const token = process.env.CLINT_API_TOKEN ?? ''
@@ -272,18 +293,24 @@ export async function fetchClintTagsList(): Promise<Array<{ id: string; name: st
       page++
     }
 
-    // Grupos (para produtos mapeados por grupo)
+    // Origens (funis individuais) e grupos (produtos), ambos a partir de /v1/origins
     const origins = await fetchOrigins(token)
     const grupos = new Map<string, string>()
+    const origensOut: Array<{ id: string; name: string }> = []
     for (const o of origins.values()) {
-      if (!o.archived_at) grupos.set(o.group.name, o.group.name)
+      if (o.archived_at) continue
+      grupos.set(o.group.name, o.group.name)
+      origensOut.push({
+        id: `${ORIGIN_PREFIX}${o.id}`,
+        name: `[Origem] ${o.name} (${o.group.name})`,
+      })
     }
     const gruposOut = [...grupos.entries()].map(([name]) => ({
       id: name, // id = nome do grupo (identificador para a lógica de group-based)
       name: `[Grupo] ${name}`,
     }))
 
-    return [...tagsOut, ...gruposOut].sort((a, b) => a.name.localeCompare(b.name))
+    return [...tagsOut, ...origensOut, ...gruposOut].sort((a, b) => a.name.localeCompare(b.name))
   } catch { return [] }
 }
 
@@ -303,8 +330,12 @@ export async function fetchClintLeadsDetalhados(
     fetchAllDeals(token, since, until),
   ])
 
-  const tagRows = config.filter(r => r.product_name === produto && isUuid(r.tag_id))
-  const groupRows = config.filter(r => r.product_name === produto && !isUuid(r.tag_id))
+  const originRows = config.filter(r => r.product_name === produto && isOriginRef(r.tag_id))
+  const tagRows = config.filter(r => r.product_name === produto && !isOriginRef(r.tag_id) && isUuid(r.tag_id))
+  const groupRows = config.filter(r => r.product_name === produto && !isOriginRef(r.tag_id) && !isUuid(r.tag_id))
+
+  // IDs dos deals por origem exclusiva
+  const originIds = new Set(originRows.map(r => originIdOf(r.tag_id)))
 
   // IDs dos deals por tag
   const tagDealIds = new Set<string>()
@@ -313,8 +344,9 @@ export async function fetchClintLeadsDetalhados(
     for (const ids of tagResults) for (const id of ids) tagDealIds.add(id)
   }
 
-  // Todos os IDs de tag de subprodutos (para excluir dos deals de grupo)
-  const allTagConfig = config.filter(r => isUuid(r.tag_id))
+  // Todos os IDs de origem/tag de subprodutos (para excluir dos deals de grupo)
+  const allOriginIds = new Set(config.filter(r => isOriginRef(r.tag_id)).map(r => originIdOf(r.tag_id)))
+  const allTagConfig = config.filter(r => !isOriginRef(r.tag_id) && isUuid(r.tag_id))
   const allSubTagIds = new Set<string>()
   if (allTagConfig.length > 0) {
     const all = await Promise.all(allTagConfig.map(r => fetchDealsByTag(token, r.tag_id, since, until)))
@@ -327,10 +359,13 @@ export async function fetchClintLeadsDetalhados(
 
   // Filtra os deals do produto
   const dealsDoP = allDeals.filter(d => {
-    if (tagRows.length > 0) return tagDealIds.has(d.id)
+    if (originRows.length > 0 || tagRows.length > 0) {
+      return originIds.has(d.origin_id) || tagDealIds.has(d.id)
+    }
     const origin = origins.get(d.origin_id)
     if (!origin) return false
     return groupRows.some(r => norm(origin.group.name) === norm(r.tag_id))
+      && !allOriginIds.has(d.origin_id)
       && !allSubTagIds.has(d.id)
       && isFunilComercial(origin.name)
   })
