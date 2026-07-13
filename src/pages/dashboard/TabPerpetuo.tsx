@@ -2,7 +2,8 @@ import { useState, useEffect, useRef } from 'react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Loader2, RefreshCw, ChevronDown, Trophy, SlidersHorizontal, X, Plus } from 'lucide-react'
+import { Loader2, RefreshCw, ChevronDown, Trophy, SlidersHorizontal, X, Plus, ExternalLink } from 'lucide-react'
+import { AdPreviewModal } from './components'
 
 // ─── ThumbModal ───────────────────────────────────────────────────────────────
 function ThumbModal({ src, adName, onClose }: { src: string; adName: string; onClose: () => void }) {
@@ -249,6 +250,7 @@ function CampaignCard({
   const [openAdsets, setOpenAdsets] = useState<Set<string>>(new Set())
   const [thumbs, setThumbs] = useState<Record<string, string | null>>({})
   const [modalThumb, setModalThumb] = useState<{ src: string; adName: string } | null>(null)
+  const [previewAd, setPreviewAd] = useState<{ adId: string; adName: string } | null>(null)
 
   const visibleAdsets = onlyActive
     ? campaign.adsets.filter(a => a.adsetStatus === 'ACTIVE')
@@ -447,7 +449,18 @@ function CampaignCard({
                               }
                             </span>
                           )}
-                          <span className="w-40 shrink-0 text-xs text-muted-foreground truncate">{ad.adName}</span>
+                          <span className="w-40 shrink-0 inline-flex items-center gap-1">
+                            <span className="text-xs text-muted-foreground truncate">{ad.adName}</span>
+                            {token && (
+                              <button
+                                className="shrink-0 rounded p-0.5 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                                title="Ver prévia do anúncio"
+                                onClick={() => setPreviewAd({ adId: ad.adId, adName: ad.adName })}
+                              >
+                                <ExternalLink className="h-3 w-3" />
+                              </button>
+                            )}
+                          </span>
                           <div className="flex-1 h-1.5 bg-muted rounded-full overflow-hidden max-w-40">
                             <div
                               className={`h-full rounded-full ${isTop ? 'bg-amber-400' : 'bg-primary/60'}`}
@@ -486,6 +499,9 @@ function CampaignCard({
       )}
       {modalThumb && (
         <ThumbModal src={modalThumb.src} adName={modalThumb.adName} onClose={() => setModalThumb(null)} />
+      )}
+      {previewAd && token && (
+        <AdPreviewModal adId={previewAd.adId} adName={previewAd.adName} token={token} onClose={() => setPreviewAd(null)} />
       )}
     </div>
   )
