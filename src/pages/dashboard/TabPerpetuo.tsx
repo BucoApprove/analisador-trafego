@@ -467,26 +467,35 @@ function CampaignCard({
                               style={{ width: `${barPct}%` }}
                             />
                           </div>
-                          <span className="text-xs font-semibold w-20 text-right shrink-0">{fmt(ad.results)} {isFollower ? 'seg.' : 'leads'}</span>
-                          <span className="text-xs text-muted-foreground w-16 text-right shrink-0">
-                            {ad.results > 0 ? brl(ad.costPerResult) : '—'}
-                          </span>
+                          <div className="w-20 text-right shrink-0">
+                            <p className="text-[9px] text-muted-foreground leading-tight">{isFollower ? 'Seguidores' : resultLabel}</p>
+                            <p className="text-xs font-semibold">{fmt(ad.results)}</p>
+                          </div>
+                          <div className="w-16 text-right shrink-0">
+                            <p className="text-[9px] text-muted-foreground leading-tight">{cprLabel}</p>
+                            <p className="text-xs text-muted-foreground">{ad.results > 0 ? brl(ad.costPerResult) : '—'}</p>
+                          </div>
                           {validLeadsContent !== undefined && (() => {
                             const contentKey = `${campaign.campaignName.toLowerCase().trim()}|||${adset.adsetName.toLowerCase().trim()}|||${ad.adName.toLowerCase().trim()}`
                             const vl = validLeadsContent === null ? null : (validLeadsContent[contentKey] ?? 0)
                             const cpl = vl !== null && vl > 0 ? brl(ad.spend / vl) : null
                             return (
                               <>
-                                <span className="text-xs font-semibold w-20 text-right shrink-0 text-emerald-600 dark:text-emerald-400">
-                                  {vl === null ? '…' : `${fmt(vl)} válidos`}
-                                </span>
-                                <span className="text-xs font-semibold w-16 text-right shrink-0 text-emerald-600 dark:text-emerald-400">
-                                  {vl === null ? '…' : (cpl ?? '—')}
-                                </span>
+                                <div className="w-20 text-right shrink-0">
+                                  <p className="text-[9px] text-muted-foreground leading-tight">Leads Válidos</p>
+                                  <p className="text-xs font-semibold text-emerald-600 dark:text-emerald-400">{vl === null ? '…' : fmt(vl)}</p>
+                                </div>
+                                <div className="w-16 text-right shrink-0">
+                                  <p className="text-[9px] text-muted-foreground leading-tight">CPL</p>
+                                  <p className="text-xs font-semibold text-emerald-600 dark:text-emerald-400">{vl === null ? '…' : (cpl ?? '—')}</p>
+                                </div>
                               </>
                             )
                           })()}
-                          <span className="text-xs text-muted-foreground w-16 text-right shrink-0">{brl(ad.spend)}</span>
+                          <div className="w-16 text-right shrink-0">
+                            <p className="text-[9px] text-muted-foreground leading-tight">Investido</p>
+                            <p className="text-xs text-muted-foreground">{brl(ad.spend)}</p>
+                          </div>
                         </div>
                       )
                     })}
