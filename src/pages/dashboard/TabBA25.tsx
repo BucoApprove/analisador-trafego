@@ -41,6 +41,18 @@ const FIXED_OR_FILTER = 'instagram,engajamento,lembrete,remarketing'
 const FIXED_SINCE = '2026-03-13'
 const FIXED_UNTIL = '2026-04-22'
 
+// Normaliza para comparar tag_name (BigQuery) contra a tag esperada
+// (`${prefix}-Captura-Tráfego` etc.) sem depender de acento/maiúscula exatos
+// — o prefixo do lançamento (Supabase) é digitado livremente e o tag_name
+// gravado no Green_Gold pode variar em capitalização/acentuação.
+function norm(s: string) {
+  return s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim()
+}
+
+function findByTagNorm(byTag: { tag: string; countPeriod: number }[], expectedTag: string) {
+  const target = norm(expectedTag)
+  return byTag.find(t => norm(t.tag) === target)
+}
 
 function makeGetCpl(map: Record<string, number> | undefined) {
   if (!map) return undefined
@@ -881,7 +893,7 @@ export default function TabBA25({
         // CPL "pago": gasto Meta ÷ só os leads da tag de tráfego pago do
         // lançamento — não totalUnique (que inclui orgânico/venda/etc e
         // diluiria o custo real do tráfego pago para baixo).
-        const leadsTraficoPago = byTag.find(t => t.tag === `${prefix}-Captura-Tráfego`)?.countPeriod ?? 0
+        const leadsTraficoPago = findByTagNorm(byTag, `${prefix}-Captura-Tráfego`)?.countPeriod ?? 0
         const cpl = leadsTraficoPago > 0 && metaData.metaSpend > 0
           ? Math.round((metaData.metaSpend / leadsTraficoPago) * 100) / 100
           : null
@@ -1146,7 +1158,7 @@ export default function TabBA25({
             const brl2 = (v: number) => v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
             const campaigns = data.metaCampaigns ?? []
 
-            const leadsCaptura = data.byTag.find(t => t.tag === `${prefix}-Captura-Tráfego`)?.countPeriod ?? 0
+            const leadsCaptura = findByTagNorm(data.byTag, `${prefix}-Captura-Tráfego`)?.countPeriod ?? 0
             const totalLeads = data.totalUnique
 
             const cpl  = totalLeads > 0 && gastoCaptura > 0 ? gastoCaptura / totalLeads : null
@@ -1174,17 +1186,19 @@ export default function TabBA25({
 
           {/* Metas × Realizado */}
           {goals && (() => {
-            // Leads realizados por tag exata (metas de leads)
+            // Leads realizados por tag (comparação normalizada — acento/maiúscula
+            // podem variar entre o prefixo digitado no lançamento e o tag_name real)
             function leadsForTag(tag: string) {
-              return data!.byTag.find(t => t.tag === tag)?.countPeriod ?? 0
+              return findByTagNorm(data!.byTag, tag)?.countPeriod ?? 0
             }
             const leadsTrafico  = leadsForTag(`${prefix}-Captura-Tráfego`)
             const leadsManychat = leadsForTag(`${prefix}-Captura-Manychat`)
-            // Orgânico: tag exata como fonte primária; se não existir tag pra esse
-            // lançamento, cai pro fallback de somar leads de campanhas (utm_campaign)
-            // sem "captura" no nome — é a forma mais simples de aproximar "não veio
-            // de tráfego pago" até termos uma classificação melhor por UTM.
-            const leadsOrganicoTag = data!.byTag.find(t => t.tag === `${prefix}-Captura-Orgânico`)?.countPeriod
+            // Orgânico: tag (normalizada) como fonte primária; se não existir tag pra
+            // esse lançamento, cai pro fallback de somar leads de campanhas
+            // (utm_campaign) sem "captura" no nome — é a forma mais simples de
+            // aproximar "não veio de tráfego pago" até termos uma classificação
+            // melhor por UTM.
+            const leadsOrganicoTag = findByTagNorm(data!.byTag, `${prefix}-Captura-Orgânico`)?.countPeriod
             const leadsOrganico = leadsOrganicoTag ?? data!.byCampaign
               .filter(c => !c.name.toLowerCase().includes('captura'))
               .reduce((s, c) => s + c.value, 0)
