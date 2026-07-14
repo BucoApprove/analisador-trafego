@@ -121,16 +121,32 @@ async function fetchDealsByTag(token: string, tagId: string, since: string, unti
 
 // ─── Busca todos os deals do período ─────────────────────────────────────────
 
+// Data (YYYY-MM-DD) de um created_at (ISO UTC) em horário de Brasília — mesma
+// conversão usada na exibição (ClintDealDetail.date), para o filtro de busca
+// nunca divergir do que é mostrado na tela.
+function dateBrasilia(createdAtUtc: string): string {
+  return new Date(new Date(createdAtUtc).getTime() - 3 * 60 * 60 * 1000).toISOString().slice(0, 10)
+}
+
+// Busca deals num range ampliado (±1 dia de margem, cobre qualquer offset de
+// timezone que a Clint use para interpretar created_at_start/end — não está
+// documentado/confirmado) e filtra no nosso lado pela data em horário de
+// Brasília, para o range buscado bater exatamente com o range exibido.
 async function fetchAllDeals(token: string, since: string, until: string): Promise<ClintDeal[]> {
   const all: ClintDeal[] = []
-  const untilEod = `${until}T23:59:59`
+  const sinceMargin = new Date(`${since}T00:00:00Z`)
+  sinceMargin.setUTCDate(sinceMargin.getUTCDate() - 1)
+  const untilMargin = new Date(`${until}T00:00:00Z`)
+  untilMargin.setUTCDate(untilMargin.getUTCDate() + 1)
+  const sinceParam = sinceMargin.toISOString().slice(0, 10)
+  const untilParam = `${untilMargin.toISOString().slice(0, 10)}T23:59:59`
   let page = 1
   for (let i = 0; i < 200; i++) {
     const u = new URL(`${BASE}/v1/deals`)
     u.searchParams.set('limit', '100')
     u.searchParams.set('page', String(page))
-    u.searchParams.set('created_at_start', since)
-    u.searchParams.set('created_at_end', untilEod)
+    u.searchParams.set('created_at_start', sinceParam)
+    u.searchParams.set('created_at_end', untilParam)
     const r = await fetch(u.toString(), { headers: { 'api-token': token, Accept: 'application/json' } })
     if (!r.ok) throw new Error(`Clint /v1/deals ${r.status}`)
     const j = body2json(await r.text()) as { data?: ClintDeal[]; hasNext?: boolean }
@@ -138,7 +154,13 @@ async function fetchAllDeals(token: string, since: string, until: string): Promi
     if (!j.hasNext || (j.data ?? []).length === 0) break
     page++
   }
-  return all
+  // Filtra pela data real em horário de Brasília — garante que o que foi
+  // buscado bate exatamente com [since, until], independente de qual
+  // timezone a Clint usou para interpretar created_at_start/end.
+  return all.filter(d => {
+    const date = dateBrasilia(d.created_at)
+    return date >= since && date <= until
+  })
 }
 
 // ─── Lê configuração do Supabase ─────────────────────────────────────────────
@@ -397,12 +419,9 @@ export async function fetchClintLeadsDetalhados(
     .map(d => {
       const tipo = norm((d.fields?.tipo as string | undefined) ?? '')
       const origin = origins.get(d.origin_id)
-      // Converte para horário Brasília
-      const dateBrasilia = new Date(new Date(d.created_at).getTime() - 3 * 60 * 60 * 1000)
-        .toISOString().slice(0, 10)
       return {
         id: d.id,
-        date: dateBrasilia,
+        date: dateBrasilia(d.created_at),
         name: d.contact?.name ?? '—',
         phone: d.contact?.phone ?? null,
         tipo: tipo === 'interessado' ? 'Interessado' : tipo === 'abordado' ? 'Abordado' : null,
