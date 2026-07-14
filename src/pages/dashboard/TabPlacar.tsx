@@ -5,8 +5,9 @@ import { supabase } from '@/lib/supabase'
 import type { Lancamento } from '@/lib/supabase'
 import { LancamentoLeadsKpis, CHART_COLORS, AdThumbTooltip } from './components'
 
-// Produtos selecionáveis no editor de mapeamento (label → product_id gravado
-// na campaign_produto_map; o backend converte o id de volta no nome canônico).
+// Fallback estático enquanto useProdutoOpts() carrega a lista real de
+// /api/produtos-canonicos (ou se a chamada falhar) — não editar para adicionar
+// produto novo, cadastre em "Produtos Canônicos" (TabConfigProdutos).
 const INTENSIVO_MARKER_ID = -2016048
 const PRODUTOS_SELECIONAVEIS: Array<{ label: string; id: number }> = [
   { label: 'Buco Approve',                id: 2016048 },
@@ -85,6 +86,7 @@ interface OrcamentoEntry {
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function fmtBRL(v: number) {
+  if (!Number.isFinite(v)) return '—'
   return v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 }
 
@@ -923,16 +925,10 @@ function ProdutoRow({ p, stripe, month, token, onMeta, onOrcamento, metaReadOnly
 
 interface MapRow { id: number; account: string; prefixo: string; produto_ids: number[]; label: string }
 
-function CampanhaMapModal({ token, onClose, onChanged }: { token: string; onClose: () => void; onChanged: () => void }) {
-  const [account, setAccount] = useState<'conta1' | 'conta2'>('conta1')
-  const [rows, setRows] = useState<MapRow[]>([])
-  const [loading, setLoading] = useState(true)
-  const [newPrefixo, setNewPrefixo] = useState('')
-  const [newId, setNewId] = useState('')
-  const [saving, setSaving] = useState(false)
+// Lista de produtos canônicos do banco (para refletir produtos adicionados via UI),
+// com fallback para PRODUTOS_SELECIONAVEIS enquanto carrega ou se a chamada falhar.
+function useProdutoOpts(token: string): Array<{ label: string; id: number }> {
   const [produtoOpts, setProdutoOpts] = useState<Array<{ label: string; id: number }>>(PRODUTOS_SELECIONAVEIS)
-
-  // Carrega lista de produtos do banco (para refletir produtos adicionados via UI)
   useEffect(() => {
     fetch('/api/produtos-canonicos', { headers: { Authorization: `Bearer ${token}` } })
       .then(r => r.ok ? r.json() : null)
@@ -943,6 +939,17 @@ function CampanhaMapModal({ token, onClose, onChanged }: { token: string; onClos
       })
       .catch(() => {/* fallback para PRODUTOS_SELECIONAVEIS já no state */})
   }, [token])
+  return produtoOpts
+}
+
+function CampanhaMapModal({ token, onClose, onChanged }: { token: string; onClose: () => void; onChanged: () => void }) {
+  const [account, setAccount] = useState<'conta1' | 'conta2'>('conta1')
+  const [rows, setRows] = useState<MapRow[]>([])
+  const [loading, setLoading] = useState(true)
+  const [newPrefixo, setNewPrefixo] = useState('')
+  const [newId, setNewId] = useState('')
+  const [saving, setSaving] = useState(false)
+  const produtoOpts = useProdutoOpts(token)
 
   const idToLabel = Object.fromEntries(produtoOpts.map(p => [p.id, p.label]))
 
@@ -1052,6 +1059,7 @@ function ClintTagsModal({ token, onClose, onChanged }: { token: string; onClose:
   const [selectedTag, setSelectedTag] = useState<{ id: string; name: string } | null>(null)
   const [saving, setSaving] = useState(false)
   const [tagsErro, setTagsErro] = useState('')
+  const produtoOpts = useProdutoOpts(token)
 
   const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }
 
@@ -1111,7 +1119,7 @@ function ClintTagsModal({ token, onClose, onChanged }: { token: string; onClose:
           <div className="flex gap-2">
             <select value={prod} onChange={e => setProd(e.target.value)} className="text-sm border rounded px-2 py-1.5 bg-background">
               <option value="">produto…</option>
-              {PRODUTOS_SELECIONAVEIS.map(p => <option key={p.id} value={p.label}>{p.label}</option>)}
+              {produtoOpts.map(p => <option key={p.id} value={p.label}>{p.label}</option>)}
             </select>
             <div className="flex-1 relative">
               <input
@@ -1174,6 +1182,7 @@ function GreenGoldTagsModal({ token, onClose, onChanged }: { token: string; onCl
   const [prod, setProd] = useState('')
   const [tagName, setTagName] = useState('')
   const [saving, setSaving] = useState(false)
+  const produtoOpts = useProdutoOpts(token)
 
   const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }
 
@@ -1223,7 +1232,7 @@ function GreenGoldTagsModal({ token, onClose, onChanged }: { token: string; onCl
           <div className="flex gap-2">
             <select value={prod} onChange={e => setProd(e.target.value)} className="text-sm border rounded px-2 py-1.5 bg-background">
               <option value="">produto…</option>
-              {PRODUTOS_SELECIONAVEIS.map(p => <option key={p.id} value={p.label}>{p.label}</option>)}
+              {produtoOpts.map(p => <option key={p.id} value={p.label}>{p.label}</option>)}
             </select>
             <input
               className="flex-1 text-sm border rounded px-2.5 py-1.5 bg-background"
