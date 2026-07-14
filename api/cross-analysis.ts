@@ -22,7 +22,7 @@ function statusSql(statuses: string[]): { sql: string; params: QueryParam[] } {
   }
 }
 
-const VALID_UTM_COLS = ['utm_content', 'utm_campaign', 'utm_medium'] as const
+const VALID_UTM_COLS = ['utm_content', 'utm_campaign', 'utm_medium', 'utm_source'] as const
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!await authUser(req, res)) return
@@ -158,9 +158,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return `
         WITH
           buyers AS (
-            SELECT DISTINCT LOWER(TRIM(E_mail_do_Comprador)) AS email
+            SELECT
+              LOWER(TRIM(E_mail_do_Comprador)) AS email,
+              MIN(COALESCE(Data_de_Aprova____o, Data_do_Pedido)) AS data_compra
             FROM ${tVendas}
             WHERE Nome_do_Produto = @product ${attrStClause.sql} AND E_mail_do_Comprador IS NOT NULL${saleDateFilter}
+            GROUP BY LOWER(TRIM(E_mail_do_Comprador))
           ),
           -- todos os leads históricos dos compradores (sem filtro de data)
           buyer_leads_all AS (
@@ -168,16 +171,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             FROM ${tLeads}
             WHERE lead_email IS NOT NULL
           ),
-          -- leads com UTM preenchido, rankeados por comprador (histórico completo — para atribuição)
+          -- leads com UTM preenchido, ranking "origin" sobre o histórico completo
+          -- (rn_first) e ranking "last" só sobre leads registrados ATÉ a compra
+          -- (rn_last_before_purchase) — "última UTM antes da compra", não a
+          -- última do histórico completo do lead (que pode ser depois da venda).
           leads_ranked AS (
             SELECT
-              LOWER(TRIM(lead_email)) AS email,
-              ${utmCol} AS utm_raw,
-              ROW_NUMBER() OVER (PARTITION BY LOWER(TRIM(lead_email)) ORDER BY lead_register ASC)  AS rn_first,
-              ROW_NUMBER() OVER (PARTITION BY LOWER(TRIM(lead_email)) ORDER BY lead_register DESC) AS rn_last
-            FROM ${tLeads}
-            WHERE lead_email IS NOT NULL
-              AND ${utmCol} IS NOT NULL AND TRIM(${utmCol}) != ''
+              LOWER(TRIM(l.lead_email)) AS email,
+              l.${utmCol} AS utm_raw,
+              l.lead_register <= b.data_compra AS antes_compra,
+              ROW_NUMBER() OVER (PARTITION BY LOWER(TRIM(l.lead_email)) ORDER BY l.lead_register ASC) AS rn_first,
+              ROW_NUMBER() OVER (
+                PARTITION BY LOWER(TRIM(l.lead_email)), (l.lead_register <= b.data_compra)
+                ORDER BY l.lead_register DESC
+              ) AS rn_last_before_purchase
+            FROM ${tLeads} l
+            INNER JOIN buyers b ON LOWER(TRIM(l.lead_email)) = b.email
+            WHERE l.lead_email IS NOT NULL
+              AND l.${utmCol} IS NOT NULL AND TRIM(l.${utmCol}) != ''
           ),
           -- join com compradores para as 3 atribuições numa passagem só
           buyer_utms AS (
@@ -185,7 +196,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
               l.utm_raw,
               l.email,
               l.rn_first,
-              l.rn_last
+              -- rn_last=1 só é válido se essa linha de fato tem lead_register <= data_compra
+              (l.antes_compra AND l.rn_last_before_purchase = 1) AS is_last
             FROM leads_ranked l
             INNER JOIN buyers b ON l.email = b.email
           ),
@@ -193,7 +205,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             SELECT
               utm_raw AS utm_val,
               COUNT(DISTINCT email)                              AS any_time,
-              COUNT(DISTINCT CASE WHEN rn_last  = 1 THEN email END) AS last_before,
+              COUNT(DISTINCT CASE WHEN is_last  THEN email END) AS last_before,
               COUNT(DISTINCT CASE WHEN rn_first = 1 THEN email END) AS origin
             FROM buyer_utms
             GROUP BY utm_raw
@@ -278,11 +290,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     `
 
     try {
-      // Wave 1: 3 dimensões UTM (queries pesadas com window functions)
-      const [contentRes, campaignRes, mediumRes] = await Promise.all([
+      // Wave 1: 4 dimensões UTM (queries pesadas com window functions)
+      const [contentRes, campaignRes, mediumRes, sourceRes] = await Promise.all([
         bqQuery(utmAttrSql('utm_content'),  params),
         bqQuery(utmAttrSql('utm_campaign'), params),
         bqQuery(utmAttrSql('utm_medium'),   params),
+        bqQuery(utmAttrSql('utm_source'),   params),
       ])
       // Wave 2: totais e last tag (mais leves)
       const [totalRes, lastTagRes] = await Promise.all([
@@ -303,6 +316,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         byContent:   parseRows(contentRes.rows),
         byCampaign:  parseRows(campaignRes.rows),
         byMedium:    parseRows(mediumRes.rows),
+        bySource:    parseRows(sourceRes.rows),
         lastTagDist: lastTagRes.rows.map(r => ({
           tag:         r.last_tag ?? '',
           compradores: parseInt(r.compradores ?? '0'),

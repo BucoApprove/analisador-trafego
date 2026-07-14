@@ -115,5 +115,15 @@ export async function getCategoriaByNome(): Promise<Record<string, Categoria>> {
   return map
 }
 
+/** IDs Hotmart (ID_do_Produto no BigQuery) de todo product_id cadastrado sob
+ *  esse nome canônico — um nome pode ter mais de um product_id (produtos
+ *  fundidos, ex: "Renovação de acesso" = BucoApp + Renovação). Usado para
+ *  filtrar vendas por produto no BigQuery sem depender do texto exato de
+ *  Nome_do_Produto (que é o nome cru da Hotmart, não o canônico do Placar). */
+export async function getProductIdsByNome(nome: string): Promise<number[]> {
+  const rows = await loadRows()
+  return rows.filter(r => r.nome === nome).map(r => Number(r.product_id))
+}
+
 /** Invalida o cache manualmente (chamado após save na tela de gestão). */
 export function invalidateCache() { _cache = null }

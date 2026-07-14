@@ -355,6 +355,105 @@ function GastoCell({ gasto, etapas }: { gasto: number; etapas: EtapaGasto | null
   )
 }
 
+// ─── Modal de distribuição de vendas por UTM (any/last/origin) ───────────────
+
+interface UtmSalesAttribution { name: string; anyTime: number; lastBefore: number; origin: number }
+interface VendasUtmResp {
+  totalBuyers: number
+  bySource: UtmSalesAttribution[]
+  byCampaign: UtmSalesAttribution[]
+  byMedium: UtmSalesAttribution[]
+  byContent: UtmSalesAttribution[]
+}
+
+function VendasUtmDimTable({ title, rows }: { title: string; rows: UtmSalesAttribution[] }) {
+  const sorted = [...rows].sort((a, b) => b.anyTime - a.anyTime)
+  const maxVal = Math.max(...sorted.map(r => r.anyTime), 1)
+  return (
+    <div>
+      <p className="text-xs font-semibold mb-1.5">{title}</p>
+      {sorted.length === 0 ? (
+        <p className="text-xs text-muted-foreground">Sem vendas atribuídas.</p>
+      ) : (
+        <div className="overflow-x-auto rounded-md border">
+          <table className="w-full text-xs">
+            <thead className="bg-muted/50">
+              <tr>
+                <th className="px-2.5 py-1.5 text-left font-medium">Valor</th>
+                <th className="px-2.5 py-1.5 text-right font-medium" title="Comprador teve essa UTM em algum momento">Todos</th>
+                <th className="px-2.5 py-1.5 text-right font-medium" title="Última UTM registrada antes da compra">Última</th>
+                <th className="px-2.5 py-1.5 text-right font-medium" title="Primeira UTM do histórico do comprador">Origem</th>
+                <th className="px-2.5 py-1.5 w-16"></th>
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {sorted.map(r => (
+                <tr key={r.name} className="hover:bg-muted/40">
+                  <td className="px-2.5 py-1 truncate max-w-[160px] font-medium" title={r.name}>{r.name}</td>
+                  <td className="px-2.5 py-1 text-right tabular-nums font-semibold" style={{ color: CHART_COLORS[0] }}>{r.anyTime}</td>
+                  <td className="px-2.5 py-1 text-right tabular-nums font-semibold" style={{ color: CHART_COLORS[2] }}>{r.lastBefore}</td>
+                  <td className="px-2.5 py-1 text-right tabular-nums font-semibold" style={{ color: CHART_COLORS[3] }}>{r.origin}</td>
+                  <td className="px-2.5 py-1">
+                    <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+                      <div className="h-full rounded-full" style={{ width: `${(r.anyTime / maxVal) * 100}%`, backgroundColor: CHART_COLORS[0] }} />
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function VendasUtmModal({ produto, token, since, until, onClose }: {
+  produto: string; token: string; since: string; until: string; onClose: () => void
+}) {
+  const [data, setData] = useState<VendasUtmResp | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    const qs = new URLSearchParams({ produto, since, until })
+    fetch(`/api/placar-vendas-utm?${qs}`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : r.json().then(j => Promise.reject(j.error)))
+      .then(j => setData(j))
+      .catch(e => setError(String(e)))
+      .finally(() => setLoading(false))
+  }, [produto, token, since, until])
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="absolute inset-0 bg-black/40" />
+      <div className="relative z-10 bg-white dark:bg-zinc-900 rounded-xl shadow-2xl w-full max-w-3xl border flex flex-col max-h-[85vh]" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 py-4 border-b">
+          <div>
+            <h3 className="font-semibold">Vendas por UTM — {produto}</h3>
+            <p className="text-xs text-muted-foreground">
+              {data ? `${data.totalBuyers} comprador(es) · ` : ''}{since} a {until}
+            </p>
+          </div>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground"><X className="h-4 w-4" /></button>
+        </div>
+        <div className="overflow-y-auto flex-1 p-4">
+          {loading && <div className="flex justify-center py-10 text-muted-foreground"><Loader2 className="h-5 w-5 animate-spin" /></div>}
+          {error && <p className="text-sm text-destructive p-4">{error}</p>}
+          {!loading && !error && data && (
+            <div className="grid gap-4 lg:grid-cols-2">
+              <VendasUtmDimTable title="Fonte (utm_source)" rows={data.bySource} />
+              <VendasUtmDimTable title="Público (utm_medium)" rows={data.byMedium} />
+              <VendasUtmDimTable title="Campanha (utm_campaign)" rows={data.byCampaign} />
+              <VendasUtmDimTable title="Criativo (utm_content)" rows={data.byContent} />
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ─── Modal de distribuição de leads por campanha + content ───────────────────
 
 function LeadsDistModal({ produto, rows, origem, token, onClose }: {
@@ -789,6 +888,7 @@ function ProdutoRow({ p, stripe, month, token, onMeta, onOrcamento, metaReadOnly
   const [open, setOpen] = useState(false)
   const [showDist, setShowDist] = useState(false)
   const [showClintDetail, setShowClintDetail] = useState(false)
+  const [showVendasUtm, setShowVendasUtm] = useState(false)
   const pct = p.meta && p.meta > 0 ? (p.liquido / p.meta) * 100 : null
   const hasOfertas = (p.ofertas?.length ?? 0) > 1
   const cpv = p.gasto > 0 && p.vendas > 0 ? p.gasto / p.vendas : null
@@ -830,8 +930,21 @@ function ProdutoRow({ p, stripe, month, token, onMeta, onOrcamento, metaReadOnly
         <GastoCell gasto={p.gasto} etapas={p.gastoEtapas} />
         {/* Orçamento mês (editável) */}
         <EditableOrcamento month={month} product={p.nome} token={token} entry={orcEntry} onSaved={e => onOrcamento(p.nome, e)} />
-        {/* Vendas */}
-        <td className="px-4 py-2.5 text-right">{p.vendas}</td>
+        {/* Vendas — clicável abre distribuição por UTM (any/last/origin) */}
+        <td className="px-4 py-2.5 text-right">
+          {p.vendas > 0 ? (
+            <button
+              onClick={() => setShowVendasUtm(true)}
+              className="font-medium tabular-nums hover:text-primary hover:underline transition-colors"
+              title="Clique para ver distribuição de vendas por UTM"
+            >
+              {p.vendas}
+            </button>
+          ) : p.vendas}
+          {showVendasUtm && (
+            <VendasUtmModal produto={p.nome} token={token} since={since} until={until} onClose={() => setShowVendasUtm(false)} />
+          )}
+        </td>
         {/* Leads — clicável abre distribuição por campanha/content */}
         <td className="px-4 py-2.5 text-right">
           <div className="flex items-center justify-end gap-1.5">
