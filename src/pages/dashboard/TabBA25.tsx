@@ -878,8 +878,12 @@ export default function TabBA25({
       let finalData: LaunchData = processed
       if (metaRes.ok) {
         const metaData = await metaRes.json()
-        const cpl = totalUnique > 0 && metaData.metaSpend > 0
-          ? Math.round((metaData.metaSpend / totalUnique) * 100) / 100
+        // CPL "pago": gasto Meta ÷ só os leads da tag de tráfego pago do
+        // lançamento — não totalUnique (que inclui orgânico/venda/etc e
+        // diluiria o custo real do tráfego pago para baixo).
+        const leadsTraficoPago = byTag.find(t => t.tag === `${prefix}-Captura-Tráfego`)?.countPeriod ?? 0
+        const cpl = leadsTraficoPago > 0 && metaData.metaSpend > 0
+          ? Math.round((metaData.metaSpend / leadsTraficoPago) * 100) / 100
           : null
         finalData = { ...processed, ...metaData, cpl }
       } else {
@@ -1285,10 +1289,16 @@ export default function TabBA25({
             const leadsPagoFaltam = Math.max(goals.metaLeadsTrafico - leadsTrafico, 0)
             const leadsPagoProjetado = cplAtual ? leadsTrafico + (orcamentoRestante / cplAtual) : null
             const cplNecessario = leadsPagoFaltam > 0 ? orcamentoRestante / leadsPagoFaltam : null
+            // Leads/dia que precisa captar (independente de custo) para bater a meta pago
+            const ritmoPagoNecessarioDia = leadsPagoFaltam > 0 ? leadsPagoFaltam / diasRestantes : 0
+            // Leads/dia que o orçamento restante + CPL atual deve render, no ritmo de gasto necessário/dia
+            const ritmoPagoProjetadoDia = cplAtual ? gastoNecessarioDia / cplAtual : null
 
             // Orgânico: sem orçamento associado — projeta pelo ritmo médio observado desde o início
             const ritmoOrganicoDia = leadsOrganico / diasDecorridos
             const leadsOrganicoProjetado = leadsOrganico + ritmoOrganicoDia * (diasRestantes - 1)
+            const leadsOrganicoFaltam = Math.max(goals.metaLeadsOrganico - leadsOrganico, 0)
+            const ritmoOrganicoNecessarioDia = leadsOrganicoFaltam > 0 ? leadsOrganicoFaltam / diasRestantes : 0
 
             // Vendas: aplica a proporção meta_vendas / meta_leads_trafico do próprio lançamento
             // sobre o total de leads projetado (pago + orgânico ao ritmo atual).
@@ -1327,22 +1337,38 @@ export default function TabBA25({
                       <p className="text-lg font-bold tabular-nums" style={{ color: CHART_COLORS[1] }}>
                         {leadsPagoProjetado != null ? Math.round(leadsPagoProjetado).toLocaleString('pt-BR') : '—'}
                       </p>
+                      <p className="text-[10px] text-muted-foreground">
+                        {leadsTrafico.toLocaleString('pt-BR')} já captados
+                        {leadsPagoProjetado != null && ` + ${Math.round(leadsPagoProjetado - leadsTrafico).toLocaleString('pt-BR')} projetados`}
+                      </p>
                       <p className="text-[10px] flex items-center gap-1">
                         <span className="text-muted-foreground">meta {goals.metaLeadsTrafico.toLocaleString('pt-BR')}</span>
                         {leadsPagoProjetado != null && (
                           <StatusBadge value={leadsPagoProjetado} max={goals.metaLeadsTrafico} />
                         )}
                       </p>
+                      {leadsPagoFaltam > 0 && (
+                        <p className="text-[10px] text-muted-foreground">
+                          precisa {ritmoPagoNecessarioDia.toFixed(1)}/dia p/ bater a meta
+                          {ritmoPagoProjetadoDia != null && ` · no ritmo de gasto atual: ${ritmoPagoProjetadoDia.toFixed(1)}/dia`}
+                        </p>
+                      )}
                     </div>
                     <div>
                       <p className="text-[11px] text-muted-foreground">Leads orgânico projetado</p>
                       <p className="text-lg font-bold tabular-nums" style={{ color: CHART_COLORS[2] }}>
                         {Math.round(leadsOrganicoProjetado).toLocaleString('pt-BR')}
                       </p>
+                      <p className="text-[10px] text-muted-foreground">
+                        {leadsOrganico.toLocaleString('pt-BR')} já captados + {Math.round(leadsOrganicoProjetado - leadsOrganico).toLocaleString('pt-BR')} projetados
+                      </p>
                       <p className="text-[10px] flex items-center gap-1">
-                        <span className="text-muted-foreground">meta {goals.metaLeadsOrganico.toLocaleString('pt-BR')} · ritmo {ritmoOrganicoDia.toFixed(1)}/dia</span>
+                        <span className="text-muted-foreground">meta {goals.metaLeadsOrganico.toLocaleString('pt-BR')} · ritmo atual {ritmoOrganicoDia.toFixed(1)}/dia</span>
                         <StatusBadge value={leadsOrganicoProjetado} max={goals.metaLeadsOrganico} />
                       </p>
+                      {leadsOrganicoFaltam > 0 && (
+                        <p className="text-[10px] text-muted-foreground">precisa {ritmoOrganicoNecessarioDia.toFixed(1)}/dia p/ bater a meta</p>
+                      )}
                     </div>
                     {metaVendas > 0 && (
                       <div className="col-span-2 lg:col-span-4 pt-3 border-t">
