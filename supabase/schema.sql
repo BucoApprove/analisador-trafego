@@ -210,6 +210,24 @@ alter table clint_tags disable row level security;
 
 -- ─────────────────────────────────────────────────────────────────────────────
 
+-- Tags do Green_Gold (BigQuery, campo tag_name) por produto canônico, para
+-- separar leads pago vs orgânico no gráfico de distribuição do Placar.
+-- Um produto pode ter várias tags (uma linha por tag). product_name = nome
+-- canônico (ex: 'Imersão ENARE'); tag_name = valor exato do campo tag_name
+-- no Green_Gold. "Pago" = lead cuja utm_campaign casa o prefixo em
+-- campaign_produto_map; "orgânico" = demais leads com essa tag.
+create table if not exists green_gold_tags (
+  id           uuid primary key default gen_random_uuid(),
+  product_name text not null,
+  tag_name     text not null,
+  created_at   timestamptz not null default now(),
+  unique (product_name, tag_name)
+);
+create index if not exists idx_green_gold_tags_product on green_gold_tags(product_name);
+alter table green_gold_tags disable row level security;
+
+-- ─────────────────────────────────────────────────────────────────────────────
+
 -- Lançamentos (aba "Lançamentos"). Cada lançamento guarda os parâmetros para
 -- puxar os dados (prefixo de campanha + filtros) e as datas-marco do funil.
 -- A janela de dados do detalhe = captura_inicio → carrinho_fim.

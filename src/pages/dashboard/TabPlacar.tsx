@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from 'react'
-import { RefreshCw, ChevronDown, ChevronUp, Pencil, Loader2, Settings, Plus, Trash2, X, ClipboardList } from 'lucide-react'
+import { RefreshCw, ChevronDown, ChevronUp, Pencil, Loader2, Settings, Plus, Trash2, X, ClipboardList, HelpCircle } from 'lucide-react'
+import { PieChart, Pie, Cell, Tooltip as RechartsTooltip, Legend, ResponsiveContainer } from 'recharts'
 import { supabase } from '@/lib/supabase'
 import type { Lancamento } from '@/lib/supabase'
 import { LancamentoLeadsKpis, CHART_COLORS, AdThumbTooltip } from './components'
@@ -54,11 +55,13 @@ interface MetaInfo {
 }
 interface ClintLeads { total: number; interessado: number; abordado: number }
 interface LeadsDistRow { campanha: string; content: string | null; leads: number }
+interface LeadsOrigem { pago: number; organico: number }
 interface LeadsData {
   leadsUtm: Record<string, number>
   leadsClint: Record<string, ClintLeads>
   clintAtivo: boolean
   leadsDistribuicao: Record<string, LeadsDistRow[]>
+  leadsOrigem: Record<string, LeadsOrigem>
 }
 interface RangeInfo { since: string; until: string; diasNoRange: number; diasNoMes: number; fatorMeta: number }
 interface PlacarResp {
@@ -353,9 +356,10 @@ function GastoCell({ gasto, etapas }: { gasto: number; etapas: EtapaGasto | null
 
 // ─── Modal de distribuição de leads por campanha + content ───────────────────
 
-function LeadsDistModal({ produto, rows, token, onClose }: {
+function LeadsDistModal({ produto, rows, origem, token, onClose }: {
   produto: string
   rows: LeadsDistRow[]
+  origem: LeadsOrigem | null
   token: string
   onClose: () => void
 }) {
@@ -434,6 +438,31 @@ function LeadsDistModal({ produto, rows, token, onClose }: {
               </div>
             </div>
           ))}
+
+          {origem && (origem.pago + origem.organico) > 0 && (
+            <div className="rounded-lg border p-3">
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">
+                Pago vs. orgânico
+                <span className="normal-case font-normal lowercase text-muted-foreground/80"> — leads com a tag do produto no Green_Gold</span>
+              </p>
+              <ResponsiveContainer width="100%" height={180}>
+                <PieChart>
+                  <Pie
+                    data={[
+                      { name: 'Pago', value: origem.pago },
+                      { name: 'Orgânico', value: origem.organico },
+                    ]}
+                    dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={40} outerRadius={65}
+                  >
+                    <Cell fill={CHART_COLORS[0]} />
+                    <Cell fill={CHART_COLORS[1]} />
+                  </Pie>
+                  <RechartsTooltip formatter={(v: number, n: string) => [`${v.toLocaleString('pt-BR')} (${((v / (origem.pago + origem.organico)) * 100).toFixed(0)}%)`, n]} />
+                  <Legend iconSize={10} wrapperStyle={{ fontSize: 12 }} />
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -743,7 +772,7 @@ function AcoesModal({ produtos, onClose }: {
 
 const PCT_META_CRITICO = 40
 
-function ProdutoRow({ p, stripe, month, token, onMeta, onOrcamento, metaReadOnly, leadsUtm, leadsClint, clintAtivo, orcEntry, acoes, onAcao, leadsDist, since, until }: {
+function ProdutoRow({ p, stripe, month, token, onMeta, onOrcamento, metaReadOnly, leadsUtm, leadsClint, clintAtivo, orcEntry, acoes, onAcao, leadsDist, leadsOrigem, since, until }: {
   p: Produto; stripe: boolean; month: string; token: string
   onMeta: (goalName: string, v: number) => void
   onOrcamento: (nome: string, e: OrcamentoEntry) => void
@@ -753,6 +782,7 @@ function ProdutoRow({ p, stripe, month, token, onMeta, onOrcamento, metaReadOnly
   acoes: Record<string, string>
   onAcao: (produto: string, valor: string) => void
   leadsDist: LeadsDistRow[]
+  leadsOrigem: LeadsOrigem | null
   since: string; until: string
 }) {
   const [open, setOpen] = useState(false)
@@ -828,7 +858,7 @@ function ProdutoRow({ p, stripe, month, token, onMeta, onOrcamento, metaReadOnly
             </div>
           )}
           {showDist && (
-            <LeadsDistModal produto={p.nome} rows={leadsDist} token={token} onClose={() => setShowDist(false)} />
+            <LeadsDistModal produto={p.nome} rows={leadsDist} origem={leadsOrigem} token={token} onClose={() => setShowDist(false)} />
           )}
           {showClintDetail && leadsClint && (
             <ClintLeadsModal
@@ -1133,6 +1163,97 @@ function ClintTagsModal({ token, onClose, onChanged }: { token: string; onClose:
   )
 }
 
+// ─── Modal: tags do Green_Gold por produto (green_gold_tags) ─────────────────
+// Usadas para separar leads pago vs orgânico no gráfico de distribuição.
+
+interface GreenGoldTagRow { id: string; product_name: string; tag_name: string }
+
+function GreenGoldTagsModal({ token, onClose, onChanged }: { token: string; onClose: () => void; onChanged: () => void }) {
+  const [rows, setRows] = useState<GreenGoldTagRow[]>([])
+  const [loading, setLoading] = useState(true)
+  const [prod, setProd] = useState('')
+  const [tagName, setTagName] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    const r = await fetch('/api/green-gold-tags', { headers: { Authorization: `Bearer ${token}` } })
+    const j = await r.json().catch(() => ({ tags: [] }))
+    setRows(j.tags ?? [])
+    setLoading(false)
+  }, [token])
+
+  useEffect(() => { load() }, [load])
+
+  async function add() {
+    if (!prod || !tagName.trim()) return
+    setSaving(true)
+    await fetch('/api/green-gold-tags', { method: 'POST', headers, body: JSON.stringify({ product_name: prod, tag_name: tagName.trim() }) })
+    setTagName('')
+    setSaving(false)
+    await load(); onChanged()
+  }
+
+  async function remove(id: string) {
+    await fetch(`/api/green-gold-tags?id=${encodeURIComponent(id)}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } })
+    await load(); onChanged()
+  }
+
+  const porProduto = rows.reduce((acc, r) => { (acc[r.product_name] ??= []).push(r); return acc }, {} as Record<string, GreenGoldTagRow[]>)
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="absolute inset-0 bg-black/40" />
+      <div className="relative z-10 bg-white dark:bg-zinc-900 rounded-xl shadow-2xl w-full max-w-xl max-h-[85vh] flex flex-col border" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-5 py-4 border-b">
+          <div>
+            <h3 className="font-semibold">Tags do Green_Gold → produto (pago vs orgânico)</h3>
+            <p className="text-xs text-muted-foreground">Valor exato do campo <code className="bg-muted px-1 rounded">tag_name</code> no BigQuery. Um produto pode ter várias tags.</p>
+          </div>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground"><X className="h-4 w-4" /></button>
+        </div>
+
+        <div className="px-5 py-3 border-b bg-muted/20 space-y-2">
+          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Nova tag</p>
+          <div className="flex gap-2">
+            <select value={prod} onChange={e => setProd(e.target.value)} className="text-sm border rounded px-2 py-1.5 bg-background">
+              <option value="">produto…</option>
+              {PRODUTOS_SELECIONAVEIS.map(p => <option key={p.id} value={p.label}>{p.label}</option>)}
+            </select>
+            <input
+              className="flex-1 text-sm border rounded px-2.5 py-1.5 bg-background"
+              placeholder="ex: Intensivo-Captura"
+              value={tagName}
+              onChange={e => setTagName(e.target.value)}
+            />
+            <button onClick={add} disabled={saving || !prod || !tagName.trim()} className="text-xs px-3 py-1.5 rounded bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 flex items-center gap-1">
+              {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
+            </button>
+          </div>
+        </div>
+
+        <div className="overflow-y-auto flex-1 p-2">
+          {loading && <div className="flex justify-center py-8 text-muted-foreground"><Loader2 className="h-5 w-5 animate-spin" /></div>}
+          {!loading && rows.length === 0 && <p className="text-sm text-muted-foreground text-center py-8">Nenhuma tag cadastrada.</p>}
+          {Object.entries(porProduto).map(([produto, tags]) => (
+            <div key={produto} className="mb-2">
+              <p className="text-xs font-semibold px-3 py-1">{produto}</p>
+              {tags.map(t => (
+                <div key={t.id} className="flex items-center gap-2 px-3 py-1.5 rounded hover:bg-muted/40 group">
+                  <code className="text-[10px] bg-muted px-1.5 py-0.5 rounded">{t.tag_name}</code>
+                  <button onClick={() => remove(t.id)} className="ml-auto opacity-0 group-hover:opacity-100 p-1 text-muted-foreground hover:text-destructive transition-all"><Trash2 className="h-3.5 w-3.5" /></button>
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ─── Lançamento ativo (rodando agora: captura_inicio ≤ hoje ≤ carrinho_fim) ───
 
 function todayIsoDate() {
@@ -1257,6 +1378,7 @@ export default function TabPlacar({ token, enabled }: Props) {
   const [error, setError] = useState('')
   const [showMap, setShowMap] = useState(false)
   const [showClint, setShowClint] = useState(false)
+  const [showGgTags, setShowGgTags] = useState(false)
   const [showAcoes, setShowAcoes] = useState(false)
   const [leads, setLeads] = useState<LeadsData | null>(null)
   const [rangeSince, setRangeSince] = useState('')
@@ -1410,6 +1532,10 @@ export default function TabPlacar({ token, enabled }: Props) {
             <Settings className="h-3.5 w-3.5" />
             Tags Clint
           </button>
+          <button onClick={() => setShowGgTags(true)} className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded border bg-background hover:bg-muted transition-colors" title="Tags do Green_Gold por produto (pago vs orgânico)">
+            <Settings className="h-3.5 w-3.5" />
+            Tags Orgânico
+          </button>
           <button onClick={() => { load(month, rangeSince, rangeUntil); loadLeads(month, rangeSince, rangeUntil); loadOrcamentos(month) }} disabled={loading} className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded border bg-background hover:bg-muted transition-colors disabled:opacity-50">
             <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
             Atualizar
@@ -1419,6 +1545,7 @@ export default function TabPlacar({ token, enabled }: Props) {
 
       {showMap && <CampanhaMapModal token={token} onClose={() => setShowMap(false)} onChanged={() => load(month, rangeSince, rangeUntil)} />}
       {showClint && <ClintTagsModal token={token} onClose={() => setShowClint(false)} onChanged={() => loadLeads(month, rangeSince, rangeUntil)} />}
+      {showGgTags && <GreenGoldTagsModal token={token} onClose={() => setShowGgTags(false)} onChanged={() => loadLeads(month, rangeSince, rangeUntil)} />}
       {showAcoes && <AcoesModal produtos={produtos.map(p => p.nome)} onClose={() => setShowAcoes(false)} />}
 
       <div className="rounded-md bg-blue-50 border border-blue-200 px-4 py-2 text-xs text-blue-800">
@@ -1505,7 +1632,15 @@ export default function TabPlacar({ token, enabled }: Props) {
                   <span title="Orçamento mensal de tráfego. Clique no valor para editar junto com ticket e conversão.">Orç. mês ✎</span>
                 </th>
                 <th className="text-right px-4 py-2.5 font-medium">Vendas</th>
-                <th className="text-right px-4 py-2.5 font-medium" title="Leads UTM (BigQuery) e Leads Clint (interessado/abordado)">Leads</th>
+                <th className="text-right px-4 py-2.5 font-medium">
+                  <span className="inline-flex items-center gap-1 justify-end">
+                    Leads
+                    <HelpCircle
+                      className="h-3.5 w-3.5 text-muted-foreground cursor-help"
+                      title={'Leads UTM: leads rastreados via UTM (BigQuery).\nLeads Clint: total de leads no CRM Clint.\nInteressados: leads Clint marcados como "interessado".\nAbordados: leads Clint marcados como "abordado".'}
+                    />
+                  </span>
+                </th>
                 <th className="text-right px-4 py-2.5 font-medium" title="CPV real e teto calculado. Verde ≤ teto, Amarelo ≤ teto×1,10, Vermelho acima.">CPV</th>
                 <th className="text-right px-4 py-2.5 font-medium" title="CPL real e teto calculado. Verde ≤ teto, Amarelo ≤ teto×1,10, Vermelho acima.">CPL</th>
                 <th className="text-right px-4 py-2.5 font-medium" title="ROAS real e esperado. Verde ≥ esperado, Amarelo ≥ esperado×0,90, Vermelho abaixo.">ROAS</th>
@@ -1522,6 +1657,7 @@ export default function TabPlacar({ token, enabled }: Props) {
                   orcEntry={orcamentos[p.nome] ?? EMPTY_ORC}
                   acoes={acoes} onAcao={onAcao}
                   leadsDist={leads?.leadsDistribuicao[p.nome] ?? []}
+                  leadsOrigem={leads?.leadsOrigem[p.nome] ?? null}
                   since={rangeSince || `${month}-01`}
                   until={rangeUntil || new Date(Number(month.split('-')[0]), Number(month.split('-')[1]), 0).toISOString().slice(0, 10)} />
               ))}
