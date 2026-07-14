@@ -58,7 +58,6 @@ const PRODUTOS: Array<{ label: string; id: number }> = [
   { label: 'Planejamento ImpulsoR+', id: 6739963 },
   { label: 'Renovação de acesso', id: 3510472 },
   { label: 'Rota Enare', id: 4739673 },
-  { label: 'BucoApp', id: 2286372 },
   { label: 'Imersão ENARE', id: 7737553 },
   { label: 'Segurança Clínica por Casos', id: 7812483 },
   { label: 'Low ticket', id: 6766383 },

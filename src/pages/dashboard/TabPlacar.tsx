@@ -18,7 +18,6 @@ const PRODUTOS_SELECIONAVEIS: Array<{ label: string; id: number }> = [
   { label: 'Planejamento ImpulsoR+',      id: 6739963 },
   { label: 'Renovação de acesso',         id: 3510472 },
   { label: 'Rota Enare',                  id: 4739673 },
-  { label: 'BucoApp',                     id: 2286372 },
   { label: 'Imersão ENARE',               id: 7737553 },
   { label: 'Segurança Clínica por Casos', id: 7812483 },
   { label: 'Low ticket',                  id: 6766383 },
@@ -835,29 +834,45 @@ function ProdutoRow({ p, stripe, month, token, onMeta, onOrcamento, metaReadOnly
         <td className="px-4 py-2.5 text-right">{p.vendas}</td>
         {/* Leads — clicável abre distribuição por campanha/content */}
         <td className="px-4 py-2.5 text-right">
-          {leadsUtm != null && leadsUtm > 0 ? (
-            <button
-              onClick={() => setShowDist(true)}
-              className="font-medium tabular-nums hover:text-primary hover:underline transition-colors"
-              title="Clique para ver distribuição por campanha e anúncio"
-            >
-              {leadsUtm.toLocaleString('pt-BR')}
-            </button>
-          ) : <span className="text-muted-foreground">—</span>}
-          {clintAtivo && leadsClint && leadsClint.total > 0 && (
-            <div className="text-xs text-muted-foreground">
+          <div className="flex items-center justify-end gap-1.5">
+            <span className="text-[10px] text-muted-foreground uppercase tracking-wide">UTM</span>
+            {leadsUtm != null && leadsUtm > 0 ? (
               <button
-                onClick={() => setShowClintDetail(true)}
-                className="font-medium text-foreground hover:text-primary hover:underline transition-colors"
-                title="Clique para ver os leads"
+                onClick={() => setShowDist(true)}
+                className="font-medium tabular-nums hover:text-primary hover:underline transition-colors"
+                title="Clique para ver distribuição por campanha e anúncio"
               >
-                {leadsClint.total.toLocaleString('pt-BR')}
+                {leadsUtm.toLocaleString('pt-BR')}
               </button>
-              {' '}
-              <span title="Interessado / Abordado (campo tipo preenchido)">
-                ({leadsClint.interessado} int · {leadsClint.abordado} abord)
-              </span>
-            </div>
+            ) : <span className="text-muted-foreground">—</span>}
+          </div>
+          {clintAtivo && leadsClint && leadsClint.total > 0 && (
+            <>
+              <div className="flex items-center justify-end gap-1.5 text-xs">
+                <span className="text-[10px] text-muted-foreground uppercase tracking-wide">Clint</span>
+                <button
+                  onClick={() => setShowClintDetail(true)}
+                  className="font-medium text-foreground hover:text-primary hover:underline transition-colors tabular-nums"
+                  title="Clique para ver os leads"
+                >
+                  {leadsClint.total.toLocaleString('pt-BR')}
+                </button>
+              </div>
+              <div className="text-[11px] text-muted-foreground" title="Interessado / Abordado / sem tipo preenchido (campo tipo)">
+                {leadsClint.interessado} int · {leadsClint.abordado} abord
+                {leadsClint.total - leadsClint.interessado - leadsClint.abordado > 0 && (
+                  <> · {leadsClint.total - leadsClint.interessado - leadsClint.abordado} outros</>
+                )}
+              </div>
+              {leadsUtm != null && leadsUtm > leadsClint.total && (
+                <div
+                  className="text-[11px] font-medium text-amber-700 dark:text-amber-400"
+                  title="Leads UTM (BigQuery) maior que Leads Clint — sinal de que parte dos leads não chegou a virar negócio na Clint (perda de integração/captação)."
+                >
+                  ⚠ {(leadsUtm - leadsClint.total).toLocaleString('pt-BR')} sem Clint
+                </div>
+              )}
+            </>
           )}
           {showDist && (
             <LeadsDistModal produto={p.nome} rows={leadsDist} origem={leadsOrigem} token={token} onClose={() => setShowDist(false)} />
@@ -1649,7 +1664,7 @@ export default function TabPlacar({ token, enabled }: Props) {
                     Leads
                     <span
                       className="inline-flex cursor-help"
-                      title={'Leads UTM: leads rastreados via UTM (BigQuery).\nLeads Clint: total de leads no CRM Clint.\nInteressados: leads Clint marcados como "interessado".\nAbordados: leads Clint marcados como "abordado".'}
+                      title={'Leads UTM: leads rastreados via UTM (BigQuery).\nLeads Clint: total de leads no CRM Clint.\nInteressados: leads Clint marcados como "interessado".\nAbordados: leads Clint marcados como "abordado".\n⚠ Quando UTM > Clint, indica leads que não chegaram a virar negócio na Clint (perda de integração/captação).'}
                     >
                       <HelpCircle className="h-3.5 w-3.5 text-muted-foreground" />
                     </span>

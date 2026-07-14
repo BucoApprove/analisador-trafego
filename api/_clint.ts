@@ -18,6 +18,11 @@
  *      do grupo correspondente que NÃO têm nenhuma tag/origem de subproduto cadastrada.
  *   4. Outros grupos simples (Pós Anatomia, Mentoria, etc.) → todos os deals do grupo.
  *
+ * Em todas as regras acima, deals cuja origem está em FUNIS_EXCLUIDOS (funis
+ * pós-venda/operacionais: Compras aprovadas/expiradas/em aberto, Abandono de
+ * carrinho, Reembolso/Chargeback, Cartão recusado, Falar em data futura) são
+ * descartados — são o mesmo negócio recriado em outro estágio, não leads novos.
+ *
  * Configuração em clint_tags (Supabase):
  *   - product_name = nome canônico do produto no Placar
  *   - tag_id       = um dos três formatos abaixo (diferenciados pelo próprio valor,
@@ -157,6 +162,25 @@ function norm(s: string) {
   return s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim()
 }
 
+// Origens (funis) pós-venda/operacionais da Clint — não são leads novos, são o
+// mesmo negócio recriado em outro estágio do funil comercial (ex.: um deal que
+// vira "Compras aprovadas" ao fechar, ou "Cartão recusado" quando o pagamento
+// falha). Contar essas origens infla a contagem de leads com deals duplicados.
+// Excluídas em toda contagem (por tag, origem exclusiva ou grupo).
+const FUNIS_EXCLUIDOS = new Set([
+  'Compras aprovadas',
+  'Compras expiradas',
+  'Compras em aberto',
+  'Abandono de carrinho',
+  'Reembolso/Chargeback',
+  'Cartão recusado',
+  'Falar em data futura',
+].map(norm))
+
+function isFunilComercial(originName: string): boolean {
+  return !FUNIS_EXCLUIDOS.has(norm(originName))
+}
+
 // Replica a lógica do painel "Novos interessados" da Clint:
 //   - total     = deals com tipo != "Abordado" (inclui vazio, "Interessado", outros)
 //   - interessado = deals com tipo == "Interessado" explícito
@@ -199,6 +223,10 @@ export async function fetchClintLeads(since: string, until: string): Promise<Rec
     for (const row of originRows) {
       const originId = originIdOf(row.tag_id)
       const dealsDestaOrigem = allDeals.filter(d => d.origin_id === originId)
+        .filter(d => {
+          const origin = origins.get(d.origin_id)
+          return !origin || isFunilComercial(origin.name)
+        })
       const prev = out[row.product_name] ?? { total: 0, interessado: 0, abordado: 0 }
       const counts = countTipo(dealsDestaOrigem)
       out[row.product_name] = {
@@ -224,8 +252,13 @@ export async function fetchClintLeads(since: string, until: string): Promise<Rec
       // Acumula por produto (pode haver múltiplas tags para o mesmo produto)
       const prev = out[row.product_name] ?? { total: 0, interessado: 0, abordado: 0 }
       // Exclui deals já contados por origem exclusiva (evita duplicar quando o
-      // mesmo deal tem tag legada E pertence à origem nova do mesmo produto)
-      const dealsDestaTag = allDeals.filter(d => ids.has(d.id) && !tagDealIds.has(d.id))
+      // mesmo deal tem tag legada E pertence à origem nova do mesmo produto) e
+      // deals em funis pós-venda/operacionais (duplicatas do mesmo negócio).
+      const dealsDestaTag = allDeals.filter(d => {
+        if (!ids.has(d.id) || tagDealIds.has(d.id)) return false
+        const origin = origins.get(d.origin_id)
+        return !origin || isFunilComercial(origin.name)
+      })
       const counts = countTipo(dealsDestaTag)
       out[row.product_name] = {
         total: prev.total + counts.total,
@@ -234,12 +267,6 @@ export async function fetchClintLeads(since: string, until: string): Promise<Rec
       }
       // Marca esses IDs como "pertencentes a subproduto com tag"
       for (const id of ids) tagDealIds.add(id)
-    }
-
-    // Replica o filtro do painel Clint "Novos interessados":
-    // exclui apenas o funil "Compras aprovadas" (origin name exato)
-    function isFunilComercial(originName: string): boolean {
-      return norm(originName) !== norm('Compras aprovadas')
     }
 
     // 2. Para produtos mapeados por group.name: conta deals do grupo
@@ -353,21 +380,17 @@ export async function fetchClintLeadsDetalhados(
     for (const ids of all) for (const id of ids) allSubTagIds.add(id)
   }
 
-  function isFunilComercial(originName: string) {
-    return norm(originName) !== norm('Compras aprovadas')
-  }
-
   // Filtra os deals do produto
   const dealsDoP = allDeals.filter(d => {
+    const origin = origins.get(d.origin_id)
+    if (origin && !isFunilComercial(origin.name)) return false
     if (originRows.length > 0 || tagRows.length > 0) {
       return originIds.has(d.origin_id) || tagDealIds.has(d.id)
     }
-    const origin = origins.get(d.origin_id)
     if (!origin) return false
     return groupRows.some(r => norm(origin.group.name) === norm(r.tag_id))
       && !allOriginIds.has(d.origin_id)
       && !allSubTagIds.has(d.id)
-      && isFunilComercial(origin.name)
   })
 
   return dealsDoP
