@@ -457,7 +457,7 @@ function LeadsDistModal({ produto, rows, origem, token, onClose }: {
                     <Cell fill={CHART_COLORS[0]} />
                     <Cell fill={CHART_COLORS[1]} />
                   </Pie>
-                  <RechartsTooltip formatter={(v: number, n: string) => [`${v.toLocaleString('pt-BR')} (${((v / (origem.pago + origem.organico)) * 100).toFixed(0)}%)`, n]} />
+                  <RechartsTooltip formatter={(v) => `${Number(v).toLocaleString('pt-BR')} (${((Number(v) / (origem.pago + origem.organico)) * 100).toFixed(0)}%)`} />
                   <Legend iconSize={10} wrapperStyle={{ fontSize: 12 }} />
                 </PieChart>
               </ResponsiveContainer>
@@ -1209,8 +1209,11 @@ function GreenGoldTagsModal({ token, onClose, onChanged }: { token: string; onCl
       <div className="relative z-10 bg-white dark:bg-zinc-900 rounded-xl shadow-2xl w-full max-w-xl max-h-[85vh] flex flex-col border" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between px-5 py-4 border-b">
           <div>
-            <h3 className="font-semibold">Tags do Green_Gold → produto (pago vs orgânico)</h3>
-            <p className="text-xs text-muted-foreground">Valor exato do campo <code className="bg-muted px-1 rounded">tag_name</code> no BigQuery. Um produto pode ter várias tags.</p>
+            <h3 className="font-semibold">Tags do Green_Gold → produto</h3>
+            <p className="text-xs text-muted-foreground">
+              Valor exato do campo <code className="bg-muted px-1 rounded">tag_name</code> no BigQuery — captura <strong className="text-foreground">todos</strong> os leads do produto (pago + orgânico).
+              A separação pago/orgânico é feita depois, cruzando com a UTM. Um produto pode ter várias tags.
+            </p>
           </div>
           <button onClick={onClose} className="text-muted-foreground hover:text-foreground"><X className="h-4 w-4" /></button>
         </div>
@@ -1532,9 +1535,9 @@ export default function TabPlacar({ token, enabled }: Props) {
             <Settings className="h-3.5 w-3.5" />
             Tags Clint
           </button>
-          <button onClick={() => setShowGgTags(true)} className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded border bg-background hover:bg-muted transition-colors" title="Tags do Green_Gold por produto (pago vs orgânico)">
+          <button onClick={() => setShowGgTags(true)} className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded border bg-background hover:bg-muted transition-colors" title="Tags do Green_Gold por produto (base para separar pago vs orgânico)">
             <Settings className="h-3.5 w-3.5" />
-            Tags Orgânico
+            Tags Green_Gold
           </button>
           <button onClick={() => { load(month, rangeSince, rangeUntil); loadLeads(month, rangeSince, rangeUntil); loadOrcamentos(month) }} disabled={loading} className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded border bg-background hover:bg-muted transition-colors disabled:opacity-50">
             <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
@@ -1635,10 +1638,12 @@ export default function TabPlacar({ token, enabled }: Props) {
                 <th className="text-right px-4 py-2.5 font-medium">
                   <span className="inline-flex items-center gap-1 justify-end">
                     Leads
-                    <HelpCircle
-                      className="h-3.5 w-3.5 text-muted-foreground cursor-help"
+                    <span
+                      className="inline-flex cursor-help"
                       title={'Leads UTM: leads rastreados via UTM (BigQuery).\nLeads Clint: total de leads no CRM Clint.\nInteressados: leads Clint marcados como "interessado".\nAbordados: leads Clint marcados como "abordado".'}
-                    />
+                    >
+                      <HelpCircle className="h-3.5 w-3.5 text-muted-foreground" />
+                    </span>
                   </span>
                 </th>
                 <th className="text-right px-4 py-2.5 font-medium" title="CPV real e teto calculado. Verde ≤ teto, Amarelo ≤ teto×1,10, Vermelho acima.">CPV</th>
