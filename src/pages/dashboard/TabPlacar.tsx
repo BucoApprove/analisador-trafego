@@ -29,8 +29,8 @@ const PRODUTOS_SELECIONAVEIS: Array<{ label: string; id: number }> = [
 interface Props { token: string; enabled: boolean }
 type Categoria = 'core' | 'porta' | 'low'
 
-type Etapa = 'conversão' | 'remarketing' | 'descoberta' | 'relacionamento'
-const ETAPAS: Etapa[] = ['conversão', 'remarketing', 'descoberta', 'relacionamento']
+type Etapa = 'conversão' | 'remarketing' | 'descoberta' | 'relacionamento' | 'captura'
+const ETAPAS: Etapa[] = ['conversão', 'remarketing', 'descoberta', 'relacionamento', 'captura']
 type EtapaGasto = Record<Etapa, number>
 
 interface Oferta { code: string; nome: string; vendas: number; liquido: number }
@@ -352,6 +352,79 @@ function GastoCell({ gasto, etapas }: { gasto: number; etapas: EtapaGasto | null
         </div>
       )}
     </td>
+  )
+}
+
+// ─── Distribuição de gasto do mês (por etapa e por produto) ─────────────────
+
+const ETAPA_LABEL: Record<Etapa, string> = {
+  'conversão': 'Conversão',
+  remarketing: 'Remarketing',
+  descoberta: 'Descoberta',
+  relacionamento: 'Relacionamento',
+  captura: 'Captura',
+}
+
+function DistribuicaoBar({ rows, total }: { rows: Array<[string, number]>; total: number }) {
+  if (total <= 0) return <p className="text-xs text-muted-foreground px-4 py-3">Sem gasto no período.</p>
+  return (
+    <div className="divide-y">
+      {rows.map(([label, valor], i) => {
+        const pct = (valor / total) * 100
+        return (
+          <div key={label} className="px-4 py-2.5">
+            <div className="flex items-center justify-between text-sm mb-1">
+              <span className="font-medium">{label}</span>
+              <span className="tabular-nums text-muted-foreground">
+                {fmtBRL(valor)} <span className="text-xs">({pct.toFixed(1)}%)</span>
+              </span>
+            </div>
+            <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+              <div className="h-full rounded-full" style={{ width: `${pct}%`, backgroundColor: CHART_COLORS[i % CHART_COLORS.length] }} />
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function DistribuicaoGasto({ campanhas }: { campanhas: MetaInfo['campanhas'] }) {
+  if (campanhas.length === 0) return null
+
+  const porEtapa = new Map<Etapa, number>()
+  const porProduto = new Map<string, number>()
+  let total = 0
+  for (const c of campanhas) {
+    porEtapa.set(c.etapa, (porEtapa.get(c.etapa) ?? 0) + c.spend)
+    porProduto.set(c.produto, (porProduto.get(c.produto) ?? 0) + c.spend)
+    total += c.spend
+  }
+
+  const etapaRows: Array<[string, number]> = ETAPAS
+    .map(e => [ETAPA_LABEL[e], porEtapa.get(e) ?? 0] as [string, number])
+    .filter(([, v]) => v > 0)
+    .sort((a, b) => b[1] - a[1])
+
+  const produtoRows: Array<[string, number]> = [...porProduto.entries()]
+    .filter(([, v]) => v > 0)
+    .sort((a, b) => b[1] - a[1])
+
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className="rounded-lg border bg-card overflow-hidden">
+        <div className="px-4 py-2 bg-muted/50 border-b text-sm font-semibold">
+          Gasto por etapa <span className="font-normal text-muted-foreground">— total {fmtBRL(total)}</span>
+        </div>
+        <DistribuicaoBar rows={etapaRows} total={total} />
+      </div>
+      <div className="rounded-lg border bg-card overflow-hidden">
+        <div className="px-4 py-2 bg-muted/50 border-b text-sm font-semibold">
+          Gasto por produto <span className="font-normal text-muted-foreground">— total {fmtBRL(total)}</span>
+        </div>
+        <DistribuicaoBar rows={produtoRows} total={total} />
+      </div>
+    </div>
   )
 }
 
@@ -1870,6 +1943,8 @@ export default function TabPlacar({ token, enabled }: Props) {
           </table>
         </div>
       )}
+
+      {data?.meta?.campanhas && <DistribuicaoGasto campanhas={data.meta.campanhas} />}
 
       {loading && !data && (
         <div className="flex justify-center py-12 text-muted-foreground text-sm">Carregando...</div>

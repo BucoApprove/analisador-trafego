@@ -16,8 +16,8 @@
 import { createClient } from '@supabase/supabase-js'
 import { classifyProduto } from './_produtos-db.js'
 
-export type Etapa = 'conversão' | 'remarketing' | 'descoberta' | 'relacionamento'
-export const ETAPAS: Etapa[] = ['conversão', 'remarketing', 'descoberta', 'relacionamento']
+export type Etapa = 'conversão' | 'remarketing' | 'descoberta' | 'relacionamento' | 'captura'
+export const ETAPAS: Etapa[] = ['conversão', 'remarketing', 'descoberta', 'relacionamento', 'captura']
 
 export const FALLBACK_PRODUTO = 'Buco Approve'
 
@@ -53,7 +53,7 @@ const ETAPA_KEYWORDS: Array<[string, Etapa]> = [
   ['post:', 'descoberta'],
   ['video', 'descoberta'],
   ['vview', 'descoberta'],
-  ['captura', 'descoberta'],
+  ['captura', 'captura'],
   ['aulas semanais', 'descoberta'],
   ['quiz', 'descoberta'],
 ]
@@ -109,7 +109,7 @@ function matchProduto(nome: string, regras: Regra[]): string {
 const round = (n: number) => Math.round(n * 100) / 100
 
 function emptyEtapas(): Record<Etapa, number> {
-  return { 'conversão': 0, remarketing: 0, descoberta: 0, relacionamento: 0 }
+  return { 'conversão': 0, remarketing: 0, descoberta: 0, relacionamento: 0, captura: 0 }
 }
 
 /** Busca e atribui o gasto Meta das contas configuradas para um mês "YYYY-MM". */
